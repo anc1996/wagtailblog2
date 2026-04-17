@@ -1,0 +1,11 @@
+{% load comment_tags %}
+
+{% if comments %}
+    {% for comment in comments %}
+        {% include "comments/comment.html" with comment=comment %}
+    {% endfor %}
+{% else %}
+    <div class="no-comments">
+        <p>暂无评论，快来发表第一个评论吧！</p>
+    </div>
+{% endif %}

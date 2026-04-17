@@ -1,0 +1,59 @@
+{% if value %}
+    <div class="gretzia-video-preview"
+         data-video-url="{{ value.url }}"
+         data-video-type="video/mp4"  {# 修正：直接提供通用类型，避免属性错误 #}
+         data-video-title="{{ value.title|default:'视频内容' }}"
+         {% if value.width %}data-video-width="{{ value.width }}"{% endif %}
+         {% if value.height %}data-video-height="{{ value.height }}"{% endif %}>
+
+        <div class="gretzia-video-thumbnail">
+            <div class="gretzia-video-background"
+                 {% if value.thumbnail %}style="background-image: url('{{ value.thumbnail.url }}');"{% endif %}>
+
+                {% if not value.thumbnail %}
+                    <video preload="metadata" muted>
+                        {# 修正：统一使用 value.url #}
+                        <source src="{{ value.url }}#t=1" type="video/mp4">
+                    </video>
+                {% endif %}
+
+                <div class="gretzia-video-overlay">
+                    <div class="gretzia-play-button">
+                        <i class="fa fa-play"></i>
+                    </div>
+
+                    <div class="gretzia-video-info">
+                        {% if value.width and value.height %}
+                            <span class="gretzia-video-resolution">
+                                <i class="fa fa-tv"></i>
+                                {{ value.width }}×{{ value.height }}
+                            </span>
+                        {% endif %}
+                        {% if value.duration %}
+                            <span class="gretzia-video-duration">
+                                <i class="fa fa-clock-o"></i>
+                                {{ value.duration|floatformat:0 }}s {# 格式化时长为整数秒 #}
+                            </span>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            {% if value.title %}
+                <div class="gretzia-video-caption">
+                    <i class="fa fa-video-camera"></i>
+                    <span>{{ value.title }}</span>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
+{% else %}
+    <div class="gretzia-video-placeholder">
+        <div class="gretzia-placeholder-content">
+            <i class="fa fa-video-camera fa-3x"></i>
+            <p>视频文件不可用</p>
+            <small>请检查视频文件是否存在</small>
+        </div>
+    </div>
+{% endif %}

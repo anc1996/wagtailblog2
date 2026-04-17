@@ -1,0 +1,81 @@
+{% load static comment_tags %}
+
+{# 外层 div 调整为 Gretzia 的 .comment 结构，并添加我们的数据属性 #}
+<div class="comment"
+     id="comment-{{ comment.id }}"
+     data-comment-id="{{ comment.id }}"
+     data-root-comment-id="{% if comment.parent %}{{ comment.parent.id }}{% else %}{{ comment.id }}{% endif %}">
+
+    <div class="inner-box"> {# 对应 Gretzia 的 inner-box #}
+        <div class="image"> {# 对应 Gretzia 的 image #}
+            <img src="{% static 'comments/img/default-avatar.png' %}" alt="{{ comment.author_user.username }}" />
+        </div>
+
+        <div class="comment-content-wrapper"> {# 新增一个wrapper来包裹右侧内容，以便flex布局 #}
+            {# 作者名称，对应 Gretzia 的 h3 #}
+            <h3>{{ comment.author_user.username }}</h3>
+
+            {# 评论时间，可以放在作者名称旁边或单独一行 #}
+            <div class="comment-meta"> {# 放置时间和编辑状态 #}
+                <span class="comment-time">{{ comment.created_at|date:"Y-m-d H:i" }}</span>
+                {% if comment.updated_at != comment.created_at %}
+                    <span class="comment-edited">(已编辑)</span>
+                {% endif %}
+            </div>
+
+            {# 评论内容，对应 Gretzia 的 .text #}
+            <div class="text" id="comment-text-{{ comment.id }}">
+                {% if comment.replied_to_user and comment.parent %}
+                    <span class="replied-to-user">@{{ comment.replied_to_user.username }} </span>
+                {% endif %}
+                {{ comment.content|render_markdown }} {# 应用 render_markdown 过滤器 #}
+            </div>
+
+            {# 评论操作，使用 Gretzia 的 reply-comment 样式，并添加其他操作链接 #}
+            <div class="comment-actions-list"> {# 新增一个列表容器来组织操作按钮 #}
+                <a href="javascript:void(0);" class="reply-comment reply-btn"
+                    data-comment-id="{{ comment.id }}"
+                    data-username="{{ comment.author_user.username }}"
+                    data-user-id="{{ comment.author_user.id }}"
+                    data-root-comment-id="{% if comment.parent %}{{ comment.parent.id }}{% else %}{{ comment.id }}{% endif %}"
+                    >回复</a>
+
+                <a href="javascript:void(0);" class="vote-link like-btn" data-comment-id="{{ comment.id }}" data-reaction="1" data-url="{% url 'comments:react_to_comment' %}">
+                    <i class="icon-like">👍</i> <span class="like-count">{{ comment.like_count }}</span>
+                </a>
+                <a href="javascript:void(0);" class="vote-link dislike-btn" data-comment-id="{{ comment.id }}" data-reaction="-1"data-url="{% url 'comments:react_to_comment' %}">
+                    <i class="icon-dislike">👎</i> <span class="dislike-count">{{ comment.dislike_count }}</span>
+                </a>
+
+                {% if user.is_authenticated and user.id == comment.author_user.id and comment.is_editable %}
+                    <a href="javascript:void(0);"
+                       class="action-link edit-btn"
+                       data-comment-id="{{ comment.id }}"
+                       data-url="{% url 'comments:edit_comment' %}"> 编辑
+                    </a>
+                {% endif %}
+
+                {% if user.is_authenticated %}
+                    {% if user.id == comment.author_user.id or user.is_staff %}
+                        <a href="javascript:void(0);" class="action-link delete-btn" data-comment-id="{{ comment.id }}" data-url="{% url 'comments:delete_comment' %}">删除</a>
+                    {% endif %}
+                {% endif %}
+            </div>
+
+            {# 动态回复表单容器，用于 JS 插入回复表单 #}
+            <div class="dynamic-reply-form-container"></div>
+
+            {# 将 comment-replies-wrapper 和 comment-replies 放在 comment-content-wrapper 内部 #}
+            {% if comment.replies.all|length > 0 %}
+                <div class="comment-replies-wrapper"> {# 保持类名，在 comments.css 中定义缩进 #}
+                    <button type="button" class="show-replies-btn theme-btn-small" data-comment-id="{{ comment.id }}">
+                        查看全部 {{ comment.replies.all|length }} 条回复
+                    </button>
+                    <div class="comment-replies" id="replies-{{ comment.id }}" style="display: none;"></div>
+                </div>
+            {% else %}
+                <div class="comment-replies" id="replies-{{ comment.id }}"></div>
+            {% endif %}
+        </div> {# End comment-content-wrapper #}
+    </div> {# End inner-box #}
+</div> {# End comment #}

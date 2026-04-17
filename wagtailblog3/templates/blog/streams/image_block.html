@@ -1,0 +1,35 @@
+<!-- templates/blog/streams/image_block.html -->
+{% load wagtailimages_tags %}
+
+<div class="content-block-wrapper image-block-wrapper" data-block-type="image">
+    {% if value %}
+        <div class="stream-image-container">
+            <figure class="stream-image-figure">
+                <div class="stream-image-wrapper">
+                    <!-- 使用适中的尺寸而非original，并添加lightbox支持 -->
+                    <a href="{% image_url value 'original' %}"
+                       data-lightbox="blog-gallery"
+                       data-title="{{ value.caption|default:value.title }}"
+                       class="stream-image-link">
+                        {% image value width-800 class="stream-blog-image img-fluid" %}
+                    </a>
+                </div>
+                {% if value.caption %}
+                    <figcaption class="stream-image-caption">
+                        <div class="stream-caption-content">
+                            <i class="fa fa-image"></i>
+                            <span class="stream-caption-text">{{ value.caption }}</span>
+                        </div>
+                    </figcaption>
+                {% endif %}
+            </figure>
+        </div>
+    {% else %}
+        <div class="stream-image-placeholder">
+            <div class="stream-placeholder-content">
+                <i class="fa fa-image fa-3x"></i>
+                <p class="stream-placeholder-text">图片不可用</p>
+            </div>
+        </div>
+    {% endif %}
+</div>

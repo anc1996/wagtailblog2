@@ -1,0 +1,130 @@
+/* archive/static/archive/css/admin_archive.css */
+
+/* === 主布局 === */
+.dashboard-grid {
+    display: flex;
+    flex-wrap: nowrap; /* 强制不换行 */
+    gap: var(--w-spacing-6, 24px); /* Wagtail 列间距 */
+}
+
+.dashboard-sidebar {
+    flex: 0 0 42%; /* 左侧栏占据大约42%宽度，可以调整 */
+    min-width: 300px; /* 最小宽度，防止内容被过度压缩 */
+}
+
+.dashboard-main-content {
+    flex: 1; /* 右侧主内容占据剩余空间 */
+    min-width: 0; /* 允许在空间不足时缩小 */
+}
+
+/* 左侧粘性面板 */
+.w-panel--sticky {
+    position: -webkit-sticky;
+    position: sticky;
+    top: var(--w-spacing-6, 24px); /* 与Wagtail顶部导航的间距 */
+    /* z-index: 1; */ /* 通常不需要，除非有特定覆盖问题 */
+}
+
+/* === 表单和输入框样式 === */
+/* .fields, .field, .field-content, .w-label, .w-input, .w-button, .w-button--secondary, .w-form-buttons, .w-separator
+   这些应该由 Wagtail 6.x 的核心 CSS 提供，我们主要调整 datepicker 的特定样式 */
+
+
+input[type="text"].datepicker:focus {
+    border-color: #26a69a;
+    box-shadow: 0 0 2px #26a69a;
+}
+
+.field .field-content .w-button + .w-button--secondary,
+.field .field-content .w-button + .w-button { /* 按钮间距 */
+    margin-left: var(--w-spacing-2, 0.5em);
+}
+
+/* === 归档统计表格 === */
+.archive-stats-table {
+    overflow-x: auto; /* 当表格内容超出容器宽度时，显示水平滚动条 */
+    margin-top: var(--w-spacing-6, 1.5em); /* 表格与上方元素的间距 */
+    margin-bottom: var(--w-spacing-6, 1.5em);
+}
+
+.archive-stats-table table.w-table.listing.condensed { /* 使用Wagtail表格类并进一步压缩 */
+    width: 100%;
+    font-size: 0.8rem; /* 尝试更小的字体以适应更多内容 */
+    line-height: 1.3;
+    border-collapse: collapse;
+}
+
+.archive-stats-table table.w-table th,
+.archive-stats-table table.w-table td {
+    padding: var(--w-spacing-2, 0.4em) var(--w-spacing-1, 0.3em); /* 大幅减少内边距 */
+    white-space: nowrap; /* 防止月份和数字换行 */
+    text-align: center;
+    border: 1px solid var(--w-color-border-furniture, #e0e1e1); /* 单元格边框 */
+}
+
+.archive-stats-table table.w-table th {
+    background-color: var(--w-color-surface-header, #f5f6f7);
+    font-weight: var(--w-font-weight-bold, bold);
+    vertical-align: middle;
+}
+
+.archive-stats-table table.w-table td.first-col,
+.archive-stats-table table.w-table th.first-col {
+    text-align: left;
+    font-weight: var(--w-font_weight-bold, bold);
+    padding-left: var(--w-spacing-2, 0.5em);
+    min-width: 60px; /* 给年份列一个最小宽度 */
+}
+.archive-stats-table table.w-table .u-text-center { /* 确保月份和年总计居中 */
+    text-align: center;
+}
+
+.archive-stats-table .text-meta {
+    color: var(--w-color-text-meta, #68768A);
+}
+
+.archive-stats-table a {
+    color: var(--w-color-text-link, #2962ff); /* Wagtail 链接颜色 */
+    text-decoration: none;
+    display: block; /* 使整个单元格可点击 */
+    padding: var(--w-spacing-2, 0.4em) var(--w-spacing-1, 0.3em); /* 与单元格内边距匹配 */
+    margin: calc(-1 * var(--w-spacing-2, 0.4em)) calc(-1 * var(--w-spacing-1, 0.3em)); /* 填充单元格 */
+}
+
+.archive-stats-table td:hover a, /* 改善hover效果 */
+.archive-stats-table td a:hover {
+    background-color: var(--w-color-surface-hover, #f0f1f2); /* Wagtail hover背景色 */
+    text-decoration: none;
+}
+
+/* === 右侧文章列表表格（_posts_table_admin.html）的样式 === */
+/* 大部分样式应由 Wagtail 的 .listing 类提供 */
+/* 你可以在这里为 .dashboard-main-content table.listing 添加特定微调 */
+.dashboard-main-content table.listing {
+    font-size: 0.9em; /* 可以比统计表大一点 */
+}
+.dashboard-main-content .listing td {
+    vertical-align: top;
+}
+.dashboard-main-content .status-tag {
+    margin-bottom: 2px;
+    display: inline-block;
+}
+
+/* === 分页样式 === */
+/* Wagtail 6.x 使用 .w-pagination 类 */
+.pagination { /* 包裹 .w-pagination 的容器，如果需要可以添加额外样式 */
+    margin-top: var(--w-spacing-6, 1.5rem);
+    display: flex;
+    justify-content: flex-start; /* Wagtail 分页通常左对齐 */
+}
+/* .w-pagination 及其子元素的样式由 Wagtail 核心 CSS 控制，通常不需要大量覆盖 */
+/* 如果需要微调，可以针对 .w-pagination__item, .w-pagination__link 等进行 */
+
+
+/* === Flatpickr 日历 z-index === */
+.flatpickr-calendar {
+    z-index: var(--w-z_index_modal_active, 10000) + 10 !important; /* 确保在Wagtail模态框之上 */
+    /* 如果使用 appendTo: document.body，可能需要更多定位CSS */
+    /* box-shadow: 0 3px 10px rgba(0,0,0,0.15); */ /* 添加一点阴影使其更突出 */
+}

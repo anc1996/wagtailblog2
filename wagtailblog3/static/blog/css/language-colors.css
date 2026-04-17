@@ -1,0 +1,84 @@
+/* ========================================
+   语言标签颜色配置
+   集中管理所有编程语言的视觉样式
+   ======================================== */
+
+/* 核心编程语言 */
+.hljs-language-tag.python {
+    background: linear-gradient(135deg, #3776ab, #4b8bbe);
+}
+
+.hljs-language-tag.javascript {
+    background: linear-gradient(135deg, #f7df1e, #f0db4f);
+    color: #323330;
+}
+
+.hljs-language-tag.java {
+    background: linear-gradient(135deg, #ed8b00, #f89820);
+}
+
+.hljs-language-tag.typescript {
+    background: linear-gradient(135deg, #3178c6, #235a97);
+}
+
+/* Web技术语言 */
+.hljs-language-tag.html {
+    background: linear-gradient(135deg, #e34c26, #f16529);
+}
+
+.hljs-language-tag.css {
+    background: linear-gradient(135deg, #1572b6, #33a9dc);
+}
+
+.hljs-language-tag.php {
+    background: linear-gradient(135deg, #777bb4, #8892bf);
+}
+
+/* 数据和配置语言 */
+.hljs-language-tag.json {
+    background: linear-gradient(135deg, #f39c12, #e67e22);
+}
+
+.hljs-language-tag.xml {
+    background: linear-gradient(135deg, #ff6b35, #f7931e);
+}
+
+.hljs-language-tag.yaml {
+    background: linear-gradient(135deg, #cb171e, #dc382d);
+}
+
+/* 数据库语言 */
+.hljs-language-tag.sql {
+    background: linear-gradient(135deg, #00758f, #00a9d6);
+}
+
+/* 系统和脚本语言 */
+.hljs-language-tag.bash {
+    background: linear-gradient(135deg, #4eaa25, #5cbf2a);
+}
+
+.hljs-language-tag.powershell {
+    background: linear-gradient(135deg, #012456, #2e5ddf);
+}
+
+/* 现代系统语言 */
+.hljs-language-tag.rust {
+    background: linear-gradient(135deg, #ce422b, #f74c00);
+}
+
+.hljs-language-tag.go {
+    background: linear-gradient(135deg, #00add8, #5dc9e2);
+}
+
+.hljs-language-tag.swift {
+    background: linear-gradient(135deg, #fa7343, #ff8c00);
+}
+
+/* 通用和文本语言 */
+.hljs-language-tag.text {
+    background: linear-gradient(135deg, #6c757d, #868e96);
+}
+
+.hljs-language-tag.markdown {
+    background: linear-gradient(135deg, #083fa1, #0969da);
+}

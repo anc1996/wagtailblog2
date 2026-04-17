@@ -1,0 +1,27 @@
+{# templates/blog/tags/recursive_menu_level.html #}
+{% load wagtailcore_tags blog_tags %}
+
+
+
+{# 遍历从 generate_menu_items 模板标签传递过来的菜单项列表 (menu_items_list) #}
+{% for item_details in menu_items_list %}
+    {# 使用 with 标签将 item_details.page_object 赋值给 item_page，方便在块内部使用 #}
+    {% with item_page=item_details.page_object %}
+        <li class="{% if item_details.is_current_or_ancestor %}current{% endif %} {% if item_details.has_dropdown %}dropdown{% endif %}">
+
+            {# 创建一个链接 (a)，链接到 item_page #}
+            <a href="{% pageurl item_page %}">{{ item_page.title }}</a>
+
+            {# 检查当前菜单项 (item_page) 是否有子菜单 (item_details.has_dropdown 为 True) #}
+            {% if item_details.has_dropdown %}
+                {# 如果有子菜单，则创建一个无序列表 (ul) 来容纳这些子项 #}
+                <ul>
+                    {# 递归地调用 generate_menu_items 模板标签来渲染子菜单 #}
+                    {# item_page (当前循环中的页面对象) 作为新的父页面 (parent_for_children) 传递给下一层 #}
+                    {# current_page_for_recursion (代表整个网站当前正在浏览的页面) 继续传递下去，用于判断子项的 'current' 状态 #}
+                    {% generate_menu_items item_page current_page_for_recursion %}
+                </ul>
+            {% endif %}
+        </li>
+    {% endwith %}
+{% endfor %}

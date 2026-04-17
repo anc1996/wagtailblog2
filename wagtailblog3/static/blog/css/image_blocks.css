@@ -1,0 +1,360 @@
+/* static/blog/css/image_blocks.css */
+/* 增强版图片块样式 - 支持标题显示和点击放大功能 */
+
+/* 图片块容器样式 - 基于实际的HTML结构 */
+.content-block-wrapper[data-block-type="image_block"] {
+    width: 100%;
+    margin: 2.5rem 0;
+    padding: 0;
+    clear: both;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    position: relative;
+}
+
+/* 图片容器包装 */
+.content-block-wrapper[data-block-type="image_block"]::before {
+    content: '';
+    width: 80%;
+    max-width: 600px;
+    display: block;
+    background: #ffffff;
+    border-radius: 12px 12px 0 0;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    height: calc(100% - 3rem);
+    z-index: -1;
+    transition: all 0.3s ease;
+}
+
+/* 直接针对img标签的样式控制 */
+.content-block-wrapper[data-block-type="image_block"] img {
+    width: 80% !important;
+    height: auto !important;
+    max-width: 600px;
+    display: block;
+    margin: 0 auto;
+    border-radius: 12px 12px 0 0;
+    transition: all 0.3s ease;
+    cursor: zoom-in;
+    position: relative;
+    z-index: 1;
+}
+
+/* 图片标题样式 - 使用伪元素显示alt文本 */
+.content-block-wrapper[data-block-type="image_block"]::after {
+    content: attr(data-image-title);
+    width: 80%;
+    max-width: 600px;
+    display: block;
+    background: #ffffff;
+    padding: 1rem 1.5rem;
+    margin: 0 auto;
+    border-radius: 0 0 12px 12px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+    font-size: 0.95rem;
+    color: #6c757d;
+    text-align: center;
+    font-style: italic;
+    border-top: 1px solid #e9ecef;
+    position: relative;
+    z-index: 1;
+    transition: all 0.3s ease;
+}
+
+/* 当没有标题时隐藏标题区域 */
+.content-block-wrapper[data-block-type="image_block"]:not([data-image-title])::after,
+.content-block-wrapper[data-block-type="image_block"][data-image-title=""]::after {
+    display: none;
+}
+
+.content-block-wrapper[data-block-type="image_block"]:not([data-image-title]) img,
+.content-block-wrapper[data-block-type="image_block"][data-image-title=""] img {
+    border-radius: 12px;
+}
+
+.content-block-wrapper[data-block-type="image_block"]:not([data-image-title])::before,
+.content-block-wrapper[data-block-type="image_block"][data-image-title=""]::before {
+    border-radius: 12px;
+    height: 100%;
+}
+
+/* 悬停效果 */
+.content-block-wrapper[data-block-type="image_block"]:hover::before {
+    transform: translateX(-50%) translateY(-3px);
+    box-shadow: 0 15px 40px rgba(0, 0, 0, 0.15);
+}
+
+.content-block-wrapper[data-block-type="image_block"]:hover img {
+    transform: scale(1.02);
+}
+
+.content-block-wrapper[data-block-type="image_block"]:hover::after {
+    color: #495057;
+}
+
+/* 点击放大图标覆盖 */
+.content-block-wrapper[data-block-type="image_block"] img::before {
+    content: '\f00e';
+    font-family: 'FontAwesome';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) scale(0);
+    background: rgba(102, 126, 234, 0.9);
+    color: white;
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    opacity: 0;
+    transition: all 0.3s ease;
+    pointer-events: none;
+    z-index: 3;
+}
+
+.content-block-wrapper[data-block-type="image_block"]:hover img::before {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+}
+
+/* 确保在博客内容区域内的正确定位 */
+.blog-content-area .content-block-wrapper[data-block-type="image_block"] {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+/* 响应式设计 */
+@media (max-width: 1200px) {
+    .content-block-wrapper[data-block-type="image_block"] img,
+    .content-block-wrapper[data-block-type="image_block"]::after,
+    .content-block-wrapper[data-block-type="image_block"]::before {
+        width: 85%;
+        max-width: 550px;
+    }
+}
+
+@media (max-width: 992px) {
+    .content-block-wrapper[data-block-type="image_block"] img,
+    .content-block-wrapper[data-block-type="image_block"]::after,
+    .content-block-wrapper[data-block-type="image_block"]::before {
+        width: 90%;
+        max-width: 500px;
+    }
+
+    .content-block-wrapper[data-block-type="image_block"] {
+        margin: 2rem 0;
+    }
+
+    .content-block-wrapper[data-block-type="image_block"]::after {
+        padding: 0.875rem 1.25rem;
+        font-size: 0.9rem;
+    }
+}
+
+@media (max-width: 768px) {
+    .content-block-wrapper[data-block-type="image_block"] img,
+    .content-block-wrapper[data-block-type="image_block"]::after,
+    .content-block-wrapper[data-block-type="image_block"]::before {
+        width: 95%;
+        max-width: 450px;
+    }
+
+    .content-block-wrapper[data-block-type="image_block"] img {
+        border-radius: 8px 8px 0 0;
+    }
+
+    .content-block-wrapper[data-block-type="image_block"]::after {
+        border-radius: 0 0 8px 8px;
+        padding: 0.75rem 1rem;
+        font-size: 0.85rem;
+    }
+
+    .content-block-wrapper[data-block-type="image_block"]::before {
+        border-radius: 8px;
+    }
+}
+
+@media (max-width: 576px) {
+    .content-block-wrapper[data-block-type="image_block"] img,
+    .content-block-wrapper[data-block-type="image_block"]::after,
+    .content-block-wrapper[data-block-type="image_block"]::before {
+        width: 98%;
+        max-width: 400px;
+    }
+
+    .content-block-wrapper[data-block-type="image_block"] img {
+        border-radius: 6px 6px 0 0;
+    }
+
+    .content-block-wrapper[data-block-type="image_block"]::after {
+        border-radius: 0 0 6px 6px;
+        padding: 0.625rem 0.875rem;
+        font-size: 0.8rem;
+    }
+
+    .content-block-wrapper[data-block-type="image_block"]::before {
+        border-radius: 6px;
+    }
+
+    .content-block-wrapper[data-block-type="image_block"] {
+        margin: 1.5rem 0;
+    }
+}
+
+/* 图片放大模态框样式 */
+.image-modal {
+    display: none;
+    position: fixed;
+    z-index: 9999;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.9);
+    backdrop-filter: blur(5px);
+    overflow: hidden;
+}
+
+.image-modal.active {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: fadeIn 0.3s ease;
+}
+
+.image-modal-content {
+    position: relative;
+    max-width: 95%;
+    max-height: 95%;
+    margin: auto;
+    background: white;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 25px 50px rgba(0, 0, 0, 0.3);
+    animation: scaleIn 0.3s ease;
+    cursor: grab;
+    user-select: none;
+}
+
+.image-modal-content.dragging {
+    cursor: grabbing;
+}
+
+.image-modal-content.large-image {
+    max-width: none;
+    max-height: none;
+    width: auto;
+    height: auto;
+}
+
+.image-modal img {
+    max-width: 95vw;
+    max-height: 85vh;
+    width: auto;
+    height: auto;
+    display: block;
+    border-radius: 12px 12px 0 0;
+    object-fit: contain;
+}
+
+.image-modal-content.large-image img {
+    max-width: none;
+    max-height: none;
+    width: auto;
+    height: auto;
+}
+
+.image-modal-caption {
+    padding: 1rem 1.5rem;
+    background: white;
+    color: #6c757d;
+    text-align: center;
+    font-style: italic;
+    font-size: 1rem;
+    border-radius: 0 0 12px 12px;
+}
+
+.image-modal-close {
+    position: absolute;
+    top: 15px;
+    right: 20px;
+    color: white;
+    font-size: 28px;
+    font-weight: bold;
+    cursor: pointer;
+    z-index: 10000;
+    background: rgba(0, 0, 0, 0.5);
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s ease;
+}
+
+.image-modal-close:hover {
+    background: rgba(0, 0, 0, 0.8);
+    transform: scale(1.1);
+}
+
+/* 动画效果 */
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes scaleIn {
+    from {
+        opacity: 0;
+        transform: scale(0.5);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+/* 确保与blog.css框架的完全兼容 */
+.blog-main .content-block-wrapper[data-block-type="image_block"] {
+    padding-left: 0;
+    padding-right: 0;
+    box-sizing: border-box;
+}
+
+/* 深色模式适配 */
+@media (prefers-color-scheme: dark) {
+    .content-block-wrapper[data-block-type="image_block"]::before,
+    .content-block-wrapper[data-block-type="image_block"]::after {
+        background: #2d3748;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+    }
+
+    .content-block-wrapper[data-block-type="image_block"]::after {
+        color: #a0aec0;
+        border-top-color: #4a5568;
+    }
+
+    .content-block-wrapper[data-block-type="image_block"]:hover::after {
+        color: #cbd5e0;
+    }
+
+    .image-modal-content {
+        background: #2d3748;
+    }
+
+    .image-modal-caption {
+        background: #2d3748;
+        color: #a0aec0;
+    }
+}

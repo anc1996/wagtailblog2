@@ -1,0 +1,255 @@
+{% extends "base.html" %}
+{% load wagtailcore_tags wagtailimages_tags blog_tags static archive_tags %}
+
+{% block body_class %}blog-index-page{% endblock %}
+
+{% block extra_css %}
+    {{ block.super }}
+    <link rel="stylesheet" href="{% static 'blog/css/blog.css' %}">
+{% endblock %}
+
+{% block content %}
+
+{# Gretzia 风格的页面标题栏 (可选，如果想替换现有的两栏式页面介绍) #}
+{# 如果使用这个，就需要移除或调整下面 "页面标题和介绍" 部分 #}
+<div class="sidebar-page-container" style="padding-top: 60px;"> {# 增加一些顶部内边距 #}
+    <div class="auto-container">
+        <div class="row clearfix">
+
+            <div class="content-side col-lg-8 col-md-12 col-sm-12">
+                <div class="blog-list-content"> {# 新增一个包装器 #}
+
+                    <div class="page-intro-section" style="margin-bottom: 40px;">
+                        <div class="row clearfix">
+                            <div class="column col-md-6 col-sm-12 col-xs-12">
+                                <div class="sec-title text-left">
+                                    <h2>{{ page.title }}</h2>
+                                    {% if page.date %}
+                                        <div class="post-date">{{ page.date}}</div>
+                                    {% endif %}
+                                </div>
+                                {% if page.intro %}
+                                    <div class="text">
+                                        {{ page.intro| richtext }}
+                                    </div>
+                                {% endif %}
+                            </div>
+                            <div class="image-column col-md-6 col-sm-12 col-xs-12 wow fadeInRight" data-wow-delay="0ms" data-wow-duration="1500ms">
+                                <div class="image">
+                                    {% if page.featured_image %}
+                                        {% image page.featured_image width-800 as feat_img %}
+                                        <img src="{{ feat_img.url }}" alt="{{ feat_img.alt|default:page.title }}" />
+                                    {% else %}
+                                        <img src="{% static 'gretzia/images/resource/news-24.jpg' %}" alt="默认图片" />
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="filters-section sidebar-widget styled-form" style="margin-bottom: 50px; padding: 20px; background-color: #f9f9f9; border-radius: 5px;">
+                        <h4 style="margin-bottom: 15px; font-weight: 600;">筛选与排序</h4>
+
+                        <form method="get" id="blog_filter_form" class="filter-form form-horizontal">
+                            <div class="row clearfix">
+                                <div class="form-group col-md-12 col-sm-12 col-xs-12">
+                                    <input type="text" name="search" value="{{ search_query|default:'' }}" placeholder="搜索文章标题..." class="form-control">
+                                </div>
+
+                                <div class="form-group col-md-6 col-sm-12 col-xs-12">
+                                    <label for="start_date_filter" style="display: block; margin-bottom: 5px;">开始日期:</label>
+                                    <input type="date" name="start_date" id="start_date_filter" value="{{ start_date|default:'' }}" class="form-control">
+                                </div>
+                                <div class="form-group col-md-6 col-sm-12 col-xs-12">
+                                    <label for="end_date_filter" style="display: block; margin-bottom: 5px;">结束日期:</label>
+                                    <input type="date" name="end_date" id="end_date_filter" value="{{ end_date|default:'' }}" class="form-control">
+                                </div>
+
+                                <div class="form-group col-md-6 col-sm-12 col-xs-12">
+                                    <label for="sort_primary" style="display: block; margin-bottom: 5px;">主要排序 (大排序):</label>
+                                    <select name="sort_primary" id="sort_primary" class="form-control"
+                                            data-current-value="{{ sort_primary|default:'date_desc' }}">
+                                        <option value="date_desc">时间 (新→旧)</option>
+                                        <option value="date_asc">时间 (旧→新)</option>
+                                        <option value="title_asc">标题 (A→Z)</option>
+                                        <option value="title_desc">标题 (Z→A)</option>
+                                    </select>
+                                </div>
+
+                                <div class="form-group col-md-6 col-sm-12 col-xs-12">
+                                    <label for="sort_secondary" style="display: block; margin-bottom: 5px;">次要排序 (小排序):</label>
+                                    <select name="sort_secondary" id="sort_secondary" class="form-control"
+                                            data-current-value="{{ sort_secondary|default:'title_asc' }}">
+                                        </select>
+                                </div>
+
+                                <div class="form-group col-md-12 col-sm-12 col-xs-12">
+                                    <button type="submit" class="next-post" style="width: 100%; padding: 10px; margin-top: 10px;">筛选</button>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+
+                    <div class="blog-list-items">
+                        <div class="row clearfix"> {# 包裹文章卡片的行 #}
+                        {% for post in blog_pages %}
+                            <article class="post-list-item" style="padding-bottom: 25px; margin-bottom: 35px; border-bottom: 1px solid #eaeaea;">
+                                <div class="row g-4">
+
+                                    {# 1. 左侧图片列 #}
+                                    <div class="col-md-4">
+                                        <div class="image">
+                                            <a href="{% pageurl post %}">
+                                                {% if post.specific.featured_image %}
+                                                    {% image post.specific.featured_image fill-350x230 as img %}
+                                                    <img src="{{ img.url }}" alt="{{ post.title }}" style="width: 100%; height: auto; border-radius: 5px;">
+                                                {% else %}
+                                                    <img src="{% static 'gretzia/images/resource/news-15.jpg' %}" alt="{{ post.title }}" style="width: 100%; height: auto; border-radius: 5px;">
+                                                {% endif %}
+                                            </a>
+                                        </div>
+                                    </div>
+
+                                    {# 2. 右侧内容列 #}
+                                    <div class="col-md-8 d-flex flex-column">
+
+                                        {# 文章标题 - 调整了与下方元信息的间距 #}
+                                        <h4 style="font-family: 'Playfair Display', serif; font-size: 22px; color: #ba6d3c; font-weight: 600; margin-top: 0; margin-bottom: 10px;">
+                                            <a href="{% pageurl post %}" style="color: inherit; text-decoration: none;">{{ post.title }}</a>
+                                        </h4>
+
+                                        {# 元信息栏 (已合并为一行，更紧凑) #}
+                                        <div class="post-meta-info" style="color: #6b6969; font-size: 13px; margin-bottom: 15px; line-height: 1.5;">
+                                            {# 作者 #}
+                                            {% with authors=post.specific.authors.all %}
+                                                {% if authors %}
+                                                    <span class="author me-2"> {# me-2 是 Bootstrap 的 margin-end 工具类 #}
+                                                        <i class="fa fa-user me-1"></i>
+                                                        {% for author in authors %}
+                                                            <a href="{% url 'blog:author_detail' pk=author.pk %}" style="color: inherit;">{{ author.name }}</a>{% if not forloop.last %}, {% endif %}
+                                                        {% endfor %}
+                                                    </span>
+                                                {% endif %}
+                                            {% endwith %}
+
+                                            {# 日期 #}
+                                            <span class="date me-2">
+                                                <i class="fa fa-calendar me-1"></i>{{ post.specific.date | date:"Y-m-d" }}
+                                            </span>
+
+                                            {# 标签列表 #}
+                                            {% with tags=post.specific.tags.all %}
+                                                {% if tags %}
+                                                    <span class="tags me-2">
+                                                        <i class="fa fa-tags me-1"></i>
+                                                        {% for tag in tags %}
+                                                            {% if blog_tag_index_page %}
+                                                                <a href="{% pageurl blog_tag_index_page %}?tag={{ tag.slug }}" style="color: inherit;">{{ tag.name }}</a>{% if not forloop.last %}, {% endif %}
+                                                            {% else %}
+                                                                <span>{{ tag.name }}</span>{% if not forloop.last %}, {% endif %}
+                                                            {% endif %}
+                                                        {% endfor %}
+                                                    </span>
+                                                {% endif %}
+                                            {% endwith %}
+
+                                            {# 访问统计 #}
+                                            {% include "blog/stats_block.html" with page=post %}
+                                        </div>
+
+                                        {# 文章简介 (已修改截断方式) #}
+                                        <div class="text" style="font-family: 'Lato', sans-serif; color: #4c4b4b; font-size: 15px; line-height: 1.7em; flex-grow: 1;">
+                                            <p>{{ post.specific.intro|striptags|truncatechars:100 }}</p>
+                                        </div>
+
+                                        {# "阅读更多" 按钮 #}
+                                        <div class="btn-box" style="margin-top: auto; padding-top:15px;"> {# 使用 margin-top: auto; 保证按钮在底部 #}
+                                            <a href="{% pageurl post %}" class="theme-btn btn-style-two">Read More</a>
+                                        </div>
+                                    </div>
+                                </div>
+                            </article>
+                        {% endfor %}
+                        </div> {# End row for blog items #}
+                    </div>
+
+                    {% if page_obj.paginator.num_pages > 1 %}
+                    <div class="custom-pagination text-center"
+                         style="margin-top: 40px; margin-bottom: 40px; padding-top:20px; border-top: 1px solid #eee; display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 10px 15px;">
+
+                        {# "上一页" 按钮 #}
+                        {% if page_obj.has_previous %}
+                            <a href="?page={{ page_obj.previous_page_number }}{% if search_query %}&search={{ search_query|urlencode }}{% endif %}{% if start_date %}&start_date={{ start_date }}{% endif %}{% if end_date %}&end_date={{ end_date }}{% endif %}"  class="theme-btn btn-style-two">
+                                <span class="fa fa-angle-left" style="margin-right: 5px;"></span> 上一页
+                            </a>
+                        {% else %}
+                            <button class="theme-btn btn-style-two" disabled style="cursor: not-allowed; opacity: 0.6;">
+                                <span class="fa fa-angle-left" style="margin-right: 5px;"></span> 上一页
+                            </button>
+                        {% endif %}
+
+                        {# "第 x 页，共 x 页" 信息 #}
+                        <span class="pagination-info-text" style="font-size: 16px; color: #555; white-space: nowrap; line-height: 40px;">
+                            第 {{ page_obj.number }} 页，共 {{ page_obj.paginator.num_pages }} 页
+                        </span>
+
+                        {# "下一页" 按钮 #}
+                        {% if page_obj.has_next %}
+                            <a href="?page={{ page_obj.next_page_number }}{% if search_query %}&search={{ search_query|urlencode }}{% endif %}{% if start_date %}&start_date={{ start_date }}{% endif %}{% if end_date %}&end_date={{ end_date }}{% endif %}" class="theme-btn btn-style-two">
+                                下一页 <span class="fa fa-angle-right" style="margin-left: 5px;"></span>
+                            </a>
+                        {% else %}
+                            <button class="theme-btn btn-style-two" disabled style="cursor: not-allowed; opacity: 0.6;">
+                                下一页 <span class="fa fa-angle-right" style="margin-left: 5px;"></span>
+                            </button>
+                        {% endif %}
+
+                        {# "跳转到 x 页" 表单 #}
+                        {% if page_obj.paginator.num_pages > 2 %} {# 当页数大于2时显示跳转表单更有意义 #}
+                        <form method="get" action="" class="pagination-jump-form" style="display: inline-flex; align-items: center; white-space: nowrap;">
+                            {# 隐藏字段以保留当前的筛选参数 #}
+                            {% if search_query %}<input type="hidden" name="search" value="{{ search_query|urlencode }}">{% endif %}
+                            {% if start_date %}<input type="hidden" name="start_date" value="{{ start_date }}">{% endif %}
+                            {% if end_date %}<input type="hidden" name="end_date" value="{{ end_date }}">{% endif %}
+
+                            <div class="form-group" style="display: inline-flex; align-items: center; margin-left: 5px;">
+                                <label for="jumptopage" style="margin-right: 8px; font-weight: normal; color: #333; white-space: nowrap; line-height: 40px;">跳转到:</label>
+                                <input type="number" name="page" id="jumptopage" min="1" max="{{ page_obj.paginator.num_pages }}"
+                                       placeholder="页"
+                                       style="width: 60px; height: 40px; padding: 0 8px; border: 1px solid #ddd; border-radius: 3px; text-align: center; line-height: normal;"
+                                       required>
+                            </div>
+                            <button type="submit" class="theme-btn btn-style-two" style="height: 40px; line-height: 20px; padding: 10px 15px; margin-left: 5px;">跳转</button>
+                        </form>
+                        {% endif %}
+                    </div>
+                    {% endif %}
+
+                </div> {# End blog-list-content #}
+            </div>
+
+            <div class="sidebar-side col-lg-4 col-md-12 col-sm-12">
+                <aside class="sidebar sticky-top">
+
+                    {# 检查是否存在随机作者 #}
+                    <div class="sidebar-widget about-widget">
+                        {% random_author_sidebar %}
+                    </div>
+
+                    <div class="sidebar-widget category-widget">
+                        <h2>文章归档</h2>
+                        {% archive_sidebar %} {# 使用我们之前修改过的带折叠功能的归档 #}
+                    </div>
+
+                </aside>
+            </div>
+
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+    {{ block.super }}
+    <script src="{% static 'blog/js/blog_index_page.js' %}"></script>
+{% endblock %}

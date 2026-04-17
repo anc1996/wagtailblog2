@@ -1,0 +1,19 @@
+{# base/templates/base/blocks/captioned_image_block.html #}
+
+{# 加载 Wagtail 图片标签库。这个标签库提供了方便的方法来处理图片，例如生成不同尺寸的图片。 #}
+{% load wagtailimages_tags %}
+
+{# 使用 <figure> 标签来表示一个独立的流内容单元，通常包含一个图片和可选的标题。 #}
+<figure>
+    {# 使用 Wagtail 的 image 标签来渲染图片。 #}
+    {# self.image 访问 CaptionedImageBlock 中的 image 字段，它是一个图片对象。 #}
+    {# fill-600x338 指定图片将以填充模式裁剪到 600x338 像素。你可以根据需要更改尺寸和裁剪模式（例如，width、height、max、min、scale）。 #}
+    {# loading="lazy" 是一个 HTML 属性，指示浏览器延迟加载图片，直到它接近视口，这有助于提高页面加载性能。 #}
+    {% image self.image fill-600x338 loading="lazy" %}
+
+    {# 使用 <figcaption> 标签为 <figure> 中的内容提供标题或说明。 #}
+    {# self.caption 访问 CaptionedImageBlock 中的 caption 字段，即图片标题文本。 #}
+    {# self.attribution 访问 CaptionedImageBlock 中的 attribution 字段，即图片归属信息文本。 #}
+    {# 这里将标题和归属信息用 " - " 连接起来显示。你可以根据设计需求调整显示格式。 #}
+    <figcaption>{{ self.caption }} - {{ self.attribution }}</figcaption>
+</figure>

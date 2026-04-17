@@ -1,0 +1,79 @@
+{% extends "wagtailadmin/base.html" %}
+{% load i18n wagtailadmin_tags static %}
+
+{% block titletag %}{% trans "搜索分析" %}{% endblock %}
+
+{% block extra_css %}
+    {{ block.super }}
+    {# 确保你已经运行了 collectstatic，或者你的静态文件服务正确配置 #}
+    <link rel="stylesheet" href="{% static 'search/css/admin_analytics.css' %}">
+{% endblock %}
+
+{% block bodyclass %}wagtail-search-analytics{% endblock %}
+
+{% block content %}
+    {% trans "搜索分析" as search_analytics_title %}
+    {% include "wagtailadmin/shared/header.html" with title=search_analytics_title icon="search" %}
+
+    {# 用于JS获取基础URL #}
+    <div id="search-analytics-url" data-url="{% url 'search_analytics' %}" style="display:none;"></div>
+
+    <div class="nice-padding search-analytics-container"> {# 添加了 search-analytics-container 类 #}
+        <h2>{% trans "热门搜索词" %}</h2>
+        {% if popular_searches %}
+            <ul class="popular-searches-list"> {# 添加了类名 #}
+                {% for search_item in popular_searches %}
+                    <li>
+                        <a href="{% url 'search:search' %}?query={{ search_item.query|urlencode }}" target="_blank">
+                            {{ search_item.query }}
+                        </a>
+                        ({{ search_item.hits }} {% trans "次" %})
+                    </li>
+                {% endfor %}
+            </ul>
+        {% else %}
+            <p>{% trans "暂无热门搜索词数据。" %}</p>
+        {% endif %}
+
+        <h2>{% trans "搜索趋势 (最近 30 天)" %}</h2>
+        <div id="search-trends-container">
+            {% if search_trends %}
+                <table class="listing full-width search-trends-table table-sortable">
+                    <thead>
+                        <tr>
+                        {#  data-sort-by 用于 JS 知道点击此列时应该按哪个字段排序 (对应后端 analytics.py 中的键)#}
+                        {#  data-current-sort-direction 用于JS 知道当前此列的排序状态 (asc, desc, '')#}
+                        {#  class 根据 current_order_by (来自视图上下文) 设置初始的排序箭头显示#}
+                            <th class="sortable-header {% if current_order_by == 'date' %}sorted-asc{% elif current_order_by == '-date' %}sorted-desc{% endif %}"
+                                data-sort-by="date"
+                                data-current-sort-direction="{% if current_order_by == 'date' %}asc{% elif current_order_by == '-date' %}desc{% endif %}">
+                                {% trans "日期" %}
+                            </th>
+                            <th class="sortable-header {% if current_order_by == 'searches' %}sorted-asc{% elif current_order_by == '-searches' %}sorted-desc{% endif %}"
+                                data-sort-by="searches"
+                                data-current-sort-direction="{% if current_order_by == 'searches' %}asc{% elif current_order_by == '-searches' %}desc{% endif %}">
+                                {% trans "搜索量" %}
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for day_stats in search_trends %}
+                            <tr>
+                                <td>{{ day_stats.daily_hits__date|date:"Y-m-d" }}</td>
+                                <td>{{ day_stats.total_searches }} {% trans "次" %}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% else %}
+                <p>{% trans "暂无搜索趋势数据。" %}</p>
+            {% endif %}
+        </div>
+    </div>
+{% endblock %}
+
+{% block extra_js %}
+    {{ block.super }}
+    {# 确保你已经运行了 collectstatic #}
+    <script src="{% static 'search/js/admin_analytics.js' %}"></script>
+{% endblock %}

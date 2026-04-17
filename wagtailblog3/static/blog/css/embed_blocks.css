@@ -1,0 +1,45 @@
+/* static/blog/css/embed_blocks.css */
+
+/*
+ * 1. 顶级容器样式 (用于居中)
+ * 同时作用于 'embed_block' (YouTube) 和 'iframe_embed' (Bilibili)
+ */
+.content-block-wrapper[data-block-type="embed_block"],
+.content-block-wrapper[data-block-type="iframe_embed"] {
+    display: flex;
+    justify-content: center; /* 水平居中 */
+    margin: 2.5rem 0;        /* 上下边距 */
+}
+
+/*
+ * 2. 响应式宽高比容器 (核心)
+ * 控制尺寸和外观
+ */
+.embed-wrapper {
+    position: relative;
+    padding-bottom: 56.25%; /* 16:9 宽高比 */
+    height: 0;
+    overflow: hidden;
+
+    /* 尺寸控制 */
+    width: 100%;
+    max-width: 720px; /* 在宽屏上舒适的最大宽度 */
+
+    /* 外观美化 */
+    background: #000; /* 加载时的黑色背景 */
+    border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
+}
+
+/*
+ * 3. iframe 自身样式
+ * 让 iframe 填满我们创建的容器
+ */
+.embed-wrapper iframe {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100% !important;  /* 使用 !important 强制覆盖 iframe 自带的 width 属性 */
+    height: 100% !important; /* 使用 !important 强制覆盖 iframe 自带的 height 属性 */
+    border: 0;
+}

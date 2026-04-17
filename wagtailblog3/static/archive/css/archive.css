@@ -1,0 +1,38 @@
+/* archive_sidebar.html 的折叠样式 (可选) */
+.year-entry {
+    display: flex; /* 使用 flex 布局让链接和按钮在同一行 */
+    justify-content: space-between; /* 将链接和按钮推到两端 */
+    align-items: center; /* 垂直居中对齐 */
+    padding: 5px 0; /* 给年份条目一些垂直内边距 */
+}
+
+.year-entry .year-link {
+    flex-grow: 1; /*让年份链接占据多余空间*/
+}
+
+.month-toggle {
+    cursor: pointer;
+    padding: 2px 6px; /* 给图标一些可点击区域 */
+    margin-left: 8px; /* 与年份文本的间距 */
+    font-size: 1em; /* 图标大小可以调整 */
+    color: #555; /* 图标颜色 */
+    transition: color 0.3s ease;
+}
+
+.month-toggle:hover,
+.month-toggle:focus {
+    color: #000; /* 鼠标悬停或聚焦时改变颜色 */
+}
+
+.months-list {
+    /* 你可以为月份列表添加额外的样式，如果需要的话 */
+    /* 例如，添加一个左边框来表示层级 */
+    /* border-left: 1px dashed #eee; */
+    /* margin-top: 5px; */
+    /* margin-bottom: 5px; */
+}
+.months-list li a {
+    /* 月份链接的样式可以调整得更细致一些 */
+    /* font-size: 0.9em; */
+    /* color: #666; */
+}

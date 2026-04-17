@@ -1,0 +1,57 @@
+{% comment %}
+    文件路径: wagtailblog3/templates/blog/streams/table_block.html
+    说明: 这是一个功能更全的、支持单元格合并和自定义类的 Bootstrap 风格表格模板。
+{% endcomment %}
+
+{% load table_block_tags %} {# 加载官方的模板标签，用于处理单元格 #}
+
+<div class="table-responsive mb-4">
+    <table class="table table-striped table-hover table-bordered">
+
+        {% if table_caption %}
+            <caption>{{ table_caption }}</caption>
+        {% endif %}
+
+        {% if table_header %}
+            <thead class="thead-light">
+                <tr>
+                    {% for column in table_header %}
+                        {% with forloop.counter0 as col_index %}
+                            {% cell_hidden 0 col_index as is_hidden %}
+                            {% if not is_hidden %}
+                                <th scope="col" {% cell_classname 0 col_index table_header %} {% cell_span 0 col_index table_header %}>
+                                    {{ column|safe }}
+                                </th>
+                            {% endif %}
+                        {% endwith %}
+                    {% endfor %}
+                </tr>
+            </thead>
+        {% endif %}
+
+        <tbody>
+            {% for row in data %}
+                {% with forloop.counter0 as row_index %}
+                    <tr>
+                        {% for column in row %}
+                            {% with forloop.counter0 as col_index %}
+                                {% cell_hidden row_index col_index table_header as is_hidden %}
+                                {% if not is_hidden %}
+                                    {% if first_col_is_header and forloop.first %}
+                                        <th scope="row" {% cell_classname row_index col_index table_header %} {% cell_span row_index col_index table_header %}>
+                                            {{ column|safe }}
+                                        </th>
+                                    {% else %}
+                                        <td {% cell_classname row_index col_index table_header %} {% cell_span row_index col_index table_header %}>
+                                            {{ column|safe }}
+                                        </td>
+                                    {% endif %}
+                                {% endif %}
+                            {% endwith %}
+                        {% endfor %}
+                    </tr>
+                {% endwith %}
+            {% endfor %}
+        </tbody>
+    </table>
+</div>

@@ -1,0 +1,30 @@
+/*
+ * 文件路径: wagtailblog3/static/blog/css/table_blocks.css
+ * 修正方案：使用属性选择器精确定位 CustomTableBlock，并强制提升标题样式优先级。
+*/
+
+/* * 1. 使用属性选择器，确保我们能精确地选中由 CustomTableBlock 生成的块。
+ * 这比使用 class 选择器更健壮。
+*/
+.content-block-wrapper[data-block-type="table_block"] {
+    /* 您可以在这里控制整个表格块的外边距等 */
+    margin-bottom: 1.5rem;
+}
+
+
+/* * 2. 修正核心：定位到表格标题 (caption) 并应用所需样式
+*/
+.content-block-wrapper[data-block-type="table_block"] table caption {
+    /* 强制标题显示在表格顶部，!important 用于覆盖任何其他库的设置 */
+    caption-side: top !important;
+
+    /* 实现您要的居中、放大、加粗效果 */
+    text-align: center;
+    font-size: 1.25em;  /* 字体比普通文本大25% */
+    font-weight: bold;
+    color: #333333; /* 使用深色，更清晰 */
+
+    /* 调整标题与表格的间距，使其看起来更舒服 */
+    padding-top: 10px;
+    padding-bottom: 15px;
+}

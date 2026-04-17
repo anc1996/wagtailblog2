@@ -1,0 +1,80 @@
+<!-- templates/blog/streams/document_block.html -->
+{% load wagtailimages_tags %}
+
+<div class="document-block">
+    <div class="document-wrapper">
+        {% if value %}
+            <div class="document-item">
+                <div class="document-icon">
+                    {% if value.file_extension == 'pdf' %}
+                        <i class="fa fa-file-pdf"></i>
+                    {% elif value.file_extension in 'doc,docx' %}
+                        <i class="fa fa-file-word"></i>
+                    {% elif value.file_extension in 'xls,xlsx' %}
+                        <i class="fa fa-file-excel"></i>
+                    {% elif value.file_extension in 'ppt,pptx' %}
+                        <i class="fa fa-file-powerpoint"></i>
+                    {% elif value.file_extension == 'txt' %}
+                        <i class="fa fa-file-text"></i>
+                    {% elif value.file_extension == 'zip' %}
+                        <i class="fa fa-file-archive"></i>
+                    {% elif value.file_extension == 'md' %}
+                        <i class="fa fa-markdown"></i>
+                    {% else %}
+                        <i class="fa fa-file"></i>
+                    {% endif %}
+                </div>
+
+                <div class="document-info">
+                    <h3 class="document-title">{{ value.title }}</h3>
+
+                    {% if value.description %}
+                        <p class="document-description">{{ value.description }}</p>
+                    {% endif %}
+
+                    <div class="document-meta">
+                        <span class="file-type">
+                            <i class="fa fa-tag"></i>
+                            {{ value.file_extension|upper|default:'文档' }}
+                        </span>
+
+                        {% if value.file_size %}
+                            <span class="file-size">
+                                <i class="fa fa-hdd"></i>
+                                {% if value.file_size < 1024 %}
+                                    {{ value.file_size }} B
+                                {% elif value.file_size < 1048576 %}
+                                    {{ value.file_size|floatformat:1|mul:0.0009765625 }} KB
+                                {% else %}
+                                    {{ value.file_size|floatformat:1|mul:0.00000095367 }} MB
+                                {% endif %}
+                            </span>
+                        {% endif %}
+
+                        <span class="upload-time">
+                            <i class="fa fa-clock"></i>
+                            {{ value.created_at|date:"Y-m-d" }}
+                        </span>
+                    </div>
+
+                    <div class="document-actions">
+                        <a href="{{ value.url }}" class="btn btn-primary" target="_blank">
+                            <i class="fa fa-eye"></i>
+                            在线查看
+                        </a>
+
+                        <a href="{{ value.file.url }}" class="btn btn-secondary" download>
+                            <i class="fa fa-download"></i>
+                            下载文档
+                        </a>
+                    </div>
+                </div>
+            </div>
+        {% else %}
+            <div class="document-placeholder">
+                <i class="fa fa-file fa-3x"></i>
+                <p>文档不可用</p>
+            </div>
+        {% endif %}
+    </div>
+</div>

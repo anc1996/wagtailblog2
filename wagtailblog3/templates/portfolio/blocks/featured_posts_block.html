@@ -1,0 +1,62 @@
+{# portfolio/templates/portfolio/blocks/featured_posts_block.html #}
+
+{% load wagtailcore_tags wagtailimages_tags %}
+
+
+<section class="news-section">
+    <div class="auto-container">
+        <!-- 区域标题 -->
+        <div class="sec-title centered">
+            <h2>{{ self.heading }}</h2>
+            {% if self.text %}
+                <div class="text wagtail-content-render">{{ self.text|richtext }}</div>
+            {% endif %}
+        </div>
+
+        <div class="row clearfix">
+            {% for post in self.posts %}
+                {% with post=post.specific %}
+                <!-- 新闻卡片单元 -->
+                <div class="news-block-two col-lg-12 col-md-12 col-sm-12">
+                    <div class="inner-box">
+                        <div class="row clearfix">
+                            <!-- 图片列 -->
+                             {% if post.header_image %}
+                                <div class="image-column col-lg-4 col-md-12 col-sm-12">
+                                    <div class="image">
+                                        <a href="{% pageurl post %}">
+                                            {% image post.header_image fill-370x270 as post_img %}
+                                            <img src="{{ post_img.url }}" alt="{{ post_img.alt }}">
+                                        </a>
+                                    </div>
+                                </div>
+                            {% endif %}
+                            <!-- 内容列 -->
+                            <div class="content-column {% if post.header_image %}col-lg-8{% else %}col-lg-12{% endif %} col-md-12 col-sm-12">
+                                <div class="inner-column">
+                                    <div class="content">
+                                        <ul class="post-meta">
+                                            <li><span class="fa fa-calendar"></span>{{ post.first_published_at|date:"Y年m月d日" }}</li>
+                                             {% if post.authors.exists %}
+                                                <li><span class="fa fa-user"></span>{{ post.authors.first.name }}</li>
+                                            {% endif %}
+                                        </ul>
+                                        <h4><a href="{% pageurl post %}">{{ post.title }}</a></h4>
+
+                                        {# 新增：显示文章的介绍内容 #}
+                                        {% if post.intro %}
+                                            <div class="text">{{ post.intro }}</div>
+                                        {% endif %}
+
+                                        <a href="{% pageurl post %}" class="read-more">阅读全文 <span class="fa fa-angle-double-right"></span></a>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endwith %}
+            {% endfor %}
+        </div>
+    </div>
+</section>

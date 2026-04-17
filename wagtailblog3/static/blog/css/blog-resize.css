@@ -1,0 +1,425 @@
+/* wagtailblog3/static/blog/css/blog-resize.css */
+
+/* =========================================
+   响应式策略说明：
+   - 移动端/平板端 (< 1280px): 使用原来的 Flex 单列布局
+   - 桌面端 (>= 1280px): 启用 Grid + 拖动功能
+   ========================================= */
+
+/* =========================================
+   1. 分隔条样式（只在桌面端显示）
+   ========================================= */
+.resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  z-index: 100;
+  display: none; /* 默认隐藏 */
+  cursor: col-resize;
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+
+  /* 扩大点击区域 */
+  padding: 0 8px;
+  margin: 0 -8px;
+}
+
+/* 左侧分隔条定位 */
+.resize-handle-left {
+  left: var(--sidebar-left-width, 17rem);
+  transform: translateX(-4px);
+}
+
+/* 右侧分隔条定位 */
+.resize-handle-right {
+  right: var(--sidebar-right-width, 20rem);
+  transform: translateX(4px);
+}
+
+/* 分隔条中心线 */
+.resize-handle-line {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: transparent;
+  transition: all 0.2s ease;
+  pointer-events: none;
+}
+
+/* 分隔条指示器 */
+.resize-handle-indicator {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 24px;
+  height: 60px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: all 0.2s ease;
+  pointer-events: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.resize-handle-indicator i {
+  color: #999;
+  font-size: 12px;
+  transition: color 0.2s;
+}
+
+/* Hover 状态 */
+.resize-handle:hover .resize-handle-line {
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    rgba(102, 126, 234, 0.3) 20%,
+    rgba(102, 126, 234, 0.5) 50%,
+    rgba(102, 126, 234, 0.3) 80%,
+    transparent
+  );
+  width: 2px;
+}
+
+.resize-handle:hover .resize-handle-indicator {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.resize-handle:hover .resize-handle-indicator i {
+  color: #667eea;
+}
+
+/* 拖动中状态 */
+.resize-handle.dragging {
+  z-index: 1000;
+}
+
+.resize-handle.dragging .resize-handle-line {
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    rgba(102, 126, 234, 0.6) 20%,
+    rgba(102, 126, 234, 0.9) 50%,
+    rgba(102, 126, 234, 0.6) 80%,
+    transparent
+  );
+  width: 3px;
+  box-shadow: 0 0 10px rgba(102, 126, 234, 0.4);
+}
+
+.resize-handle.dragging .resize-handle-indicator {
+  opacity: 1;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-color: transparent;
+  box-shadow: 0 4px 20px rgba(102, 126, 234, 0.5);
+}
+
+.resize-handle.dragging .resize-handle-indicator i {
+  color: white;
+  animation: pulse-dots 1s infinite;
+}
+
+/* 吸附动画 */
+.resize-handle.snapping .resize-handle-indicator {
+  animation: snap-bounce 0.3s ease;
+}
+
+@keyframes snap-bounce {
+  0%, 100% { transform: translate(-50%, -50%) scale(1); }
+  50% { transform: translate(-50%, -50%) scale(1.2); }
+}
+
+@keyframes pulse-dots {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* =========================================
+   2. 宽度提示气泡
+   ========================================= */
+.resize-tooltip {
+  position: absolute;
+  left: 50%;
+  top: 20%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.85);
+  color: white;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s, transform 0.2s;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  z-index: 10;
+}
+
+.resize-tooltip::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -6px;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 6px solid rgba(0, 0, 0, 0.85);
+}
+
+.resize-tooltip span {
+  display: block;
+  text-align: center;
+}
+
+.tooltip-width {
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 2px;
+}
+
+.tooltip-percent {
+  font-size: 11px;
+  opacity: 0.8;
+}
+
+/* 显示提示 */
+.resize-handle:hover .resize-tooltip,
+.resize-handle.dragging .resize-tooltip {
+  opacity: 1;
+  transform: translateX(-50%) translateY(-5px);
+}
+
+/* =========================================
+   3. 拖动时的全局样式
+   ========================================= */
+body.resizing {
+  cursor: col-resize !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+body.resizing * {
+  cursor: col-resize !important;
+  pointer-events: none !important;
+}
+
+body.resizing .resize-handle {
+  pointer-events: auto !important;
+}
+
+/* 拖动时添加蒙层防止iframe干扰 */
+.resize-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 999;
+  display: none;
+}
+
+body.resizing .resize-overlay {
+  display: block;
+}
+
+/* =========================================
+   4. 布局状态指示器（可选）
+   ========================================= */
+.layout-status-indicator {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 12px 16px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  display: none;
+  z-index: 1001;
+  transition: all 0.3s ease;
+}
+
+.layout-status-indicator.show {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+.status-item {
+  display: flex;
+  flex-direction: column;
+}
+
+.status-label {
+  font-size: 11px;
+  color: #999;
+  text-transform: uppercase;
+}
+
+.status-value {
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+}
+
+.status-reset {
+  background: #f5f5f5;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.status-reset:hover {
+  background: #667eea;
+  color: white;
+}
+
+/* =========================================
+   5. 响应式适配
+   ========================================= */
+
+/*
+   ⚠️ 关键：只在桌面端 (>= 1280px) 启用 Grid 布局
+   移动端/平板端保持原来的 Flex 布局
+*/
+
+/* 桌面端 (>= 1280px) - 启用 Grid + 拖动功能 */
+/* =========================================
+   5. 响应式适配 - 桌面端
+   ========================================= */
+
+/* 桌面端 (>= 1280px) - 启用 Grid + 拖动功能 */
+@media (min-width: 1280px) {
+
+  /* 🔥 核心修复：使用 calc() 强制响应 CSS 变量 */
+  .blog-layout-container {
+    display: grid !important;
+    grid-template-columns:
+      calc(var(--sidebar-left-width, 272px) * 1)
+      minmax(500px, 1fr)
+      calc(var(--sidebar-right-width, 320px) * 1);
+    gap: 0;
+    position: relative;
+  }
+
+  /* 🔥 拖动时禁用过渡 */
+  body.resizing .blog-layout-container {
+    transition: none !important;
+  }
+
+  /* 🔥 确保侧栏完全可见 */
+  .blog-sidebar-left,
+  .blog-sidebar-right {
+    display: block !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    overflow: visible !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    pointer-events: auto !important;
+  }
+
+  /* 🔥 侧栏内容自适应 */
+  .blog-sidebar-left *,
+  .blog-sidebar-right * {
+    max-width: 100%;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+  }
+
+  /* TOC 特殊处理 */
+  .toc-wrapper {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  .toc-link {
+    white-space: normal !important;
+    word-wrap: break-word !important;
+  }
+
+  /* Zen 模式隐藏侧栏 */
+  .blog-layout-container.hide-sidebar-left {
+    grid-template-columns:
+      0
+      minmax(500px, 1fr)
+      calc(var(--sidebar-right-width, 320px) * 1);
+  }
+
+  .blog-layout-container.hide-sidebar-right {
+    grid-template-columns:
+      calc(var(--sidebar-left-width, 272px) * 1)
+      minmax(500px, 1fr)
+      0;
+  }
+
+  .blog-layout-container.hide-sidebar-left.hide-sidebar-right {
+    grid-template-columns:
+      0
+      minmax(500px, 1fr)
+      0;
+  }
+
+  /* Zen 模式下隐藏侧栏内容 */
+  .blog-layout-container.hide-sidebar-left .blog-sidebar-left {
+    opacity: 0 !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+    overflow: hidden !important;
+  }
+
+  .blog-layout-container.hide-sidebar-right .blog-sidebar-right {
+    opacity: 0 !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+    overflow: hidden !important;
+  }
+
+  /* 显示分隔条逻辑 */
+  .blog-layout-container:not(.hide-sidebar-left):not(.hide-sidebar-right) .resize-handle {
+    display: block;
+  }
+
+  .blog-layout-container.hide-sidebar-left:not(.hide-sidebar-right) .resize-handle-right {
+    display: block;
+  }
+
+  .blog-layout-container.hide-sidebar-right:not(.hide-sidebar-left) .resize-handle-left {
+    display: block;
+  }
+
+  .blog-layout-container.hide-sidebar-left.hide-sidebar-right .resize-handle {
+    display: none !important;
+  }
+}
+
+/* =========================================
+   6. 打印样式
+   ========================================= */
+@media print {
+  .resize-handle,
+  .layout-status-indicator {
+    display: none !important;
+  }
+
+  .blog-layout-container {
+    display: block !important;
+  }
+}

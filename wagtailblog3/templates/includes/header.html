@@ -1,0 +1,125 @@
+{# templates/includes/header.html #}
+{% load wagtailcore_tags wagtailimages_tags blog_tags static i18n %}
+
+<header class="main-header header-style-one"> {# 定义网站的头部区域 #}
+
+
+    <!--Header-Upper-->
+    <div class="header-upper">
+        <div class="auto-container">
+            <div class="outer-container clearfix">
+                <!--标志外层-->
+                <div class="logo-outer">
+                    <div class="logo">
+                        {# 使用新的模板标签获取logo链接的根页面 #}
+                        {% get_site_root_details as site_root_details_for_logo %}
+                        <a href="{% if site_root_details_for_logo.page_obj %}{% pageurl site_root_details_for_logo.page_obj %}{% else %}/{% endif %}">
+                            <img src="{% static 'gretzia/images/logo.png' %}" alt="网站Logo" title="返回首页">
+                        </a>
+                    </div>
+                </div>
+
+                <div class="top-left info-block left-aligned">
+                    <div class="inner">
+                        <!-- 隐藏导航切换器 -->
+                        <div class="nav-toggler">
+                            <a href="#" class="mobile-nav-toggler" role="button" aria-label="打开导航菜单"><i class="icon_menu"><img src="{%static 'gretzia/images/icons/menu-icon.png' %}" alt="菜单图标" /></i></a>
+                        </div>
+                    </div>
+                </div>
+                <div class="top-right info-block right-aligned">
+                    <!--搜索框-->
+                    <div class="search-box-outer">
+                        <div class="dropdown">
+                            <button class="search-box-btn dropdown-toggle" type="button" id="dropdownMenu3" aria-label="打开搜索框" data-bs-toggle="dropdown" aria-expanded="false"><img src="{% static 'gretzia/images/icons/search-icon.png' %}" alt="" /></button>
+                            <ul class="dropdown-menu pull-right search-panel" aria-labelledby="dropdownMenu3">
+                                <li class="panel-outer">
+                                    <div class="form-container">
+                                        <form method="get" action="{% url 'search:search' %}">
+                                            {# 使用 Wagtail 的搜索 URL 反向解析 #}
+                                            {# 添加 CSRF 令牌以保护表单 #}
+                                            <div class="form-group">
+                                                <input type="search" name="query" type="text" value="" placeholder="Search Here" required="">
+                                                <button type="submit" aria-label="提交搜索"><span class="icon fa fa-search"></span></button>
+                                            </div>
+                                        </form>
+                                    </div>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+    <!--End Header Upper-->
+
+
+    <div class="header-lower">
+        <div class="auto-container">
+            <div class="nav-outer clearfix">
+                <!-- 主菜单 -->
+                <nav class="main-menu navbar-expand-md">
+                    <div class="navbar-header">
+                        <!-- 切换按钮 -->
+                        <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarSupportedContent" aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
+                            <span class="icon-bar"></span>
+                            <span class="icon-bar"></span>
+                            <span class="icon-bar"></span>
+                        </button>
+                    </div>
+
+                        <div class="navbar-collapse collapse clearfix" id="navbarSupportedContent">
+                            <ul class="navigation clearfix">
+                                {# 1. 获取站点根页面 (Home) #}
+                                {% get_site_root_details as site_root_info %}
+
+                                {% if site_root_info.page_obj %}
+                                    {% with home_page=site_root_info.page_obj %}
+                                        {# 1.1 显示 Home 链接 (固定项，不作为下拉菜单的触发器) #}
+                                        <li class="{% if site_root_info.is_current_or_ancestor %}current{% endif %}">
+                                            <a href="{% pageurl home_page %}">{{ home_page.title }}</a>
+                                        </li>
+                                    {% endwith %}
+
+                                    {# 2. 获取并显示 Home 页面的第一层子页面，与 Home 平级 #}
+                                    {#    这些子页面自身可以是下拉菜单的触发器 #}
+                                    {#    'page' 是从视图传递过来的当前页面上下文变量 #}
+                                    {% generate_menu_items site_root_info.page_obj page %}
+
+                                {% else %}
+                                    {# 如果找不到站点根页面，显示错误或备用链接 #}
+                                    <li><a href="/">{% translate "Menu Error: Root page not found." %}</a></li>
+                                {% endif %}
+
+                                {# 作者 #}
+                                <li class="{% if request.resolver_match.view_name == 'blog:author_list' %}current{% endif %}">
+                                    <a href="{% url 'blog:author_list' %}">作者</a>
+                                </li>
+                                {# 你可以在这里添加其他固定的顶级菜单项，例如“搜索” #}
+                                 <li><a href="{% url 'search:search' %}">全文搜索</a></li>
+
+
+                            </ul>
+                        </div>
+                </nav>
+
+            </div>
+        </div>
+    </div>
+
+    <!-- Mobile Menu  -->
+    <div class="mobile-menu">
+			<div class="menu-backdrop"></div>
+			<div class="close-btn"><span class="icon fa-remove"></span></div>
+
+			<nav class="menu-box">
+				<div class="nav-logo"><a href="/"><img src="{% static 'gretzia/images/logo-small.png' %}" alt="" title=""></a></div>
+				<div class="menu-outer"></div>
+			</nav>
+		</div>
+    <!-- End Mobile Menu -->
+
+
+</header>

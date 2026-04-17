@@ -1,0 +1,133 @@
+<!-- comments/templates/comments/admin/dashboard.html -->
+{% extends "wagtailadmin/base.html" %}
+{% load i18n wagtailadmin_tags %}
+
+{% block titletag %}评论统计{% endblock %}
+
+{% block content %}
+<header class="nice-padding">
+    <div class="row">
+        <div class="left">
+            <div class="col">
+                <h1 class="icon icon-{{ header_icon }}">{{ page_header }}</h1>
+            </div>
+        </div>
+    </div>
+</header>
+
+<div class="nice-padding">
+    <!-- 统计数字 -->
+    <div class="stats-row">
+        <div class="stats-col">
+            <div class="stats-box">
+                <h3>评论总量</h3>
+                <div class="big-number">{{ total_comments }}</div>
+                <div class="stats-details">
+                    <div>已审核: {{ approved_comments }}</div>
+                    <div>已删除: {{ deleted_comments }}</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="stats-col">
+            <div class="stats-box">
+                <h3>评论趋势</h3>
+                <div class="stats-details">
+                    <div>今日: {{ today_comments }}</div>
+                    <div>本周: {{ week_comments }}</div>
+                    <div>本月: {{ month_comments }}</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 最受欢迎的评论 -->
+    <div class="panel nice-padding">
+        <h2>点赞最多的评论</h2>
+        <table class="listing">
+            <thead>
+                <tr>
+                    <th>评论内容</th>
+                    <th>作者</th>
+                    <th>点赞数</th>
+                    <th>页面</th>
+                    <th>日期</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for comment in popular_comments %}
+                <tr>
+                    <td>{{ comment.content|truncatechars:50 }}</td>
+                    <td>{{ comment.author_user.username }}</td>
+                    <td>{{ comment.like_count }}</td>
+                    <td>
+                        <a href="{% url 'wagtailadmin_pages:edit' comment.page.id %}">
+                            {{ comment.page.title }}
+                        </a>
+                    </td>
+                    <td>{{ comment.created_at|date:"Y-m-d H:i" }}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="5">暂无数据</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- 评论最多的文章 -->
+    <div class="panel nice-padding">
+        <h2>评论最多的文章</h2>
+        <table class="listing">
+            <thead>
+                <tr>
+                    <th>文章标题</th>
+                    <th>评论数</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for page in most_commented_pages %}
+                <tr>
+                    <td>{{ page.title }}</td>
+                    <td>{{ page.comment_count }}</td>
+                    <td>
+                        <a href="{% url 'wagtailadmin_pages:edit' page.id %}" class="button button-small">编辑</a>
+                        <a href="{{ page.url }}" class="button button-small" target="_blank">查看</a>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="3">暂无数据</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<style>
+    .stats-row {
+        display: flex;
+        flex-wrap: wrap;
+        margin: 0 -10px 20px;
+    }
+    .stats-col {
+        flex: 1 1 300px;
+        padding: 0 10px;
+        margin-bottom: 20px;
+    }
+    .stats-box {
+        background: #fff;
+        border-radius: 6px;
+        box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        padding: 20px;
+    }
+    .big-number {
+        font-size: 3em;
+        font-weight: bold;
+        margin: 0.2em 0;
+    }
+    .stats-details {
+        margin-top: 10px;
+        color: #666;
+    }
+</style>
+{% endblock %}

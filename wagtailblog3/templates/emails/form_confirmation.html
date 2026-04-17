@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>表单提交确认</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f8f9fa;
+        }
+        .email-container {
+            background-color: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px 20px;
+            text-align: center;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 24px;
+            font-weight: 600;
+        }
+        .header p {
+            margin: 10px 0 0 0;
+            opacity: 0.9;
+            font-size: 16px;
+        }
+        .status-badge {
+            background: rgba(255, 255, 255, 0.2);
+            padding: 5px 15px;
+            border-radius: 20px;
+            display: inline-block;
+            margin-top: 10px;
+            font-size: 14px;
+        }
+        .content {
+            padding: 30px 20px;
+        }
+        .content p {
+            margin: 0 0 15px 0;
+            color: #555;
+        }
+        .form-details {
+            background-color: #f8f9fa;
+            border-radius: 6px;
+            padding: 20px;
+            margin: 25px 0;
+            border-left: 4px solid #667eea;
+        }
+        .form-details h3 {
+            margin: 0 0 15px 0;
+            color: #333;
+            font-size: 18px;
+        }
+        .field-item {
+            margin-bottom: 12px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #e9ecef;
+        }
+        .field-item:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+        .field-label {
+            font-weight: 600;
+            color: #495057;
+            margin-bottom: 4px;
+        }
+        .field-value {
+            color: #6c757d;
+            word-wrap: break-word;
+        }
+        .user-email-highlight {
+            background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-weight: 600;
+            color: #1565c0;
+        }
+        .contact-info {
+            background-color: #e8f4fd;
+            border-radius: 6px;
+            padding: 20px;
+            margin: 25px 0;
+        }
+        .contact-info h4 {
+            margin: 0 0 15px 0;
+            color: #0056b3;
+            font-size: 16px;
+        }
+        .email-list {
+            margin: 10px 0;
+            padding: 0;
+            list-style: none;
+        }
+        .email-list li {
+            margin-bottom: 8px;
+            color: #495057;
+            padding: 8px 12px;
+            background: rgba(255, 255, 255, 0.7);
+            border-radius: 4px;
+            border-left: 3px solid #007bff;
+        }
+        .email-list li strong {
+            color: #0056b3;
+        }
+        .response-time {
+            background-color: #fff3cd;
+            padding: 15px;
+            border-radius: 6px;
+            border-left: 4px solid #ffc107;
+            margin: 20px 0;
+        }
+        .response-time h5 {
+            margin: 0 0 8px 0;
+            color: #856404;
+        }
+        .response-time p {
+            margin: 0;
+            color: #856404;
+        }
+        .footer {
+            background-color: #f8f9fa;
+            padding: 20px;
+            text-align: center;
+            border-top: 1px solid #e9ecef;
+        }
+        .footer p {
+            margin: 5px 0;
+            font-size: 14px;
+            color: #6c757d;
+        }
+        .signature {
+            margin-top: 20px;
+            padding-top: 15px;
+            border-top: 1px solid #e9ecef;
+        }
+        .highlight {
+            background-color: #d4edda;
+            padding: 15px;
+            border-radius: 6px;
+            border-left: 4px solid #28a745;
+            margin: 20px 0;
+        }
+        .highlight strong {
+            color: #155724;
+        }
+        .submission-time {
+            font-size: 12px;
+            color: #6c757d;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <div class="email-container">
+        <div class="header">
+            <h1>✓ 表单提交成功</h1>
+            <p>感谢您通过 {{ page.title }} 联系我们</p>
+            <div class="status-badge">
+                {% if submission_time %}
+                    提交时间：{{ submission_time|date:"Y-m-d H:i" }}
+                {% else %}
+                    刚刚提交
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="content">
+            <p>亲爱的用户，</p>
+            <p>我们已经成功收到您的留言。以下是您提交的详细信息以及我们的联系方式：</p>
+
+            <div class="form-details">
+                <h3>📝 您提交的信息</h3>
+                {% for field_name, field_value in form.items %}
+                    {% if field_value %}
+                        <div class="field-item">
+                            <div class="field-label">
+                                {% if 'email' in field_name %}
+                                    📧 {{ field_name }}
+                                {% elif 'name' in field_name %}
+                                    👤 {{ field_name }}
+                                {% elif 'phone' in field_name or 'tel' in field_name %}
+                                    📱 {{ field_name }}
+                                {% elif 'subject' in field_name or 'title' in field_name %}
+                                    📌 {{ field_name }}
+                                {% elif 'message' in field_name or 'content' in field_name %}
+                                    💬 {{ field_name }}
+                                {% else %}
+                                    {{ field_name }}
+                                {% endif %}：
+                            </div>
+                            <div class="field-value">
+                                {% if 'email' in field_name %}
+                                    <span class="user-email-highlight">{{ field_value }}</span>
+                                {% else %}
+                                    {{ field_value }}
+                                {% endif %}
+                            </div>
+                        </div>
+                    {% endif %}
+                {% endfor %}
+            </div>
+
+            <div class="contact-info">
+                <h4>📬 邮件发送详情</h4>
+                <p><strong>邮件发送规则：</strong>此确认邮件同时发送给您和我们的客服团队，确保双方都能及时了解沟通进展。</p>
+
+                <ul class="email-list">
+                    <li>
+                        <strong>您的邮箱：</strong>{{ user_email }}
+                        <span style="color: #28a745; font-size: 12px;">（主收件人）</span>
+                    </li>
+                    {% if admin_emails %}
+                        {% for email in admin_emails %}
+                            <li>
+                                <strong>客服邮箱：</strong>{{ email }}
+                                <span style="color: #17a2b8; font-size: 12px;">（抄送）</span>
+                            </li>
+                        {% endfor %}
+                    {% endif %}
+                </ul>
+            </div>
+
+            <div class="response-time">
+                <h5>⏰ 回复时间承诺</h5>
+                <p>我们承诺在收到您的留言后：</p>
+                <ul style="margin: 8px 0; padding-left: 20px; color: #856404;">
+                    <li>工作日内4小时内回复</li>
+                    <li>节假日24小时内回复</li>
+                    <li>紧急事务将优先处理</li>
+                </ul>
+            </div>
+
+            <div class="highlight">
+                <p><strong>💡 温馨提示：</strong></p>
+                <ul style="margin: 8px 0; padding-left: 20px;">
+                    <li>此邮件是系统自动发送的确认邮件，请勿直接回复</li>
+                    <li>如需进一步沟通，我们会主动联系您</li>
+                    <li>请将我们的邮箱地址添加到通讯录，避免回复邮件被误判为垃圾邮件</li>
+                </ul>
+            </div>
+
+            {% if page.confirmation_email_text %}
+                <div style="padding: 15px; background: #f8f9fa; border-radius: 6px; margin: 20px 0;">
+                    {{ page.confirmation_email_text|safe }}
+                </div>
+            {% endif %}
+
+            <div class="signature">
+                <p>再次感谢您的关注和支持！我们期待与您的进一步交流。</p>
+                <p style="font-weight: 600;">祝好，<br>{{ site.site_name|default:"网站团队" }} 团队</p>
+
+                {% if submission_time %}
+                    <p class="submission-time">
+                        邮件生成时间：{{ submission_time|date:"Y年m月d日 H:i:s" }}
+                    </p>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="footer">
+            <p>📧 此邮件由系统自动发送，请勿直接回复</p>
+            <p>🌐 如需联系我们，请访问我们的网站或发送邮件至上述联系邮箱</p>
+            {% if site %}
+                <p style="margin-top: 10px; font-size: 12px;">
+                    © {{ site.site_name|default:"网站团队" }} |
+                    发件人：{{ site.site_name|default:"系统邮件" }}
+                </p>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>

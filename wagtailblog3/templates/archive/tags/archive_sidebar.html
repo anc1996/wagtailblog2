@@ -1,0 +1,43 @@
+{# archive/templates/archive/tags/archive_sidebar.html #}
+{% load static %}
+
+<div class="archive-tree">
+    <ul class="cat-list">
+        {% for year, year_data in archive_tree.items %}
+            <li>
+                <div class="year-entry">
+
+                    {# 年份链接 #}
+                    <a href="{{ year_data.url }}"
+                       class="year-link {% if year == current_year %}active{% endif %}">
+                        <i class="fa fa-calendar-alt"></i> {{ year }}年 ({{ year_data.count }})
+                    </a>
+
+                    {# 折叠/展开触发器 - 仅当有月份时显示 #}
+                    {% if year_data.months %}
+                        <span class="month-toggle" data-target="#months-{{ year }}" role="button" tabindex="0" aria-expanded="{% if year == current_year %}true{% else %}false{% endif %}" aria-controls="months-{{ year }}">
+                            <i class="fa {% if year == current_year %}fa-minus-square-o{% else %}fa-plus-square-o{% endif %}"></i>
+                        </span>
+                    {% endif %}
+                </div>
+
+                {# 月份列表 - 默认根据 current_year 决定是否显示 #}
+                {% if year_data.months %}
+                <ul id="months-{{ year }}" class="months-list" style="padding-left: 25px; list-style: none; {% if year != current_year %}display: none;{% endif %}">
+                    {% for month, month_data in year_data.months.items %}
+                        <li>
+                            <a href="{{ month_data.url }}"
+                               class="month-link {% if year == current_year and month == current_month %}active{% endif %}">
+                                <i class="fa fa-calendar-day"></i> {{ month_data.display_name }} ({{ month_data.count }})
+                            </a>
+                        </li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+            </li>
+        {% empty %}
+            <li><a href="#">暂无归档文章</a></li>
+        {% endfor %}
+    </ul>
+</div>
+

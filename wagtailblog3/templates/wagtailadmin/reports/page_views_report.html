@@ -1,0 +1,161 @@
+{% extends "wagtailadmin/base.html" %}
+{% load i18n wagtailadmin_tags %}
+
+{% block titletag %}{% trans "页面访问统计" %}{% endblock %}
+
+{% block content %}
+<header class="nice-padding">
+  <div class="row">
+    <div class="left">
+      <h1 class="icon icon-site">{% trans "页面访问统计" %}</h1>
+    </div>
+  </div>
+</header>
+
+<div class="nice-padding">
+  <!-- 搜索表单 -->
+  <form method="GET" class="search-form">
+    <div class="row">
+      <div class="col6">
+        <div class="field-row">
+          <div class="field">
+            <label for="id_q">标题搜索:</label>
+            <input type="text" name="q" id="id_q" placeholder="搜索页面标题" value="{{ search_query }}">
+          </div>
+        </div>
+      </div>
+      <div class="col6">
+        <div class="field-row">
+          <div class="field">
+            <label for="id_sort">排序方式:</label>
+            <select name="sort" id="id_sort">
+              <option value="-total_views" {% if sort == "-total_views" %}selected{% endif %}>访问量 (降序)</option>
+              <option value="total_views" {% if sort == "total_views" %}selected{% endif %}>访问量 (升序)</option>
+              <option value="-total_unique_views" {% if sort == "-total_unique_views" %}selected{% endif %}>唯一访问 (降序)</option>
+              <option value="total_unique_views" {% if sort == "total_unique_views" %}selected{% endif %}>唯一访问 (升序)</option>
+              <option value="-first_published_at" {% if sort == "-first_published_at" %}selected{% endif %}>发布日期 (最新)</option>
+              <option value="first_published_at" {% if sort == "first_published_at" %}selected{% endif %}>发布日期 (最早)</option>
+              <option value="title" {% if sort == "title" %}selected{% endif %}>标题 (A-Z)</option>
+              <option value="-title" {% if sort == "-title" %}selected{% endif %}>标题 (Z-A)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="col6">
+        <div class="field-row">
+          <div class="field">
+            <label for="id_min_views">访问量范围:</label>
+            <div class="field-col">
+              <input type="number" name="min_views" id="id_min_views" placeholder="最小值" value="{{ min_views }}" min="0">
+              <span>-</span>
+              <input type="number" name="max_views" id="id_max_views" placeholder="最大值" value="{{ max_views }}" min="0">
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="col6">
+        <div class="field-row">
+          <div class="field">
+            <label for="id_start_date">发布日期范围:</label>
+            <div class="field-col">
+              <input type="date" name="start_date" id="id_start_date" value="{{ start_date }}">
+              <span>-</span>
+              <input type="date" name="end_date" id="id_end_date" value="{{ end_date }}">
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="col12">
+        <div class="field-row">
+          <button type="submit" class="button">搜索</button>
+          <a href="{% url 'page_views_report' %}" class="button button-secondary">清除筛选</a>
+        </div>
+      </div>
+    </div>
+  </form>
+
+  <!-- 结果表格 -->
+  {% if page_obj %}
+    <div class="result-count">
+      {% blocktrans count counter=paginator.count %}找到 {{ counter }} 条记录{% plural %}找到 {{ counter }} 条记录{% endblocktrans %}
+    </div>
+
+    <div class="listing">
+      <table class="listing">
+        <thead>
+          <tr>
+            <th>页面标题</th>
+            <th>总访问量</th>
+            <th>唯一访问量</th>
+            <th>发布日期</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for page in page_obj %}
+            <tr>
+              <td><a href="{{ page.url }}" target="_blank">{{ page.title }}</a></td>
+              <td>{{ page.total_views|default:0 }}</td>
+              <td>{{ page.total_unique_views|default:0 }}</td>
+              <td>{{ page.first_published_at|date:"Y-m-d" }}</td>
+              <td>
+                <a href="{% url 'page_view_counts_detail' page.id %}" class="button button-small">查看详情</a>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 分页 -->
+    {% if paginator.num_pages > 1 %}
+      <div class="pagination">
+        <p>第 {{ page_obj.number }} 页，共 {{ paginator.num_pages }} 页</p>
+        <ul>
+          {% if page_obj.has_previous %}
+            <li><a href="?page={{ page_obj.previous_page_number }}{% if query_string %}&{{ query_string }}{% endif %}" class="previous">上一页</a></li>
+          {% endif %}
+
+          {% for page_num in paginator.page_range %}
+            {% if page_num == page_obj.number %}
+              <li class="active"><span>{{ page_num }}</span></li>
+            {% elif page_num == 1 or page_num == paginator.num_pages or page_num|add:"-2" <= page_obj.number and page_num|add:"2" >= page_obj.number %}
+              <li><a href="?page={{ page_num }}{% if query_string %}&{{ query_string }}{% endif %}">{{ page_num }}</a></li>
+            {% elif page_num == 2 or page_num == paginator.num_pages|add:"-1" %}
+              <li><span>...</span></li>
+            {% endif %}
+          {% endfor %}
+
+          {% if page_obj.has_next %}
+            <li><a href="?page={{ page_obj.next_page_number }}{% if query_string %}&{{ query_string }}{% endif %}" class="next">下一页</a></li>
+          {% endif %}
+        </ul>
+      </div>
+    {% endif %}
+  {% else %}
+    <p>{% trans "暂无访问数据" %}</p>
+
+    <div class="help-block">
+      <p>可能的原因：</p>
+      <ol>
+        <li>尚未有任何页面被访问</li>
+        <li>访问数据尚未从Redis同步到数据库</li>
+        <li>搜索条件过于严格，没有符合条件的结果</li>
+      </ol>
+
+      <p>解决方法：</p>
+      <ol>
+        <li>浏览几篇博客文章以生成访问数据</li>
+        <li>运行命令: <code>python manage.py sync_pageviews</code></li>
+        <li>尝试放宽搜索条件</li>
+      </ol>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

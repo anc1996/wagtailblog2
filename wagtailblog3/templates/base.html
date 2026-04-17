@@ -1,0 +1,126 @@
+{% load static wagtailcore_tags wagtailuserbar %}
+
+<!DOCTYPE html>
+<html lang="zh-Hans"> {# 1. 修改语言代码为中文 #}
+<head>
+    <meta charset="utf-8" />
+    <title>
+        {% block title %}
+            {% if page.seo_title %}{{ page.seo_title }}{% else %}{{ page.title }}{% endif %}
+        {% endblock %}
+        {% block title_suffix %}
+            {% wagtail_site as current_site %}
+            {% if current_site and current_site.site_name %}- {{ current_site.site_name }}{% endif %}
+        {% endblock %}
+    </title>
+
+    {# --- SEO & Meta 优化 --- #}
+    {% if page.search_description %}
+        <meta name="description" content="{{ page.search_description }}" />
+    {% endif %}
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0">
+
+    {# Open Graph 标签 (社交分享优化) #}
+    <meta property="og:title" content="{% if page.seo_title %}{{ page.seo_title }}{% else %}{{ page.title }}{% endif %}" />
+    <meta property="og:description" content="{{ page.search_description|default:'' }}" />
+    <meta property="og:type" content="website" />
+    {# 如果有图片，建议在这里动态添加 og:image #}
+
+    {# 强制在新选项卡中打开实时预览面板中的所有链接 #}
+    {% if request.in_preview_panel %}
+        <base target="_blank">
+    {% endif %}
+
+    {# --- 性能优化：Favicon --- #}
+
+
+    {# --- CSS 样式表 (优化加载顺序) --- #}
+    {# 1. 先加载框架库 #}
+    <link href="{% static 'gretzia/css/bootstrap.css' %}" rel="stylesheet">
+    <link href="{% static 'gretzia/css/font-awesome.css' %}" rel="stylesheet">
+    <link href="{% static 'gretzia/css/animate.css' %}" rel="stylesheet">
+    <link href="{% static 'gretzia/css/owl.css' %}" rel="stylesheet">
+    <link href="{% static 'gretzia/css/jquery.fancybox.css' %}" rel="stylesheet">
+    <link href="{% static 'gretzia/css/hover.css' %}" rel="stylesheet">
+
+    {# 2. 再加载模版主样式 #}
+    <link href="{% static 'gretzia/css/style.css' %}" rel="stylesheet">
+    <link href="{% static 'gretzia/css/responsive.css' %}" rel="stylesheet">
+
+    {% block custom_scrollbar_assets %}
+    <link href="{% static 'gretzia/css/jquery.mCustomScrollbar.min.css' %}" rel="stylesheet">
+    {% endblock custom_scrollbar_assets %}
+
+    {# 3. 最后加载自定义样式 (确保我们可以覆盖上面的所有样式) #}
+    {# 建议：将 flatpickr 放在这里 #}
+    <link href="{% static 'css/flatpickr.min.css' %}" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'css/blog_interactions.css' %}">
+    <link rel="stylesheet" href="{% static 'archive/css/archive.css' %}">
+
+    {# 你的全局覆盖样式 #}
+    <link rel="stylesheet" type="text/css" href="{% static 'css/wagtailblog3.css' %}">
+
+    {% block extra_css %}{% endblock %}
+
+</head>
+
+<body class="{% block body_class %}{% endblock %}">
+
+    {% wagtailuserbar %}
+
+    <div class="page-wrapper">
+
+        {# Preloader 建议：如果加载太慢，可以考虑用 JS 控制它的淡出，或者直接移除以提高感官速度 #}
+        <div class="preloader"></div>
+
+        {# Header #}
+        {% block header %}
+           {% include "includes/header.html" %}
+        {% endblock %}
+
+        {# Main Content #}
+        {% block content %}{% endblock %}
+
+        {# Footer #}
+        {% block footer %}
+           {% include "includes/footer.html" %}
+        {% endblock %}
+
+    </div>
+
+    {# --- JS 脚本 (放在底部加速渲染) --- #}
+
+    {# 核心库 #}
+    <script src="{% static 'gretzia/js/jquery.js' %}"></script>
+    <script src="{% static 'gretzia/js/popper.min.js' %}"></script>
+    <script src="{% static 'gretzia/js/bootstrap.min.js' %}"></script>
+
+    {# 插件库 #}
+    <script src="{% static 'gretzia/js/isotope.js' %}"></script>
+    <script src="{% static 'gretzia/js/jquery.fancybox.pack.js' %}"></script>
+    <script src="{% static 'gretzia/js/jquery.fancybox-media.js' %}"></script>
+    <script src="{% static 'gretzia/js/owl.js' %}"></script>
+    <script src="{% static 'gretzia/js/appear.js' %}"></script>
+    <script src="{% static 'gretzia/js/wow.js' %}"></script>
+    <script src="{% static 'gretzia/js/validate.js' %}"></script>
+
+    {% block custom_scrollbar_assets_js %}
+    <script src="{% static 'gretzia/js/jquery.mCustomScrollbar.concat.min.js' %}"></script>
+    {% endblock custom_scrollbar_assets_js %}
+
+    {# 你的自定义逻辑 #}
+    <script src="{% static 'gretzia/js/script.js' %}"></script>
+    <script src="{% static 'gretzia/js/enhanced-jquery-compatibility.js' %}"></script>
+    <script src="{% static 'gretzia/js/jquery.mCustomScrollbar.js' %}"></script>
+    <script type="text/javascript" src="{% static 'js/wagtailblog3.js' %}"></script>
+
+    {% block extra_js %}
+        <script src="{% static 'js/flatpickr.js' %}"></script>
+        <script src="{% static 'js/zh.js' %}"></script>
+        <script src="{% static 'js/frontend_datepicker.js' %}"></script>
+        <script src="{% static 'archive/js/archive.js' %}"></script>
+    {% endblock %}
+
+</body>
+</html>

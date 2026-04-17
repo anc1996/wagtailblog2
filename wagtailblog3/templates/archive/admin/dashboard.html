@@ -1,0 +1,508 @@
+{% extends "wagtailadmin/base.html" %}
+{% load i18n wagtailadmin_tags static archive_tags %}
+
+{% block titletag %}博客归档管理{% endblock %}
+
+{% block content %}
+    <header class="header">
+        <div class="row">
+            <div class="left">
+                <div class="col header-title">
+                    <h1 class="icon icon-folder-open-inverse">博客归档管理</h1>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <div class="nice-padding">
+        <div class="help-block help-info">
+            <svg class="icon icon-help" aria-hidden="true"><use href="#icon-help"></use></svg>
+            当前共有 <strong>{{ total_posts_count }}</strong> 篇博客文章
+        </div>
+
+        {# 主内容区布局 #}
+        <div class="row">
+            <div class="col12">
+                {# 日期筛选表单 #}
+                <div class="nice-padding">
+                    <h2 class="label-above">选择时间段</h2>
+                    <form method="get" id="date-filter-form" class="search-form">
+                        <ul class="fields inline">
+                            <li class="field date-field">
+                                <label for="id_start_date">开始日期</label>
+                                <input type="date"
+                                       name="start_date"
+                                       id="id_start_date"
+                                       class="w-field__input date-input"
+                                       value="{{ selected_start_date|default:'' }}">
+                            </li>
+                            <li class="field date-field">
+                                <label for="id_end_date">结束日期</label>
+                                <input type="date"
+                                       name="end_date"
+                                       id="id_end_date"
+                                       class="w-field__input date-input"
+                                       value="{{ selected_end_date|default:'' }}">
+                            </li>
+                            <li class="button-row">
+                                <button type="submit" class="button button-small button-secondary">查询文章</button>
+                                <button type="button" id="reset-filter" class="button button-small button-secondary">重置</button>
+                            </li>
+                        </ul>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            {# 归档统计表格 - 全宽显示 #}
+            <div class="col12">
+                <div class="nice-padding">
+                    <h2 class="label-above">归档统计</h2>
+                    <div id="archive-stats-container">
+                        {% include "archive/admin/_archive_stats_table.html" %}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            {# 文章列表 - 全宽显示 #}
+            <div class="col12">
+                <div class="nice-padding" id="posts-list-container">
+                    {% include "archive/admin/_posts_list_section.html" %}
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock %}
+
+{% block extra_css %}
+    {{ block.super }}
+    <style>
+        /* 搜索表单优化 */
+        .search-form .fields.inline {
+            display: flex;
+            align-items: flex-end;
+            gap: 1em;
+            margin-bottom: 0;
+        }
+
+        .search-form .fields.inline li {
+            flex: 0 0 auto;
+            margin: 0;
+        }
+
+        .search-form .fields.inline li:not(.button-row) {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .search-form .fields.inline label {
+            margin-bottom: 0.5em;
+            font-weight: 600;
+        }
+
+        /* 日期输入框基础样式 */
+        .search-form .date-input {
+            width: 180px;
+            padding: 0.5em;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+            font-family: inherit;
+            color: #333;
+        }
+
+        /* 使用 JavaScript 控制的类来隐藏占位符 */
+        .search-form .date-input.hide-placeholder::-webkit-datetime-edit {
+            opacity: 0;
+        }
+
+        .search-form .date-input.hide-placeholder::-moz-datetime-edit {
+            opacity: 0;
+        }
+
+        /* Firefox 特殊处理 */
+        .search-form .date-input.hide-placeholder {
+            color: transparent;
+        }
+
+        .search-form .date-input.hide-placeholder:focus {
+            color: #333;
+        }
+
+        .button-row {
+            display: flex;
+            gap: 0.5em;
+        }
+
+        /* 归档统计表格优化 */
+        .archive-stats-wrapper {
+            overflow-x: auto;
+            margin: 1em 0;
+        }
+
+        .listing--full-width {
+            width: 100%;
+            table-layout: fixed;
+        }
+
+        .listing th.archive-year,
+        .listing td.archive-year {
+            width: 80px;
+            font-weight: 600;
+            text-align: left;
+            padding-left: 1em;
+        }
+
+        .listing th.archive-month,
+        .listing td.archive-month {
+            width: calc((100% - 80px - 100px) / 12);
+            text-align: center;
+            font-size: 0.9em;
+        }
+
+        .listing th.archive-total,
+        .listing td.archive-total {
+            width: 100px;
+            text-align: center;
+            font-weight: 600;
+            background-color: #f8f8f8;
+        }
+
+        .listing td.archive-month .muted {
+            color: #999;
+        }
+
+        /* 归档分页样式 */
+        .archive-pagination {
+            margin-top: 1em;
+            text-align: center;
+        }
+
+        .archive-pagination button {
+            margin: 0 0.5em;
+        }
+
+        .archive-pagination .page-info {
+            display: inline-block;
+            margin: 0 1em;
+            color: #666;
+        }
+
+        /* 文章列表表格优化 */
+        .listing .title {
+            width: 40%;
+        }
+
+        .listing td,
+        .listing th {
+            padding: 0.8em 1em;
+        }
+
+        /* 标签样式 */
+        .status-tag {
+            display: inline-block;
+            padding: 3px 10px;
+            background: #e8f4f8;
+            border-radius: 3px;
+            font-size: 0.85em;
+            margin-right: 0.3em;
+        }
+
+        .status-tag.primary {
+            background: #007d7e;
+            color: white;
+        }
+
+        /* 分页样式优化 */
+        .pagination {
+            margin-top: 2em;
+            border-top: 1px solid #e6e6e6;
+            padding-top: 1.5em;
+        }
+
+        .pagination-count {
+            margin-bottom: 1em;
+            color: #666;
+            font-size: 0.95em;
+        }
+
+        .pagination ul {
+            display: flex;
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            gap: 0.3em;
+            align-items: center;
+        }
+
+        .pagination li {
+            margin: 0;
+        }
+
+        .pagination li a,
+        .pagination li span {
+            display: inline-block;
+            padding: 0.5em 0.8em;
+            border: 1px solid #d9d9d9;
+            border-radius: 3px;
+            text-decoration: none;
+            color: #333;
+            min-width: 36px;
+            text-align: center;
+        }
+
+        .pagination li a:hover {
+            background-color: #f5f5f5;
+            border-color: #999;
+            cursor: pointer;
+        }
+
+        .pagination li.active span {
+            background-color: #007d7e;
+            border-color: #007d7e;
+            color: white;
+            font-weight: 600;
+        }
+
+        .pagination li.disabled span {
+            color: #ccc;
+            border: none;
+            cursor: default;
+        }
+
+        .pagination li.prev a,
+        .pagination li.next a {
+            padding-left: 1em;
+            padding-right: 1em;
+        }
+
+        /* 标题样式优化 */
+        .label-above {
+            margin-bottom: 1em;
+            font-size: 1.2em;
+        }
+
+        .label-above .count {
+            font-weight: normal;
+            font-size: 0.85em;
+            color: #666;
+        }
+
+        /* 空状态提示 */
+        .no-results-message {
+            text-align: center;
+            padding: 3em 1em;
+            color: #999;
+        }
+
+        .no-results-message p {
+            margin: 0;
+            font-size: 1.1em;
+        }
+
+        /* 加载提示 */
+        .loading-indicator {
+            text-align: center;
+            padding: 2em;
+            color: #666;
+        }
+
+        /* 响应式调整 */
+        @media screen and (max-width: 1024px) {
+            .search-form .fields.inline {
+                flex-wrap: wrap;
+            }
+
+            .archive-stats-wrapper {
+                font-size: 0.9em;
+            }
+        }
+
+        @media screen and (max-width: 768px) {
+            .listing th.archive-month,
+            .listing td.archive-month {
+                font-size: 0.8em;
+                padding: 0.5em 0.3em;
+            }
+        }
+    </style>
+{% endblock %}
+
+{% block extra_js %}
+    {{ block.super }}
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // 全局状态管理
+            window.archiveFilterState = {
+                startDate: '{{ selected_start_date|default:"" }}',
+                endDate: '{{ selected_end_date|default:"" }}',
+                isFiltering: {{ is_date_filter_active|yesno:"true,false" }}
+            };
+
+            // 日期输入框占位符管理
+            const startDateInput = document.getElementById('id_start_date');
+            const endDateInput = document.getElementById('id_end_date');
+
+            function manageDatePlaceholder(input) {
+                if (!input) return;
+
+                // 如果输入框没有值，添加隐藏占位符的类
+                if (!input.value) {
+                    input.classList.add('hide-placeholder');
+                } else {
+                    input.classList.remove('hide-placeholder');
+                }
+            }
+
+            // 初始化时管理占位符
+            manageDatePlaceholder(startDateInput);
+            manageDatePlaceholder(endDateInput);
+
+            // 为开始日期输入框绑定事件
+            if (startDateInput) {
+                startDateInput.addEventListener('input', function() {
+                    manageDatePlaceholder(this);
+                });
+
+                startDateInput.addEventListener('change', function() {
+                    manageDatePlaceholder(this);
+                });
+
+                startDateInput.addEventListener('focus', function() {
+                    this.classList.remove('hide-placeholder');
+                });
+
+                startDateInput.addEventListener('blur', function() {
+                    manageDatePlaceholder(this);
+                });
+            }
+
+            // 为结束日期输入框绑定事件
+            if (endDateInput) {
+                endDateInput.addEventListener('input', function() {
+                    manageDatePlaceholder(this);
+                });
+
+                endDateInput.addEventListener('change', function() {
+                    manageDatePlaceholder(this);
+                });
+
+                endDateInput.addEventListener('focus', function() {
+                    this.classList.remove('hide-placeholder');
+                });
+
+                endDateInput.addEventListener('blur', function() {
+                    manageDatePlaceholder(this);
+                });
+            }
+
+            // 全局函数：处理文章列表分页点击
+            window.handlePostsPagination = function(page) {
+                console.log('点击分页，页码:', page);
+                console.log('当前状态:', window.archiveFilterState);
+
+                if (window.archiveFilterState && window.archiveFilterState.isFiltering) {
+                    window.loadFilteredPosts(
+                        window.archiveFilterState.startDate,
+                        window.archiveFilterState.endDate,
+                        page
+                    );
+                } else {
+                    console.error('分页状态丢失，重新加载页面');
+                    location.reload();
+                }
+            };
+
+            const filterForm = document.getElementById('date-filter-form');
+            const postsContainer = document.getElementById('posts-list-container');
+
+            // 日期筛选表单提交
+            filterForm.addEventListener('submit', function(e) {
+                e.preventDefault();
+
+                const startDate = document.getElementById('id_start_date').value;
+                const endDate = document.getElementById('id_end_date').value;
+
+                if (!startDate || !endDate) {
+                    alert('请选择开始日期和结束日期');
+                    return;
+                }
+
+                if (startDate > endDate) {
+                    alert('开始日期不能晚于结束日期');
+                    return;
+                }
+
+                // 更新全局状态
+                window.archiveFilterState.startDate = startDate;
+                window.archiveFilterState.endDate = endDate;
+                window.archiveFilterState.isFiltering = true;
+
+                console.log('提交查询，更新状态:', window.archiveFilterState);
+
+                // 加载筛选结果
+                window.loadFilteredPosts(startDate, endDate, 1);
+            });
+
+            // 重置按钮
+            document.getElementById('reset-filter').addEventListener('click', function() {
+                window.archiveFilterState = {
+                    startDate: '',
+                    endDate: '',
+                    isFiltering: false
+                };
+                location.reload();
+            });
+
+            // 加载筛选后的文章列表
+            window.loadFilteredPosts = function(startDate, endDate, page) {
+                console.log('加载文章列表:', {startDate, endDate, page});
+
+                postsContainer.innerHTML = '<div class="loading-indicator">正在加载...</div>';
+
+                const url = '{% url "posts_filter_ajax" %}?' +
+                    'start_date=' + encodeURIComponent(startDate) +
+                    '&end_date=' + encodeURIComponent(endDate) +
+                    '&page=' + page;
+
+                fetch(url)
+                    .then(response => response.json())
+                    .then(data => {
+                        console.log('收到响应:', data);
+                        if (data.success) {
+                            postsContainer.innerHTML = data.html;
+                        } else {
+                            alert(data.error || '查询失败');
+                            location.reload();
+                        }
+                    })
+                    .catch(error => {
+                        console.error('请求错误:', error);
+                        alert('查询失败，请重试');
+                        location.reload();
+                    });
+            };
+
+            // 归档统计分页（完全独立）
+            window.loadArchiveStatsPage = function(page) {
+                const container = document.getElementById('archive-stats-container');
+                container.innerHTML = '<div class="loading-indicator">正在加载...</div>';
+
+                const url = '{% url "archive_stats_ajax" %}?archive_page=' + page;
+
+                fetch(url)
+                    .then(response => response.json())
+                    .then(data => {
+                        container.innerHTML = data.html;
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        alert('加载失败，请重试');
+                        location.reload();
+                    });
+            };
+        });
+    </script>
+{% endblock %}

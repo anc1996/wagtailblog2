@@ -1,0 +1,201 @@
+{% load static comment_tags %}
+
+{# 整个评论模块的外层容器 - 添加认证状态标识 #}
+<div class="comment-box{% if user.is_authenticated %} authenticated{% endif %}"
+     id="comments-section"
+     data-user-authenticated="{% if user.is_authenticated %}true{% else %}false{% endif %}">
+
+    <h2>评论 (<span id="comments-count">{{ comment_count }}</span>)</h2>
+
+    {# 排序按钮区域 - 只有登录用户或有评论时才显示 #}
+    {% if user.is_authenticated or comment_count > 0 %}
+    <div class="comments-sort-area">
+        <button class="sort-btn {% if sort_by == 'hot' %}active{% endif %}" data-sort="hot">热门</button>
+        <button class="sort-btn {% if sort_by == 'new' %}active{% endif %}" data-sort="new">最新</button>
+    </div>
+    {% endif %}
+
+    {# 评论列表容器 #}
+    <div id="comments-list" class="comments-list" data-page-id="{{ page.id }}">
+        {# 初始状态处理：如果没有评论，根据登录状态显示不同内容 #}
+        {% if comment_count == 0 %}
+            {% if user.is_authenticated %}
+                {# 已登录用户看到"暂无评论" #}
+                <div class="no-comments">
+                    <div class="no-comments-icon">
+                        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M20 6h-2l-1.27-1.27A1 1 0 0 0 16 4H8a1 1 0 0 0-1 1v2H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V7a1 1 0 0 0-1-1zM9 6h6v1H9V6zm10 10H5V9h14v7z" fill="currentColor"/>
+                            <circle cx="9" cy="12" r="1" fill="currentColor"/>
+                            <circle cx="15" cy="12" r="1" fill="currentColor"/>
+                            <path d="M9 14h6v1H9z" fill="currentColor"/>
+                        </svg>
+                    </div>
+                    <p>暂无评论，成为第一个评论者吧！</p>
+                </div>
+            {% else %}
+                {# 未登录用户看到登录提示 #}
+                <div class="login-prompt">
+                    <div class="login-prompt-icon">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" fill="currentColor"/>
+                        </svg>
+                    </div>
+                    <h4 class="login-prompt-title">想要参与讨论？</h4>
+                    <p class="login-prompt-text">登录后即可发表评论，与大家分享你的想法</p>
+                    <button type="button" class="login-btn theme-btn">立即登录</button>
+                </div>
+            {% endif %}
+        {% endif %}
+        {# JavaScript 会在评论加载时替换这里的内容 #}
+    </div>
+
+    {# 加载更多按钮 - 只有在有评论且有下一页时才显示 #}
+    {% if comments_page.has_next %}
+    <div class="load-more-container">
+        <button id="load-more-comments" class="theme-btn load-more-btn" data-page="{{ comments_page.next_page_number }}">加载更多</button>
+    </div>
+    {% endif %}
+
+    {# ========== 预定义的HTML模板片段（隐藏状态） ========== #}
+
+    {# 1. 登录提示模板 #}
+    <div id="login-prompt-template" class="template-hidden">
+        <div class="login-prompt">
+            <div class="login-prompt-icon">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" fill="currentColor"/>
+                </svg>
+            </div>
+            <h4 class="login-prompt-title">想要参与讨论？</h4>
+            <p class="login-prompt-text">登录后即可发表评论，与大家分享你的想法</p>
+            <button type="button" class="login-btn theme-btn">立即登录</button>
+        </div>
+    </div>
+
+    {# 2. 暂无评论提示模板 #}
+    <div id="no-comments-template" class="template-hidden">
+        <div class="no-comments">
+            <div class="no-comments-icon">
+                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M20 6h-2l-1.27-1.27A1 1 0 0 0 16 4H8a1 1 0 0 0-1 1v2H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V7a1 1 0 0 0-1-1zM9 6h6v1H9V6zm10 10H5V9h14v7z" fill="currentColor"/>
+                    <circle cx="9" cy="12" r="1" fill="currentColor"/>
+                    <circle cx="15" cy="12" r="1" fill="currentColor"/>
+                    <path d="M9 14h6v1H9z" fill="currentColor"/>
+                </svg>
+            </div>
+            <p>暂无评论，成为第一个评论者吧！</p>
+        </div>
+    </div>
+
+    {# 3. 加载指示器模板 #}
+    <div id="loading-indicator-template" class="template-hidden">
+        <div class="comments-loading-indicator">
+            <div class="loading-spinner">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-dasharray="15 5" class="loading-circle">
+                        <animateTransform attributeName="transform" type="rotate" values="0 12 12;360 12 12" dur="1s" repeatCount="indefinite"/>
+                    </circle>
+                </svg>
+            </div>
+            <span class="loading-text">加载中...</span>
+        </div>
+    </div>
+
+    {# 4. 回复加载指示器模板 #}
+    <div id="replies-loading-template" class="template-hidden">
+        <div class="replies-loading-indicator">
+            <div class="loading-spinner-small">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-dasharray="15 5" class="loading-circle">
+                        <animateTransform attributeName="transform" type="rotate" values="0 12 12;360 12 12" dur="1s" repeatCount="indefinite"/>
+                    </circle>
+                </svg>
+            </div>
+            <span>加载回复中...</span>
+        </div>
+    </div>
+
+    {# 5. 评论编辑表单模板 #}
+    <div id="edit-form-template" class="template-hidden">
+        <div class="edit-comment-form">
+            <div class="form-group">
+                <textarea class="form-control edit-textarea" rows="4" placeholder="编辑您的评论..."></textarea>
+            </div>
+            <div class="edit-form-actions">
+                <button type="button" class="theme-btn save-edit-btn">保存</button>
+                <button type="button" class="theme-btn-small cancel-edit-btn">取消</button>
+            </div>
+        </div>
+    </div>
+
+    {# 6. 错误提示模板 #}
+    <div id="error-message-template" class="template-hidden">
+        <div class="comment-error-message">
+            <div class="error-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" fill="none"/>
+                    <line x1="15" y1="9" x2="9" y2="15" stroke="currentColor" stroke-width="2"/>
+                    <line x1="9" y1="9" x2="15" y2="15" stroke="currentColor" stroke-width="2"/>
+                </svg>
+            </div>
+            <span class="error-text"></span>
+        </div>
+    </div>
+
+    {# 7. 成功提示模板 #}
+    <div id="success-message-template" class="template-hidden">
+        <div class="comment-success-message">
+            <div class="success-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" fill="none"/>
+                    <path d="9 12l2 2 4-4" stroke="currentColor" stroke-width="2" fill="none"/>
+                </svg>
+            </div>
+            <span class="success-text"></span>
+        </div>
+    </div>
+
+    {# ========== 评论表单模板 ========== #}
+    <div class="comment-form-template template-hidden">
+        {% if user.is_authenticated %}
+            <div class="comment-reply-form" id="main-comment-form-wrapper">
+                <div class="author-image">
+                    <img src="{% static 'comments/img/default-avatar.png' %}" alt="{{ user.username }}">
+                </div>
+                <form id="comment-form" action="{% url 'comments:post_comment' page.id %}" method="post">
+                    {% csrf_token %}
+                    <input type="hidden" name="parent_id" id="comment-parent-id" value="">
+                    <input type="hidden" name="replied_to_user_id" id="replied-to-user-id" value="">
+
+                    <div class="form-group">
+                        <textarea name="content" id="comment-content" placeholder="发一条友善的评论 (支持 Markdown)" rows="4" class="form-control"></textarea>
+                    </div>
+                    <div class="comment-form-actions-gretzia">
+                        <span id="reply-to-info" class="reply-to-info template-hidden">
+                            回复 <span id="reply-to-name"></span>
+                            <button type="button" id="cancel-reply" class="theme-btn-small">取消</button>
+                        </span>
+                        <button type="submit" id="submit-comment" class="theme-btn">发表评论</button>
+                    </div>
+                </form>
+            </div>
+        {% else %}
+            <div class="comment-login-prompt">
+                <p>请先<a href="{% url 'wagtailadmin_login' %}?next={{ page.url }}">登录</a>后再发表评论</p>
+            </div>
+        {% endif %}
+    </div>
+
+    {# 初始评论表单的渲染位置 - 只有登录用户才显示 #}
+    {% if user.is_authenticated %}
+    <div id="initial-comment-form-placement"></div>
+    {% endif %}
+</div>
+
+{# 添加用户数据供JavaScript使用 #}
+<script type="application/json" id="user-data">
+{
+    "authenticated": {% if user.is_authenticated %}true{% else %}false{% endif %},
+    "username": "{% if user.is_authenticated %}{{ user.username|escapejs }}{% endif %}"
+}
+</script>

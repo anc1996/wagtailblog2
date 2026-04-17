@@ -1,0 +1,91 @@
+{% load wagtailadmin_tags %}
+
+{% if is_date_filter_active %}
+    <h2 class="label-above">
+        {{ selected_start_date }} 至 {{ selected_end_date }} 内的文章
+        {% if posts_to_display.paginator %}
+            <span class="count">(共 {{ posts_to_display.paginator.count }} 篇)</span>
+        {% endif %}
+    </h2>
+{% else %}
+    <h2 class="label-above">最近10篇发布</h2>
+{% endif %}
+
+{% include "archive/admin/_posts_table_admin.html" with posts_list=posts_to_display.object_list|default:posts_to_display %}
+
+{% if is_paginated_list and posts_to_display.has_other_pages %}
+    <nav class="pagination" aria-label="分页导航">
+        <p class="pagination-count">
+            第 {{ posts_to_display.start_index }} - {{ posts_to_display.end_index }} 篇，
+            共 {{ posts_to_display.paginator.count }} 篇
+        </p>
+        <ul>
+            {% if posts_to_display.has_previous %}
+                <li class="prev">
+                    <a href="javascript:void(0);"
+                       data-page="{{ posts_to_display.previous_page_number }}"
+                       class="posts-pagination-link icon icon-arrow-left text-replace"
+                       onclick="handlePostsPagination({{ posts_to_display.previous_page_number }})">上一页</a>
+                </li>
+            {% endif %}
+
+            {# 智能分页显示逻辑 #}
+            {% with page_num=posts_to_display.number total_pages=posts_to_display.paginator.num_pages %}
+
+                {# 第一页 #}
+                {% if page_num > 3 %}
+                    <li>
+                        <a href="javascript:void(0);"
+                           data-page="1"
+                           class="posts-pagination-link"
+                           onclick="handlePostsPagination(1)">1</a>
+                    </li>
+                    {% if page_num > 4 %}
+                        <li class="disabled"><span>...</span></li>
+                    {% endif %}
+                {% endif %}
+
+                {# 当前页附近的页码 #}
+                {% for num in posts_to_display.paginator.page_range %}
+                    {% if num >= page_num|add:"-2" and num <= page_num|add:"2" %}
+                        {% if num == page_num %}
+                            <li class="active">
+                                <span>{{ num }}</span>
+                            </li>
+                        {% else %}
+                            <li>
+                                <a href="javascript:void(0);"
+                                   data-page="{{ num }}"
+                                   class="posts-pagination-link"
+                                   onclick="handlePostsPagination({{ num }})">{{ num }}</a>
+                            </li>
+                        {% endif %}
+                    {% endif %}
+                {% endfor %}
+
+                {# 最后一页 #}
+                {% if page_num < total_pages|add:"-2" %}
+                    {% if page_num < total_pages|add:"-3" %}
+                        <li class="disabled"><span>...</span></li>
+                    {% endif %}
+                    <li>
+                        <a href="javascript:void(0);"
+                           data-page="{{ total_pages }}"
+                           class="posts-pagination-link"
+                           onclick="handlePostsPagination({{ total_pages }})">{{ total_pages }}</a>
+                    </li>
+                {% endif %}
+
+            {% endwith %}
+
+            {% if posts_to_display.has_next %}
+                <li class="next">
+                    <a href="javascript:void(0);"
+                       data-page="{{ posts_to_display.next_page_number }}"
+                       class="posts-pagination-link icon icon-arrow-right-after text-replace"
+                       onclick="handlePostsPagination({{ posts_to_display.next_page_number }})">下一页</a>
+                </li>
+            {% endif %}
+        </ul>
+    </nav>
+{% endif %}

@@ -1,0 +1,29 @@
+<!-- templates/blog/streams/audio_block.html -->
+{% if value %}
+<div class="custom-audio-block-wrapper">
+
+    {# 1. 音频播放器 #}
+    <div class="custom-audio-player-container">
+        <audio controls preload="metadata" style="width: 100%;">
+            {# 修正: 使用 value.url 并且硬编码 type 属性来避免错误 #}
+            <source src="{{ value.url }}" type="audio/mpeg">
+            <p>你的浏览器不支持音频播放。 <a href="{{ value.url }}">点击这里下载文件</a></p>
+        </audio>
+    </div>
+
+    {# 2. 音频标题 (移到播放器下方) #}
+    {% if value.title %}
+        <h4 class="custom-audio-title">
+            <i class="fa fa-music" aria-hidden="true"></i>
+            {{ value.title }}
+        </h4>
+    {% endif %}
+
+</div>
+{% else %}
+    {# 音频文件不存在时的占位符 #}
+    <div class="audio-placeholder">
+        <i class="fa fa-music fa-3x"></i>
+        <p>音频文件不可用</p>
+    </div>
+{% endif %}

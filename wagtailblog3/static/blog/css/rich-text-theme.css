@@ -1,0 +1,100 @@
+/*
+ * =================================================================
+ * 文件: rich-text-theme.css (最终修复版)
+ * 描述: 通过 revert 关键字从根源解决全局样式冲突，实现完美的 GitHub 风格。
+ * =================================================================
+*/
+
+/* --- 基础和根容器 --- */
+ .content-block-wrapper[data-block-type="rich_text"] {
+    -ms-text-size-adjust: 100%;
+    -webkit-text-size-adjust: 100%;
+    color: #24292e;
+    background-color: #ffffff;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+    font-size: 16px;
+    line-height: 1.6;
+    word-wrap: break-word;
+}
+
+/* --- 通用元素间距 --- */
+ .content-block-wrapper[data-block-type="rich_text"] p,
+ .content-block-wrapper[data-block-type="rich_text"] blockquote,
+ .content-block-wrapper[data-block-type="rich_text"] ul,
+ .content-block-wrapper[data-block-type="rich_text"] ol,
+ .content-block-wrapper[data-block-type="rich_text"] pre,
+ .content-block-wrapper[data-block-type="rich_text"] hr {
+    margin-top: 0;
+    margin-bottom: 16px;
+}
+
+/* --- 标题 --- */
+ .content-block-wrapper[data-block-type="rich_text"] h1,
+ .content-block-wrapper[data-block-type="rich_text"] h2,
+ .content-block-wrapper[data-block-type="rich_text"] h3,
+ .content-block-wrapper[data-block-type="rich_text"] h4,
+ .content-block-wrapper[data-block-type="rich_text"] h5,
+ .content-block-wrapper[data-block-type="rich_text"] h6 {
+    margin-top: 24px;
+    margin-bottom: 16px;
+    font-weight: 600;
+    line-height: 1.25;
+}
+ .content-block-wrapper[data-block-type="rich_text"] h1 { font-size: 2em; padding-bottom: .3em; border-bottom: 1px solid #eaecef; }
+ .content-block-wrapper[data-block-type="rich_text"] h2 { font-size: 1.5em; padding-bottom: .3em; border-bottom: 1px solid #eaecef; }
+ .content-block-wrapper[data-block-type="rich_text"] h3 { font-size: 1.25em; }
+ .content-block-wrapper[data-block-type="rich_text"] h4 { font-size: 1em; }
+ .content-block-wrapper[data-block-type="rich_text"] h5 { font-size: .875em; }
+ .content-block-wrapper[data-block-type="rich_text"] h6 { font-size: .85em; color: #6a737d; }
+
+/* --- [核心修复] 列表样式 --- */
+ .content-block-wrapper[data-block-type="rich_text"] ul,
+ .content-block-wrapper[data-block-type="rich_text"] ol {
+    /* 使用 revert 关键字来撤销 style.css 中所有霸道的全局重置，恢复浏览器默认样式 */
+    padding: revert;
+    margin: revert;
+    list-style: revert;
+
+    /* 在恢复默认值的基础上，再应用我们需要的样式 */
+    margin-bottom: 16px;
+    padding-left: 2em; /* 经典的列表缩进 */
+}
+
+/* 再次明确列表项符号类型 */
+ .content-block-wrapper[data-block-type="rich_text"] ul { list-style-type: disc; }
+ .content-block-wrapper[data-block-type="rich_text"] ol { list-style-type: decimal; }
+ .content-block-wrapper[data-block-type="rich_text"] li > p { margin-bottom: 0; }
+ .content-block-wrapper[data-block-type="rich_text"] li + li { margin-top: .25em; }
+
+/* 嵌套列表样式 */
+ .content-block-wrapper[data-block-type="rich_text"] ul ul,
+ .content-block-wrapper[data-block-type="rich_text"] ol ol {
+    margin-top: 0;
+    margin-bottom: 0;
+}
+ .content-block-wrapper[data-block-type="rich_text"] ul ul { list-style-type: circle; }
+ .content-block-wrapper[data-block-type="rich_text"] ol ol { list-style-type: lower-alpha; }
+
+/* --- 其他元素样式 --- */
+ .content-block-wrapper[data-block-type="rich_text"] a { color: #0366d6; text-decoration: none; }
+ .content-block-wrapper[data-block-type="rich_text"] a:hover { text-decoration: underline; }
+ .content-block-wrapper[data-block-type="rich_text"] blockquote { padding: 0 1em; color: #6a737d; border-left: .25em solid #dfe2e5; }
+ .content-block-wrapper[data-block-type="rich_text"] hr { height: .25em; padding: 0; background-color: #e1e4e8; border: 0; }
+ .content-block-wrapper[data-block-type="rich_text"] img { max-width: 100%; box-sizing: content-box; background-color: #fff; }
+ .content-block-wrapper[data-block-type="rich_text"] code { padding: .2em .4em; margin: 0; font-size: 85%; background-color: rgba(27,31,35,.05); border-radius: 3px; font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace; }
+ .content-block-wrapper[data-block-type="rich_text"] pre { padding: 16px; overflow: auto; font-size: 85%; line-height: 1.45; background-color: #f6f8fa; border-radius: 3px; }
+ .content-block-wrapper[data-block-type="rich_text"] pre code { background-color: transparent; border: 0; padding: 0; margin: 0; }
+ .content-block-wrapper[data-block-type="rich_text"] strong { font-weight: 600; }
+
+/* --- 深色模式适配 (保持不变) --- */
+@media (prefers-color-scheme: dark) {
+     .content-block-wrapper[data-block-type="rich_text"] { color: #c9d1d9; background-color: #0d1117; }
+     .content-block-wrapper[data-block-type="rich_text"] a { color: #58a6ff; }
+     .content-block-wrapper[data-block-type="rich_text"] h1,
+     .content-block-wrapper[data-block-type="rich_text"] h2 { border-bottom-color: #21262d; }
+     .content-block-wrapper[data-block-type="rich_text"] blockquote { color: #8b949e; border-left-color: #30363d; }
+     .content-block-wrapper[data-block-type="rich_text"] code { background-color: rgba(110,118,129,0.4); }
+     .content-block-wrapper[data-block-type="rich_text"] pre { background-color: #161b22; }
+     .content-block-wrapper[data-block-type="rich_text"] hr { background-color: #30363d; }
+     .content-block-wrapper[data-block-type="rich_text"] img { background-color: #0d1117; }
+}

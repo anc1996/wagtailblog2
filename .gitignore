@@ -1,0 +1,33 @@
+# 敏感环境配置文件（必须忽略！）
+.env
+
+# Python 编译文件
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Wagtail/Django 静态文件与上传媒体
+# 通常这些在生产环境生成，不需要进版本库
+staticfiles_collected/
+/media/
+/static/
+
+# 运行时的 Socket 和 PID 文件（你目录里那两个）
+*.sock
+*.pid
+
+# 日志文件
+/logs/
+*.log
+
+# 数据库 (如果是本地开发的 sqlite)
+*.sqlite3
+
+# 操作系统与 IDE 文件
+.DS_Store
+.vscode/
+.idea/
+
+# 刚才提到的中文说明书文件夹（如果你还没改名）
+# 如果你想保留它，就不要加下面这一行
+''$'\350\257\264\346\230\216\344\271\246'

@@ -1,0 +1,90 @@
+{# templates/blog/author_detail.html #}
+
+{% extends "base.html" %}
+{% load static wagtailcore_tags wagtailimages_tags archive_tags %}
+
+{% block title %}{{ author.name }} - 作者详情{% endblock %}
+
+{% block content %}
+<div class="sidebar-page-container">
+    <div class="auto-container">
+        <div class="row clearfix">
+
+            <h1>{{ author.name }}-作者</h1>
+            <div class="content-side col-lg-8 col-md-12 col-sm-12">
+                {# ... (作者信息和文章列表) ... #}
+                <div class="blog-single">
+                    <div class="inner-box">
+                        <div class="author-box" style="margin-bottom: 40px; border: 1px solid #eee; padding: 20px; display: flex;">
+                            <div class="author-image" style="margin-right: 20px; flex-shrink: 0;">
+                                {% if author.author_image %}
+                                    {% image author.author_image fill-150x150 as author_img %}
+                                    <img src="{{ author_img.url }}" alt="{{ author.name }}" style="border-radius: 50%;">
+                                {% else %}
+                                    <img src="{% static 'gretzia/images/resource/author-1.jpg' %}" alt="默认头像" style="border-radius: 50%;">
+                                {% endif %}
+                            </div>
+                            <div class="author-info">
+                                <h2>{{ author.name }}</h2>
+                                <div class="text">
+                                    {{ author.bio|linebreaks|default:"这位作者很神秘，什么都没留下..." }}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="related-posts">
+                            <h2>{{ author.name }} 的文章</h2>
+                            <div class="row clearfix">
+                                {% for post in blog_posts %}
+                                    <div class="news-block-three col-lg-6 col-md-6 col-sm-12">
+                                        <div class="inner-box">
+                                            <div class="image">
+                                                {% if post.featured_image %}
+                                                    {% image post.featured_image fill-370x250 as post_img %}
+                                                    <a href="{% pageurl post %}"><img src="{{ post_img.url }}" alt="{{ post.title }}"></a>
+                                                {% else %}
+                                                     <a href="{% pageurl post %}"><img src="{% static 'gretzia/images/resource/news-1.jpg' %}" alt=""></a>
+                                                {% endif %}
+                                            </div>
+                                            <div class="lower-content">
+                                                <ul class="post-meta">
+                                                    <li><span class="fa fa-calendar"></span> {{ post.date|date:"Y-m-d" }}</li>
+                                                </ul>
+                                                <h3><a href="{% pageurl post %}">{{ post.title }}</a></h3>
+                                            </div>
+                                        </div>
+                                    </div>
+                                {% empty %}
+                                    <p class="col-12">这位作者还没有发表任何文章。</p>
+                                {% endfor %}
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+
+            <div class="sidebar-side col-lg-4 col-md-12 col-sm-12">
+                <aside class="sidebar default-sidebar">
+                    {# ... (搜索框) ... #}
+                    <div class="sidebar-widget search-box">
+                        <form method="get" action="{% url 'blog:author_list' %}"> {# <--- 这个是正确的 #}
+                            <div class="form-group">
+                                <input type="search" name="q" value="{{ search_query }}" placeholder="搜索作者姓名...">
+                                <button type="submit"><span class="icon fa fa-search"></span></button>
+                            </div>
+                        </form>
+                    </div>
+
+                    {# ... (分类列表) ... #}
+                    <div class="sidebar-widget category-widget">
+                        <h2>文章归档</h2>
+                        {% archive_sidebar %} {# 使用我们之前修改过的带折叠功能的归档 #}
+                    </div>
+                </aside>
+            </div>
+
+        </div>
+    </div>
+</div>
+{% endblock %}

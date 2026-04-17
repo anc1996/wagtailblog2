@@ -1,0 +1,18 @@
+{# templates/blog/tags/top_tags_sidebar.html #}
+
+{% load wagtailcore_tags %} {# wagtailcore_tags 包含 pageurl #}
+
+
+<h2>热门标签排行</h2>
+<ul class="cat-list">
+    {% if top_tags and blog_tag_index_page %}
+        {% for tag in top_tags %}
+            <li>
+                {# 使用 pageurl 获取 BlogTagIndexPage 的 URL，并附加 tag slug #}
+                <a href="{% pageurl blog_tag_index_page %}?tag={{ tag.slug }}">{{ tag.name }} <span>({{ tag.num_times }})</span></a>
+            </li>
+        {% endfor %}
+    {% else %}
+         <li><a href="#">暂无热门标签</a></li>
+    {% endif %}
+</ul>

@@ -1,0 +1,683 @@
+/* wagtailblog3/static/blog/css/blog.css */
+
+/* =========================================
+   1. 全局基础与 Hero 区域
+   ========================================= */
+.blog-hero {
+    position: relative;
+    background: linear-gradient(135deg, #2c3e50 0%, #4ca1af 100%);
+    color: white;
+    padding: 5rem 0;
+    margin-bottom: 2rem;
+    overflow: hidden;
+}
+.blog-hero::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0, 0, 0, 0.4);
+    z-index: 1;
+}
+.blog-hero-content {
+    position: relative;
+    z-index: 2;
+    text-align: center;
+}
+.blog-title {
+    font-size: 3.2rem;
+    margin-bottom: 1.5rem;
+    font-weight: 700;
+    text-shadow: 2px 2px 8px rgba(0, 0, 0, 0.6);
+    font-family: 'Playfair Display', serif;
+}
+.blog-meta {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 2rem;
+    margin-top: 1.5rem;
+    font-size: 1.1rem;
+    opacity: 0.9;
+}
+.blog-meta i {
+    margin-right: 5px;
+    color: #ffd700;
+}
+.blog-intro {
+    font-size: 1.2rem;
+    margin: 1.5rem auto;
+    max-width: 900px;
+    line-height: 1.6;
+    opacity: 0.95;
+}
+.blog-featured-image {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    object-fit: cover;
+    z-index: 0;
+}
+.hero-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 20px;
+}
+
+/* =========================================
+   2. 布局容器 (移动端优先默认)
+   ========================================= */
+.full-width-container {
+    max-width: 95%;
+    width: 1800px;
+    margin: 0 auto;
+    padding: 0 15px;
+}
+
+.blog-layout-container {
+    display: flex;
+    gap: 30px;
+    align-items: flex-start;
+    margin-bottom: 3rem;
+    position: relative;
+    flex-direction: column;
+}
+
+.blog-center-column {
+    flex-grow: 1;
+    min-width: 0;
+    width: 100%;
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+    overflow: hidden;
+}
+
+.article-scroll-container {
+    height: auto;
+    overflow-y: visible;
+    padding: 0;
+    position: relative;
+    scroll-behavior: smooth;
+    max-height: none !important;
+}
+
+.article-body-content {
+    background: white;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+}
+
+.blog-comments-section {
+    border-top: 1px solid #eee;
+    padding: 30px 50px;
+    background: #fafafa;
+    margin-top: 30px;
+    border-radius: 8px;
+}
+
+/* =========================================
+   3. 左侧侧边栏 (TOC)
+   ========================================= */
+.blog-sidebar-left {
+    width: 260px;
+    flex-shrink: 0;
+    position: sticky;
+    top: 20px;
+    z-index: 10;
+    display: none;
+}
+
+/* =========================================
+   H1 级别目录特殊样式
+   ========================================= */
+
+/* H1 目录项整体样式 */
+.toc-item-h1 {
+  margin-top: 12px;  /* 增加上边距，与其他项区分 */
+  margin-bottom: 8px;
+  padding-top: 12px;
+  border-top: 2px solid #e0e0e0;  /* 顶部分隔线 */
+}
+
+/* 第一个 H1 不需要顶部边距和分隔线 */
+.toc-item-h1:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
+/* H1 的链接样式 */
+.toc-item-h1 > .toc-entry > .toc-link {
+  font-size: 15px;  /* 比默认 14px 大一点 */
+  font-weight: 700;  /* 加粗 */
+  color: #333;  /* 更深的颜色 */
+  padding: 6px 8px 6px 2px;  /* 稍大的内边距 */
+  border-left-width: 4px;  /* 更粗的左边框 */
+}
+
+/* H1 链接 hover 状态 */
+.toc-item-h1 > .toc-entry > .toc-link:hover {
+  background-color: #f0f4ff;  /* 稍微不同的 hover 背景色 */
+  color: #0066cc;  /* 更深的蓝色 */
+}
+
+/* H1 链接 active 状态 */
+.toc-item-h1 > .toc-entry > .toc-link.active {
+  color: #0066cc;
+  font-weight: 700;
+  background-color: #e0ebff;  /* 更深的激活背景色 */
+  border-left-color: #0066cc;
+}
+
+/* H1 的折叠图标样式 */
+.toc-item-h1 > .toc-entry > .toc-toggle {
+  color: #333;  /* 更深的图标颜色 */
+  font-size: 13px;  /* 稍大的图标 */
+}
+
+/* H1 子菜单（h2）的样式调整 */
+.toc-item-h1 > .toc-sub-menu {
+  margin-top: 6px;
+  padding-left: 18px;  /* 比普通子菜单稍大的缩进 */
+  border-left-width: 2px;  /* 更粗的左边框 */
+  border-left-color: #d0d0d0;
+}
+
+.toc-wrapper {
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+    padding: 15px 10px;
+    max-height: 85vh;
+    overflow-y: auto;
+}
+
+.toc-header {
+    font-size: 14px;
+    font-weight: 600;
+    color: #999;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+    padding-left: 10px;
+}
+
+.toc-list, .toc-sub-menu {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.toc-sub-menu {
+    padding-left: 16px;
+    display: block;
+    border-left: 1px solid #f0f0f0;
+    margin-left: 7px;
+}
+
+.toc-entry {
+    display: flex;
+    align-items: flex-start;
+    padding: 2px 0;
+    border-radius: 4px;
+    transition: background-color 0.2s;
+}
+.toc-entry:hover {
+    background-color: #f5f5f5;
+}
+
+.toc-toggle {
+    width: 20px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: #999;
+    font-size: 12px;
+    flex-shrink: 0;
+    transition: transform 0.2s ease, color 0.2s;
+    margin-top: 2px;
+}
+.toc-toggle:hover {
+    color: #333;
+}
+.toc-toggle.placeholder {
+    cursor: default;
+    opacity: 0;
+}
+.toc-toggle i {
+    transition: transform 0.2s ease;
+    transform: rotate(0deg);
+}
+
+.toc-link {
+    flex-grow: 1;
+    display: block;
+    padding: 4px 8px 4px 2px;
+    color: #555;
+    text-decoration: none;
+    font-size: 14px;
+    line-height: 1.5;
+    cursor: pointer;
+    border-left: 3px solid transparent;
+    transition: all 0.2s;
+    white-space: normal;
+    word-break: break-word;
+    overflow: visible;
+    text-overflow: clip;
+}
+.toc-link:hover {
+    background-color: #f5f7fa;
+    color: #007bff;
+}
+.toc-link.active {
+    color: #007bff;
+    font-weight: 600;
+    background-color: #e8f0fe;
+    border-left-color: #007bff;
+}
+.toc-item.active > .toc-entry {
+    background-color: #e8f0fe;
+}
+.toc-item.collapsed > .toc-sub-menu {
+    display: none;
+}
+.toc-item.collapsed > .toc-entry .toc-toggle i {
+    transform: rotate(-90deg);
+}
+
+/* =========================================
+   4. 右侧侧边栏 (Widgets)
+   ========================================= */
+.blog-sidebar-right {
+    width: 300px;
+    flex-shrink: 0;
+    position: sticky;
+    top: 20px;
+    display: none;
+}
+
+.sidebar-widget {
+    background: #fff;
+    border: 1px solid #eee;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+.widget-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: #333;
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.related-list {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.related-item-small {
+    display: flex;
+    gap: 12px;
+    text-decoration: none;
+    align-items: flex-start;
+}
+
+.related-thumb {
+    width: 60px;
+    height: 60px;
+    flex-shrink: 0;
+    border-radius: 4px;
+    overflow: hidden;
+    background: #eee;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.related-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.related-info h5 {
+    font-size: 14px;
+    margin: 0 0 5px 0;
+    line-height: 1.4;
+    color: #333;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+.related-info .date {
+    font-size: 12px;
+    color: #999;
+}
+.related-item-small:hover h5 {
+    color: #007bff;
+}
+
+.nav-widget {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.nav-btn {
+    display: block;
+    padding: 12px;
+    background: #f8f9fa;
+    border-radius: 6px;
+    text-decoration: none;
+    border: 1px solid #eee;
+    transition: all 0.2s;
+}
+.nav-btn:hover {
+    background: #fff;
+    border-color: #007bff;
+    box-shadow: 0 2px 8px rgba(0,123,255,0.1);
+}
+.nav-btn .label {
+    display: block;
+    font-size: 12px;
+    color: #888;
+    margin-bottom: 4px;
+}
+.nav-btn .title {
+    display: block;
+    font-size: 14px;
+    font-weight: 600;
+    color: #333;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* =========================================
+   5. 用户反应 (Reactions) 按钮
+   ========================================= */
+.reaction-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.reaction-btn {
+    flex: 1 1 45%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 10px;
+    font-size: 14px;
+    border: 1px solid #eee;
+    background-color: #f9f9f9;
+    color: #666;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    outline: none;
+    box-shadow: none;
+}
+.reaction-btn i {
+    font-size: 16px;
+    color: #888;
+    transition: color 0.2s;
+}
+.reaction-btn:hover {
+    background-color: #f0f0f0;
+    border-color: #ddd;
+    transform: translateY(-2px);
+}
+.reaction-btn.active {
+    background-color: #e8f0fe;
+    border-color: #007bff;
+    color: #007bff;
+    font-weight: 600;
+}
+.reaction-btn.active i {
+    color: #007bff;
+    animation: bounce 0.4s ease;
+}
+
+@keyframes bounce {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.3); }
+    100% { transform: scale(1); }
+}
+
+/* =========================================
+   6. 移动端/小屏适配 (Max 1100px)
+   ========================================= */
+@media (max-width: 1100px) {
+    .blog-sidebar-left,
+    .blog-sidebar-right {
+        display: none !important;
+    }
+
+    .blog-center-column {
+        width: 100%;
+        border-radius: 0;
+        box-shadow: none;
+        background: transparent;
+    }
+
+    #mobile-interactions-placeholder {
+        margin-top: 30px;
+    }
+
+    /* 移动端隐藏悬浮触发条 */
+    .zen-trigger {
+        display: none !important;
+    }
+}
+
+/* =========================================
+   7. PC端 Grid 布局 & Zen Mode (Min 992px)
+   ========================================= */
+@media (min-width: 992px) {
+    .blog-sidebar-left,
+    .blog-sidebar-right {
+        display: block;
+    }
+
+    /* Grid 布局 */
+    .blog-layout-container {
+        display: grid;
+        grid-template-columns: 17rem minmax(0, 1fr) 20rem;
+        gap: 2rem;
+        width: 100%;
+        margin: 0 auto;
+        padding: 0;
+        align-items: stretch;
+        transition: grid-template-columns 0.4s cubic-bezier(0.25, 0.8, 0.25, 1);
+    }
+
+    .blog-center-column {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        width: 100%;
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+    }
+
+    .article-scroll-container {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        height: 80vh;
+        overflow-y: auto;
+        padding: 40px 50px;
+    }
+    .article-scroll-container::-webkit-scrollbar {
+        width: 6px;
+    }
+    .article-scroll-container::-webkit-scrollbar-track {
+        background: #f1f1f1;
+    }
+    .article-scroll-container::-webkit-scrollbar-thumb {
+        background: #c1c1c1;
+        border-radius: 3px;
+    }
+    .article-scroll-container::-webkit-scrollbar-thumb:hover {
+        background: #a8a8a8;
+    }
+
+    .article-body-content {
+        flex: 1;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        padding: 0;
+        box-shadow: none;
+        background: transparent;
+    }
+
+    .content-blocks {
+        flex: 1;
+    }
+
+    .blog-comments-section {
+        margin-top: 0;
+    }
+
+    /* 侧栏 Sticky */
+    .toc-wrapper,
+    .sidebar-scroll-area {
+        position: sticky;
+        top: 6rem;
+        max-height: calc(100vh - 8rem);
+        overflow-y: auto;
+        padding-right: 5px;
+        scrollbar-width: thin;
+        scrollbar-color: #ccc transparent;
+    }
+    .toc-wrapper::-webkit-scrollbar,
+    .sidebar-scroll-area::-webkit-scrollbar {
+        width: 4px;
+    }
+    .toc-wrapper::-webkit-scrollbar-thumb,
+    .sidebar-scroll-area::-webkit-scrollbar-thumb {
+        background-color: #ccc;
+        border-radius: 4px;
+    }
+
+    /* ===== Zen Mode 折叠状态 ===== */
+    .blog-layout-container.hide-sidebar-left {
+        grid-template-columns: 0 minmax(0, 1fr) 20rem;
+    }
+    .blog-layout-container.hide-sidebar-right {
+        grid-template-columns: 17rem minmax(0, 1fr) 0;
+    }
+    .blog-layout-container.hide-sidebar-left.hide-sidebar-right {
+        grid-template-columns: 0 minmax(0, 1fr) 0;
+    }
+
+    /* 隐藏侧栏的过渡 */
+    .blog-layout-container.hide-sidebar-left #sidebar-left,
+    .blog-layout-container.hide-sidebar-right #sidebar-right {
+        opacity: 0;
+        visibility: hidden;
+        overflow: hidden;
+        pointer-events: none;
+    }
+
+    /* ===== 统一悬浮触发条 ===== */
+    .zen-trigger {
+        position: fixed;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 22px;
+        height: 90px;
+        background: rgba(255, 255, 255, 0.95);
+        border: 1px solid rgba(0, 0, 0, 0.08);
+        box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        z-index: 1000;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        opacity: 1;
+        pointer-events: auto;
+    }
+
+    .zen-trigger.left {
+        left: 0;
+        border-radius: 0 8px 8px 0;
+        border-left: none;
+    }
+
+    .zen-trigger.right {
+        right: 0;
+        border-radius: 8px 0 0 8px;
+        border-right: none;
+    }
+
+    .zen-trigger i {
+        font-size: 14px;
+        color: #888;
+        transition: all 0.3s ease;
+    }
+
+    /* Hover 效果 */
+    .zen-trigger:hover {
+        width: 30px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border-color: transparent;
+        box-shadow: 0 4px 20px rgba(102, 126, 234, 0.4);
+    }
+    .zen-trigger:hover i {
+        color: white;
+    }
+
+    /* 图标方向：默认指向边缘（收缩） */
+    .zen-trigger.left i {
+        transform: rotate(0deg);
+    }
+    .zen-trigger.right i {
+        transform: rotate(0deg);
+    }
+
+    /* 收缩后：图标指向中间（展开） */
+    body.zen-left-hidden .zen-trigger.left i {
+        transform: rotate(180deg);
+    }
+    body.zen-right-hidden .zen-trigger.right i {
+        transform: rotate(180deg);
+    }
+
+    /* 收缩时的视觉强调 */
+    body.zen-left-hidden .zen-trigger.left,
+    body.zen-right-hidden .zen-trigger.right {
+        background: rgba(102, 126, 234, 0.08);
+        border-color: rgba(102, 126, 234, 0.15);
+    }
+    body.zen-left-hidden .zen-trigger.left i,
+    body.zen-right-hidden .zen-trigger.right i {
+        color: #667eea;
+    }
+
+    /* 首次提示动画 */
+    @keyframes pulse-hint {
+        0%, 100% {
+            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+        }
+        50% {
+            box-shadow: 0 2px 20px rgba(102, 126, 234, 0.35);
+        }
+    }
+    .zen-trigger.hint-animation {
+        animation: pulse-hint 1.5s ease-in-out 3;
+    }
+}

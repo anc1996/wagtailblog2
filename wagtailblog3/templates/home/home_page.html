@@ -1,0 +1,219 @@
+{# templates/home/home_page.html #}
+
+{% extends "base.html" %}
+{% load wagtailcore_tags wagtailimages_tags blog_tags static archive_tags  %} {# 新增 archive_tags #}
+
+{% block body_class %}home-page{% endblock %}
+
+{% block content %}
+<!--获取homepage目录下的BlogIndexPage并渲染轮播-->
+<section class="main-slider style-two">
+    <div class="auto-container">
+
+        {#  获取BlogIndexPage的所有实例，轮播 #}
+        <div class="single-item-carousel owl-carousel owl-theme">
+            {% if blog_indexs %}
+                {% for blog_index in blog_indexs %}
+                <!--Slide-->
+                <div class="slide">
+                    <figure class="image">
+                        {% if blog_index.featured_image %}
+                            {% image blog_index.featured_image fill-800x400 alt=blog_index.title %}
+                        {% else %}
+                            <img src="{% static 'gretzia/images/resource/slide-1.jpg' %}" alt="{{ blog_index.title }}" />
+                        {% endif %}
+                    </figure>
+                    <div class="overlay-box">
+                        <div class="overlay-inner">
+                            <div class="content">
+                                <div class="title">
+                                    <a href="{% pageurl blog_index %}" class="badge badge-primary">博客专栏</a>
+                                </div>
+                                <h2>
+                                    <a href="{% pageurl blog_index %}">{{ blog_index.title }}</a>
+                                </h2>
+                                <div class="text">
+                                    {% if blog_index.intro %}
+                                        {{ blog_index.intro|richtext|striptags|truncatechars:100 }}
+                                    {% else %}
+                                        探索 {{ blog_index.title }} 中的精彩内容
+                                    {% endif %}
+                                </div>
+                                <a href="{% pageurl blog_index %}" class="theme-btn btn-style-one">阅读全文</a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            {% endif %}
+        </div>
+    </div>
+</section>
+
+
+<div class="sidebar-page-container">
+    <div class="auto-container">
+        <div class="row clearfix">
+
+            <!--内容-->
+            <div class="content-side col-lg-8 col-md-8 col-sm-12 col-xs-12">
+
+                <div class="content-inner">
+
+                    <!--主页标题-->
+                    <div class="sec-title">
+                        <h2>{{ page.title }}</h2>
+                        <div class="post-date">{{ page.date }}</div>
+                    </div>
+
+                    <!--主页详情页-->
+                    <div class="news-detail">
+                        <div class="inner-box">
+                            <div class="single-item-carousel owl-carousel owl-theme">
+                                <div class="image">
+                                    {% if page.banner_image %}
+                                        {# 性能优化: 使用 webp #}
+                                        {% image page.banner_image fill-1200x400 format-webp as banner_img %}
+                                        <img src="{{ banner_img.url }}" alt="{{ page.title }}" class="img-fluid rounded" />
+                                    {% else %}
+                                        <img src="{% static 'gretzia/images/resource/news-6.jpg' %}" alt="{{ page.title }}" class="img-fluid rounded" />
+                                    {% endif %}
+                                </div>
+                            </div>
+                            <div class="fullwidth-content">
+                                <div class="text">
+                                    {# 显示主页个人文本 #}
+                                    {% if page.hero_text %}
+                                        <p class="hero-text">{{ page.hero_text }}</p>
+                                    {% endif %}
+                                    <blockquote>
+                                        {# 显示 CTA 按钮或链接 #}
+                                        {% if page.hero_cta_link %}
+                                            <a href="{% pageurl page.hero_cta_link %}" class="button hero-cta">
+                                                {# 使用 firstof 来显示 hero_cta 文本，如果为空则显示链接页面的标题 #}
+                                                {% firstof page.hero_cta page.hero_cta_link.title %}
+                                            </a>
+                                        {% elif page.hero_cta %}
+                                            {# 如果没有链接页面，但有 CTA 文本，可以考虑只显示文本或者禁用按钮 #}
+                                             <span class="button hero-cta disabled">{{ page.hero_cta }}</span>
+                                        {% endif %}
+                                    </blockquote>
+                                    <p>{{ page.body| richtext }} {# 显示“简介”和“个人简介”内容 #} </p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="sec-title">
+                        <h2>🔥 热门阅读</h2>
+                        <div class="separator"></div>
+                    </div>
+                    {% if popular_posts %} {# 如果有最热的博客文章 #}
+                    <div class="masonry-items-container row clearfix">
+
+                        {% for post in popular_posts %} {# 遍历最热的博客文章 #}
+                        <!--News Block Two-->
+                        <div class="news-block-two masonry-item col-md-6 col-sm-6 col-xs-12">
+                            <div class="inner-box">
+                                <div class="image">
+                                    {% if post.featured_image %}
+                                        {# 性能优化: 这里的图片在首屏下方，必须开启 lazy loading #}
+                                        {% image post.featured_image fill-400x300 format-webp as post_img %}
+                                        <img src="{{ post_img.url }}"
+                                             alt="{{ post.title }}"
+                                             loading="lazy"
+                                             width="{{ post_img.width }}"
+                                             height="{{ post_img.height }}"
+                                             class="transition-image" />
+                                    {% else %}
+                                        <img src="{% static 'gretzia/images/resource/news-7.jpg' %}" alt="{{ post.title }}" loading="lazy" />
+                                    {% endif %}
+                                </div>
+                                <div class="lower-content">
+                                    {# 显示文章分类（如果有的话） #}
+                                    {% if post.categories.first %}
+                                        <div class="title">
+                                            <a href="{% pageurl post %}">{{ post.categories.first.name }}</a>
+                                        </div>
+                                    {% else %}
+                                        <div class="title">
+                                            <a href="{% pageurl post %}">博客</a>
+                                        </div>
+                                    {% endif %}
+
+                                    <h2><a href="{% pageurl post %}">{{ post.title }}</a></h2>
+
+                                    <div class="post-date">{{ post.date|date:"F d, Y" }}</div>
+
+                                    {# 显示文章简介 #}
+                                    <div class="text">
+                                        {% if post.intro %}
+                                            {{ post.intro|striptags|truncatechars:60 }}
+                                        {% else %}
+                                            {{ post.title }} - 点击阅读更多精彩内容...
+                                        {% endif %}
+                                    </div>
+
+                                    {# 显示访问统计和反应 #}
+                                    {% with view_counts=post.get_view_count reactions=post.get_reactions %}
+                                        {% if view_counts or reactions %}
+                                            <div class="post-stats" style="margin: 15px 0; font-size: 13px; color: #888; border-top: 1px solid #eee; padding-top: 15px;">
+                                                {% if view_counts %}
+                                                    <span style="margin-right: 20px;">
+                                                        <i class="fa fa-eye"></i> {{ view_counts.total }} 次浏览
+                                                    </span>
+                                                {% endif %}
+                                                {% if reactions %}
+                                                    <span>
+                                                        <i class="fa fa-heart"></i>
+                                                        {% for reaction in reactions %}
+                                                            {{ reaction.icon }} {{ reaction.count }}
+                                                        {% endfor %}
+                                                    </span>
+                                                {% endif %}
+                                            </div>
+                                        {% endif %}
+                                    {% endwith %}
+
+                                    <div class="btn-box text-center">
+                                        <a href="{% pageurl post %}" class="theme-btn btn-style-two">阅读更多</a>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+
+                </div>
+            </div>
+
+            {# 您可以在这里添加其他区块，例如标签等 #}
+            <div class="sidebar-side col-lg-4 col-md-4 col-sm-12 col-xs-12">
+                    <aside class="sidebar sticky-top">
+
+                         {# 检查是否存在随机作者 #}
+                        <div class="sidebar-widget about-widget">
+                            {% random_author_sidebar %}
+                            </div>
+
+
+                    	<!-- 标签边框：获取被文章运用最多的前6名标签 -->
+                        <div class="sidebar-widget category-widget">
+                            {% top_tags_sidebar %} {# 这是新的标签 #}
+                        </div>
+
+                        {# --- 新增：文章归档 --- #}
+                        <div class="sidebar-widget category-widget">
+                            <h2>文章归档</h2>
+                            {% archive_sidebar %}
+                        </div>
+                        {# --- 文章归档结束 --- #}
+
+                    </aside>
+                </div>
+
+        </div>
+    </div>
+</div>
+{% endblock %}

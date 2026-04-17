@@ -1,0 +1,243 @@
+{% extends "base.html" %}
+{% load wagtailcore_tags wagtailimages_tags static %}
+
+{% block body_class %}template-formpage thank-you-page{% endblock %}
+
+{% block content %}
+<div class="about-section thank-you-section">
+    <div class="auto-container">
+        <div class="row clearfix">
+
+            <div class="content-side col-lg-8 col-md-8 col-sm-12 col-xs-12">
+                <!-- 页面标题 -->
+                <div class="sec-title centered">
+                    <h2>{{ page.title }}</h2>
+                </div>
+
+                <!-- 特色图片或默认图片 -->
+                <div class="image-container">
+                    {% if page.feature_image %}
+                        <div class="image">
+                            {% image page.feature_image fill-600x400 alt=page.title %}
+                        </div>
+                    {% else %}
+                        <div class="image">
+                            <img src="{% static 'gretzia/images/resource/thank-you.jpg' %}" alt="{{ page.title }}" />
+                        </div>
+                    {% endif %}
+                </div>
+
+                <!-- 感谢内容 -->
+                <div class="content-box">
+                    <div class="text">
+                        {% if page.thank_you_text %}
+                            {{ page.thank_you_text|richtext }}
+                        {% else %}
+                            <div class="default-thank-you-content">
+                                <h3>感谢您的留言！</h3>
+                                <p>我们已经收到您的信息，会在24小时内尽快回复您。您的每一条留言对我们都非常重要，我们会认真对待并及时处理。</p>
+
+                                <div class="highlight-box">
+                                    <div class="icon-box">
+                                        <span class="icon fa fa-check-circle"></span>
+                                    </div>
+                                    <div class="content">
+                                        <h4>提交成功</h4>
+                                        <p>您的留言已成功提交，我们的系统已自动记录并将通知相关人员处理。</p>
+                                    </div>
+                                </div>
+
+                                <div class="additional-info">
+                                    <h4>接下来您可以：</h4>
+                                    <div class="info-list">
+                                        <div class="info-item">
+                                            <span class="number">1</span>
+                                            <div class="content">
+                                                <h5>浏览更多内容</h5>
+                                                <p>继续浏览我们的博客文章，获取更多有价值的信息。</p>
+                                            </div>
+                                        </div>
+                                        <div class="info-item">
+                                            <span class="number">2</span>
+                                            <div class="content">
+                                                <h5>关注我们</h5>
+                                                <p>通过社交媒体关注我们，获取最新更新和资讯。</p>
+                                            </div>
+                                        </div>
+                                        <div class="info-item">
+                                            <span class="number">3</span>
+                                            <div class="content">
+                                                <h5>订阅通知</h5>
+                                                <p>如果您有紧急事务需要处理，请直接通过邮件联系我们。</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        {% endif %}
+
+                        <!-- 操作按钮 -->
+                        <div class="action-links">
+                            <a href="/" class="theme-btn btn-style-one">
+                                <span class="txt">返回首页</span>
+                                <span class="icon fa fa-home"></span>
+                            </a>
+                            <a href="#" class="theme-btn btn-style-two">
+                                <span class="txt">浏览博客</span>
+                                <span class="icon fa fa-book"></span>
+                            </a>
+                            <a href="javascript:history.back()" class="theme-btn btn-style-three">
+                                <span class="txt">返回上页</span>
+                                <span class="icon fa fa-arrow-left"></span>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 联系信息卡片 -->
+                <div class="contact-info-section">
+                    <div class="row clearfix">
+
+                        <!-- 邮件联系 -->
+                        <div class="contact-block col-md-4 col-sm-6 col-xs-12">
+                            <div class="inner-box">
+                                <div class="icon-box">
+                                    <span class="icon fa fa-envelope"></span>
+                                </div>
+                                <h4>邮件联系</h4>
+                                <div class="text">
+                                    如有紧急事务，请直接发送邮件至我们的联系邮箱，我们会优先处理。
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 响应时间 -->
+                        <div class="contact-block col-md-4 col-sm-6 col-xs-12">
+                            <div class="inner-box">
+                                <div class="icon-box">
+                                    <span class="icon fa fa-clock-o"></span>
+                                </div>
+                                <h4>响应时间</h4>
+                                <div class="text">
+                                    我们承诺在24小时内回复您的留言，工作日期间通常在4小时内响应。
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 社交媒体 -->
+                        <div class="contact-block col-md-4 col-sm-6 col-xs-12">
+                            <div class="inner-box">
+                                <div class="icon-box">
+                                    <span class="icon fa fa-share-alt"></span>
+                                </div>
+                                <h4>关注我们</h4>
+                                <div class="text">
+                                    通过社交媒体平台关注我们，获取最新的文章更新和行业资讯。
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+
+                <!-- 相关文章推荐 -->
+                <div class="related-posts-section">
+                    <div class="sec-title">
+                        <h3>您可能感兴趣的文章</h3>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 页面加载动画 -->
+<script>
+$(document).ready(function() {
+    // 感谢页面淡入效果
+    const $thankYouSection = $('.thank-you-section');
+    if ($thankYouSection.length) {
+        $thankYouSection.css({
+            'opacity': '0',
+            'transform': 'translateY(20px)'
+        });
+
+        setTimeout(() => {
+            $thankYouSection.css({
+                'transition': 'all 0.6s ease-out',
+                'opacity': '1',
+                'transform': 'translateY(0)'
+            });
+        }, 100);
+    }
+
+    // 成功图标动画
+    const $checkIcon = $('.fa-check-circle');
+    if ($checkIcon.length) {
+        setTimeout(() => {
+            $checkIcon.css('animation', 'pulse 0.6s ease-in-out');
+        }, 800);
+    }
+
+    // 按钮悬停效果增强
+    $('.action-links .theme-btn').hover(
+        function() { // Mouse enter
+            $(this).css({
+                'transform': 'translateY(-2px)',
+                'transition': 'transform 0.3s ease'
+            });
+        },
+        function() { // Mouse leave
+            $(this).css('transform', 'translateY(0)');
+        }
+    );
+
+    // CSS 动画定义
+    const styleContent = `
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+            100% { transform: scale(1); }
+        }
+
+        .highlight-box {
+            animation: slideInUp 0.8s ease-out 0.4s both;
+        }
+
+        @keyframes slideInUp {
+            from {
+                transform: translateY(30px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        .info-item {
+            animation: fadeInLeft 0.6s ease-out both;
+        }
+
+        .info-item:nth-child(1) { animation-delay: 0.6s; }
+        .info-item:nth-child(2) { animation-delay: 0.8s; }
+        .info-item:nth-child(3) { animation-delay: 1s; }
+
+        @keyframes fadeInLeft {
+            from {
+                transform: translateX(-20px);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+    `;
+
+    // 将CSS添加到<head>
+    $('<style>').text(styleContent).appendTo('head');
+});
+</script>
+
+{% endblock content %}

@@ -1,0 +1,22 @@
+{% comment %}
+浏览量与反应统计块 - 可在多个页面中引用
+参数:
+- page: 页面对象
+{% endcomment %}
+
+<div class="page-stats">
+    <div class="view-stats">
+        <span title="总访问量"><i class="fas fa-eye"></i> {{ page.specific.get_view_count.total }}次访问</span>
+        <span title="今日访问量">(今日: {{ page.specific.get_view_count.today }})</span>
+    </div>
+
+    <div class="reaction-stats" data-page-id="{{ page.id }}">
+        {% for reaction in page.specific.get_reactions %}
+            {% if reaction.count > 0 %}
+                <span class="reaction-count" title="{{ reaction.name }}">
+                    <i class="{{ reaction.icon }}"></i> {{ reaction.count }}
+                </span>
+            {% endif %}
+        {% endfor %}
+    </div>
+</div>

@@ -1,0 +1,472 @@
+/* static/blog/css/video_blocks.css */
+/* Gretzia风格视频块样式 - 缩略图预览 + 模态框播放 */
+
+/* ==================== 视频块容器基础样式 ==================== */
+.content-block-wrapper[data-block-type="video_block"] {
+    width: 100%;
+    margin: 2.5rem 0;
+    padding: 0;
+    clear: both;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    position: relative;
+}
+
+/* ==================== 视频预览缩略图样式 ==================== */
+.gretzia-video-preview {
+    width: 80%;
+    max-width: 600px;
+    margin: 0 auto;
+    background: #ffffff;
+    border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+    overflow: hidden;
+    transition: all 0.3s ease;
+    cursor: pointer;
+    position: relative;
+}
+
+.gretzia-video-preview:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 15px 40px rgba(0, 0, 0, 0.15);
+}
+
+/* 视频缩略图容器 */
+.gretzia-video-thumbnail {
+    position: relative;
+    width: 100%;
+    border-radius: 12px 12px 0 0;
+    overflow: hidden;
+}
+
+/* 视频背景（缩略图或视频帧） */
+.gretzia-video-background {
+    position: relative;
+    width: 100%;
+    height: 300px;
+    background-color: #000;
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+
+/* 当没有缩略图时显示的视频元素 */
+.gretzia-video-background video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    pointer-events: none;
+}
+
+/* ==================== 播放按钮覆盖层 ==================== */
+.gretzia-video-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.3);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    transition: all 0.3s ease;
+}
+
+.gretzia-video-preview:hover .gretzia-video-overlay {
+    background: rgba(0, 0, 0, 0.5);
+}
+
+/* 播放按钮 */
+.gretzia-play-button {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 28px;
+    margin-bottom: 1rem;
+    transition: all 0.3s ease;
+    box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4);
+}
+
+.gretzia-play-button:hover {
+    transform: scale(1.1);
+    box-shadow: 0 12px 35px rgba(102, 126, 234, 0.6);
+}
+
+.gretzia-play-button i {
+    margin-left: 4px; /* 调整播放图标位置 */
+}
+
+/* 视频信息显示 */
+.gretzia-video-info {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    color: white;
+    font-size: 0.9rem;
+    background: rgba(0, 0, 0, 0.6);
+    padding: 0.5rem 1rem;
+    border-radius: 20px;
+    backdrop-filter: blur(10px);
+}
+
+.gretzia-video-info span {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+}
+
+.gretzia-video-info i {
+    opacity: 0.8;
+}
+
+/* ==================== 视频标题样式 ==================== */
+.gretzia-video-caption {
+    background: #ffffff;
+    padding: 1rem 1.5rem;
+    color: #6c757d;
+    text-align: center;
+    font-style: italic;
+    border-top: 1px solid #e9ecef;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+}
+
+.gretzia-video-preview:hover .gretzia-video-caption {
+    color: #495057;
+}
+
+.gretzia-video-caption i {
+    color: #667eea;
+}
+
+/* 当没有标题时的样式调整 */
+.gretzia-video-preview:not([data-video-title]) .gretzia-video-thumbnail,
+.gretzia-video-preview[data-video-title=""] .gretzia-video-thumbnail {
+    border-radius: 12px;
+}
+
+/* ==================== 视频模态框样式 ==================== */
+.gretzia-video-modal {
+    display: none;
+    position: fixed;
+    z-index: 9999;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.95);
+    backdrop-filter: blur(5px);
+    overflow: hidden;
+}
+
+.gretzia-video-modal.active {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: gretzia-fadeIn 0.3s ease;
+}
+
+/* 模态框内容容器 */
+.gretzia-video-modal-content {
+    position: relative;
+    max-width: 95vw;
+    max-height: 95vh;
+    margin: auto;
+    background: #1a1a1a;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5);
+    animation: gretzia-scaleIn 0.3s ease;
+    cursor: grab;
+    user-select: none;
+    resize: both;
+    min-width: 400px;
+    min-height: 300px;
+}
+
+.gretzia-video-modal-content.dragging {
+    cursor: grabbing;
+}
+
+/* 模态框视频播放器 */
+.gretzia-video-modal video {
+    width: 100%;
+    height: auto;
+    max-width: 90vw;
+    max-height: 80vh;
+    display: block;
+    background: #000;
+    border-radius: 12px 12px 0 0;
+    outline: none;
+}
+
+/* 模态框标题 */
+.gretzia-video-modal-caption {
+    padding: 1rem 1.5rem;
+    background: #1a1a1a;
+    color: #ffffff;
+    text-align: center;
+    font-size: 1rem;
+    border-radius: 0 0 12px 12px;
+    border-top: 1px solid #333;
+}
+
+/* 关闭按钮 */
+.gretzia-video-modal-close {
+    position: absolute;
+    top: 15px;
+    right: 20px;
+    color: white;
+    font-size: 28px;
+    font-weight: bold;
+    cursor: pointer;
+    z-index: 10000;
+    background: rgba(0, 0, 0, 0.7);
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s ease;
+}
+
+.gretzia-video-modal-close:hover {
+    background: rgba(255, 95, 86, 0.8);
+    transform: scale(1.1);
+}
+
+/* 模态框控制栏 */
+.gretzia-video-controls {
+    position: absolute;
+    bottom: 15px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.8);
+    padding: 0.5rem 1rem;
+    border-radius: 25px;
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    color: white;
+    backdrop-filter: blur(10px);
+    opacity: 0;
+    transition: all 0.3s ease;
+}
+
+.gretzia-video-modal-content:hover .gretzia-video-controls {
+    opacity: 1;
+}
+
+.gretzia-video-controls button {
+    background: none;
+    border: none;
+    color: white;
+    font-size: 16px;
+    cursor: pointer;
+    padding: 0.3rem;
+    border-radius: 50%;
+    transition: all 0.2s ease;
+}
+
+.gretzia-video-controls button:hover {
+    background: rgba(255, 255, 255, 0.2);
+    transform: scale(1.1);
+}
+
+/* ==================== 视频占位符样式 ==================== */
+.gretzia-video-placeholder {
+    width: 80%;
+    max-width: 600px;
+    margin: 0 auto;
+    padding: 3rem 2rem;
+    background: #f8f9fa;
+    border-radius: 12px;
+    text-align: center;
+    color: #6c757d;
+    border: 2px dashed #dee2e6;
+}
+
+.gretzia-placeholder-content i {
+    color: #adb5bd;
+    margin-bottom: 1rem;
+}
+
+.gretzia-placeholder-content p {
+    margin: 0.5rem 0;
+    font-size: 1.1rem;
+    font-weight: 500;
+}
+
+.gretzia-placeholder-content small {
+    font-size: 0.9rem;
+    opacity: 0.8;
+}
+
+/* ==================== 动画效果 ==================== */
+@keyframes gretzia-fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes gretzia-scaleIn {
+    from {
+        opacity: 0;
+        transform: scale(0.5);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+/* ==================== 响应式设计 ==================== */
+@media (max-width: 1200px) {
+    .gretzia-video-preview {
+        width: 85%;
+        max-width: 550px;
+    }
+}
+
+@media (max-width: 992px) {
+    .gretzia-video-preview {
+        width: 90%;
+        max-width: 500px;
+    }
+
+    .gretzia-video-background {
+        height: 250px;
+    }
+
+    .gretzia-play-button {
+        width: 70px;
+        height: 70px;
+        font-size: 24px;
+    }
+}
+
+@media (max-width: 768px) {
+    .gretzia-video-preview {
+        width: 95%;
+        border-radius: 8px;
+    }
+
+    .gretzia-video-thumbnail {
+        border-radius: 8px 8px 0 0;
+    }
+
+    .gretzia-video-background {
+        height: 200px;
+    }
+
+    .gretzia-play-button {
+        width: 60px;
+        height: 60px;
+        font-size: 20px;
+    }
+
+    .gretzia-video-caption {
+        padding: 0.75rem 1rem;
+        font-size: 0.9rem;
+    }
+
+    .gretzia-video-info {
+        font-size: 0.8rem;
+        padding: 0.4rem 0.8rem;
+        gap: 0.8rem;
+    }
+}
+
+@media (max-width: 576px) {
+    .gretzia-video-preview {
+        width: 98%;
+        border-radius: 6px;
+    }
+
+    .gretzia-video-background {
+        height: 180px;
+    }
+
+    .gretzia-play-button {
+        width: 50px;
+        height: 50px;
+        font-size: 18px;
+    }
+
+    .gretzia-video-caption {
+        padding: 0.6rem 0.8rem;
+        font-size: 0.85rem;
+    }
+
+    .content-block-wrapper[data-block-type="video_block"] {
+        margin: 1.5rem 0;
+    }
+
+    .gretzia-video-modal-content {
+        min-width: 300px;
+        min-height: 200px;
+    }
+}
+
+/* ==================== 深色模式适配 ==================== */
+@media (prefers-color-scheme: dark) {
+    .gretzia-video-preview,
+    .gretzia-video-caption {
+        background: #2d3748;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+    }
+
+    .gretzia-video-caption {
+        color: #a0aec0;
+        border-top-color: #4a5568;
+    }
+
+    .gretzia-video-preview:hover .gretzia-video-caption {
+        color: #cbd5e0;
+    }
+
+    .gretzia-video-placeholder {
+        background: #2d3748;
+        border-color: #4a5568;
+        color: #a0aec0;
+    }
+}
+
+/* =======================================
+   拖拽与缩放功能增强样式
+   ======================================= */
+
+/* 1. 为模态框头部添加可拖动鼠标指针 */
+.gretzia-modal-header {
+    cursor: move;
+}
+
+/* 2. jQuery UI 缩放手柄样式 */
+.ui-resizable-handle {
+    position: absolute;
+    font-size: 0.1px;
+    display: block;
+    z-index: 9999;
+}
+.ui-resizable-e { cursor: e-resize; width: 7px; right: -5px; top: 0; height: 100%; }
+.ui-resizable-s { cursor: s-resize; height: 7px; bottom: -5px; left: 0; width: 100%; }
+.ui-resizable-n { cursor: n-resize; height: 7px; top: -5px; left: 0; width: 100%; }
+.ui-resizable-w { cursor: w-resize; width: 7px; left: -5px; top: 0; height: 100%; }
+.ui-resizable-se { cursor: se-resize; width: 12px; height: 12px; right: 1px; bottom: 1px; background: transparent; }
+.ui-resizable-sw { cursor: sw-resize; width: 9px; height: 9px; left: -5px; bottom: -5px; }
+.ui-resizable-nw { cursor: nw-resize; width: 9px; height: 9px; left: -5px; top: -5px; }
+.ui-resizable-ne { cursor: ne-resize; width: 9px; height: 9px; right: -5px; top: -5px; }

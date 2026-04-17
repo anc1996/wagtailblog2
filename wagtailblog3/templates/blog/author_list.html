@@ -1,0 +1,137 @@
+{# templates/blog/author_list.html #}
+
+{% extends "base.html" %}
+{% load static wagtailcore_tags wagtailimages_tags blog_tags archive_tags i18n %} {# 确保 blog_tags 和 i18n 已加载 #}
+
+{% block title %}{% translate "Authors List" %}{% endblock %}
+
+
+{% block content %}
+<div class="sidebar-page-container">
+    <div class="auto-container">
+        <div class="row clearfix">
+
+
+            <div class="sidebar-side col-lg-4 col-md-4 col-sm-12 col-xs-12">
+                <aside class="sidebar sticky-top">
+
+                    {# 搜索作者 Widget #}
+                    <div class="sidebar-widget search-box">
+                        <form method="get" action="{% url 'blog:author_list' %}">
+                            <div class="form-group">
+                                <input type="search" name="q" value="{{ search_query|default:'' }}" placeholder="{% translate 'Search Authors...' %}">
+                                <button type="submit"><span class="icon fa fa-search"></span></button>
+                            </div>
+                        </form>
+                    </div>
+
+                    {# 文章归档 Widget #}
+                    {% get_site_root_details as archive_sidebar_site_info %}
+                    {% if archive_sidebar_site_info.page_obj %}
+                        <div class="sidebar-widget category-widget">
+                            <div class="sidebar-title">
+                                <h2>{% translate "Article Archives" %}</h2>
+                            </div>
+                            {% archive_sidebar %}
+                        </div>
+                    {% endif %}
+
+
+                    {# 你可以根据 Gretzia 风格添加更多 widgets，例如： #}
+                    <div class="sidebar-widget popular-tags">
+                        {% top_tags_sidebar %}
+                    </div>
+
+                </aside>
+            </div>
+
+            <div class="content-side col-lg-8 col-md-8 col-sm-12 col-xs-12">
+                <div class="content-inner"> {# 新增一个包装器 #}
+
+                    <!--Page Title-->
+                    <div class="sec-title">
+                        <h2>作者列表</h2>
+                    </div>
+
+                    {% if authors %}
+                    <div class="page-intro-section">
+
+                        {% for author in authors %}
+                         {# 使用 Bootstrap 的行和列 #}
+                            <div class="row clearfix">
+                                {# 左侧图片列 #}
+                                <div class="image-column col-lg-3 col-md-4 col-sm-12">
+                                    <div class="image">
+                                        <a href="{% url 'blog:author_detail' pk=author.pk %}">
+                                            {% if author.author_image %}
+                                                {% image author.author_image fill-200x200 as author_img %}
+                                                <img src="{{ author_img.url }}" alt="{{ author.name }}" style="border-radius: 50%;">
+                                            {% else %}
+                                                {# 提供一个备用的占位图 #}
+                                                <img src="{% static 'gretzia/images/resource/author-thumb-1.jpg' %}" alt="{{ author.name }}" style="border-radius: 50%;">
+                                            {% endif %}
+                                        </a>
+                                    </div>
+                                </div>
+
+                                {# 右侧内容列，使用 Flexbox 进行垂直布局 #}
+                                <div class="column col-lg-9 col-md-8 col-sm-12 d-flex flex-column">
+
+                                    {# <h3> 标签自带外边距，我们用 mb-2 (margin-bottom) 来微调 #}
+                                    <h3 class="mb-2"><a href="{% url 'blog:author_detail' pk=author.pk %}">{{ author.name }}</a></h3>
+
+                                    {# 在简介文本下方增加外边距 mb-3，把它和下方的链接拉开距离 #}
+                                    <div class="text mb-3">
+                                        {# 使用 get_bio_preview_html 并增加字数限制，显示更丰富的预览 #}
+                                        {% if author.get_bio_preview_html %}
+                                             {{ author.get_bio_preview_html|safe }}
+                                        {% else %}
+                                            <p>{% translate "No bio available." %}</p>
+                                        {% endif %}
+                                    </div>
+
+                                    {# 使用 mt-auto (margin-top: auto) 将这个链接推到容器底部，实现“底端对齐” #}
+                                    <a href="{% url 'blog:author_detail' pk=author.pk %}" class="read-more mt-auto">{% translate "View Profile" %} <span class="arrow fa fa-arrow-right"></span></a>
+                                </div>
+                                <p></p>
+                            </div>
+                        {% endfor %}
+
+                        {% if is_paginated %}
+                        <ul class="styled-pagination text-center">
+                            {% if page_obj.has_previous %}
+                                <li><a href="?page={{ page_obj.previous_page_number }}{% if search_query %}&q={{ search_query }}{% endif %}"><span class="fa fa-angle-left"></span></a></li>
+                            {% endif %}
+
+                            {% for num in paginator.page_range %}
+                                {% if page_obj.number == num %}
+                                    <li class="active"><a href="#">{{ num }}</a></li>
+                                {% elif num > page_obj.number|add:'-3' and num < page_obj.number|add:'3' %}
+                                    <li><a href="?page={{ num }}{% if search_query %}&q={{ search_query }}{% endif %}">{{ num }}</a></li>
+                                {% endif %}
+                            {% endfor %}
+
+                            {% if page_obj.has_next %}
+                                <li><a href="?page={{ page_obj.next_page_number }}{% if search_query %}&q={{ search_query }}{% endif %}"><span class="fa fa-angle-right"></span></a></li>
+                            {% endif %}
+                        </ul>
+                        {% endif %}
+                    </div>
+                    {% else %}
+                        <p>没有找到符合条件的作者。</p>
+                    {% endif %}
+
+                </div>
+            </div>
+
+
+
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+
+{% block extra_js %}
+    {{ block.super }}
+{% endblock %}

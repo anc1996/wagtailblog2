@@ -1,0 +1,62 @@
+{% load wagtailadmin_tags %}
+
+<table class="listing">
+    <thead>
+        <tr>
+            <th class="title">
+                <a href="#" class="icon icon-arrow-down-after">标题</a>
+            </th>
+            <th>发布日期</th>
+            <th>作者</th>
+            <th>分类</th>
+            <th>标签</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for post in posts_list %}
+            <tr>
+                <td class="title">
+                    <div class="title-wrapper">
+                        <a href="{% url 'wagtailadmin_pages:edit' post.id %}" title="{{ post.title }}">
+                            {{ post.title }}
+                        </a>
+                    </div>
+                </td>
+                <td>{{ post.date|date:"Y-m-d" }}</td>
+                <td>
+                    {% for author in post.authors.all %}
+                        {{ author.name }}{% if not forloop.last %}, {% endif %}
+                    {% empty %}
+                        <span style="color: #999;">-</span>
+                    {% endfor %}
+                </td>
+                <td>
+                    {% for category in post.categories.all %}
+                        <span class="status-tag primary">{{ category.name }}</span>{% if not forloop.last %} {% endif %}
+                    {% empty %}
+                        <span style="color: #999;">-</span>
+                    {% endfor %}
+                </td>
+                <td>
+                    {% for tag in post.tags.all %}
+                        <span class="status-tag">{{ tag.name }}</span>{% if not forloop.last %} {% endif %}
+                    {% empty %}
+                        <span style="color: #999;">-</span>
+                    {% endfor %}
+                </td>
+            </tr>
+        {% empty %}
+            <tr>
+                <td colspan="5" class="no-results-message">
+                    <p>
+                        {% if is_date_filter_active %}
+                            在选定时间段内没有找到文章。
+                        {% else %}
+                            没有最近发布的文章。
+                        {% endif %}
+                    </p>
+                </td>
+            </tr>
+        {% endfor %}
+    </tbody>
+</table>

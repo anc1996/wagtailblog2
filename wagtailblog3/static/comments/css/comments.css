@@ -1,0 +1,959 @@
+/* comments.css - 修复版本：支持子评论下方显示回复框 */
+
+/* ========== 基础设置 ========== */
+
+/* 隐藏模板元素 */
+.template-hidden {
+    display: none !important;
+}
+
+/* 评论模块的整体容器 */
+.comment-box {
+    margin-top: 40px;
+    padding: 30px;
+    background-color: #fcfcfc;
+    border-radius: 8px;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+}
+
+.comment-box h2 {
+    font-family: 'Montserrat', sans-serif;
+    font-size: 24px;
+    color: #333;
+    margin-bottom: 25px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #eee;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+/* ========== 状态提示组件 ========== */
+
+/* 登录提示样式 */
+.login-prompt {
+    text-align: center;
+    padding: 40px 20px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    margin: 20px 0;
+    border: 1px solid #e9ecef;
+    transition: all 0.3s ease;
+}
+
+.login-prompt:hover {
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    transform: translateY(-2px);
+}
+
+.login-prompt-icon {
+    margin-bottom: 20px;
+    color: #6c757d;
+    animation: float 3s ease-in-out infinite;
+}
+
+.login-prompt-title {
+    color: #495057;
+    margin-bottom: 12px;
+    font-weight: 500;
+    font-size: 1.1em;
+}
+
+.login-prompt-text {
+    color: #6c757d;
+    margin-bottom: 20px;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+/* 暂无评论样式 */
+.no-comments {
+    text-align: center;
+    padding: 40px 20px;
+    color: #888;
+    border: 2px dashed #eee;
+    border-radius: 8px;
+    margin: 20px 0;
+    background: #fafafa;
+}
+
+.no-comments-icon {
+    margin-bottom: 15px;
+    color: #ccc;
+    animation: pulse 2s ease-in-out infinite;
+}
+
+.no-comments p {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 500;
+}
+
+/* ========== 加载指示器 ========== */
+
+.comments-loading-indicator,
+.replies-loading-indicator {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    color: #888;
+    font-style: italic;
+    background: #f8f9fa;
+    border-radius: 5px;
+    margin: 10px 0;
+}
+
+.loading-spinner,
+.loading-spinner-small {
+    margin-right: 10px;
+    color: #007bff;
+}
+
+.loading-text {
+    font-size: 14px;
+}
+
+/* 加载动画 */
+.loading-circle {
+    transform-origin: center;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+@keyframes float {
+    0%, 100% { transform: translateY(0px); }
+    50% { transform: translateY(-10px); }
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+/* ========== 消息提示组件 ========== */
+
+.comment-error-message,
+.comment-success-message {
+    display: flex;
+    align-items: center;
+    padding: 12px 16px;
+    border-radius: 6px;
+    margin: 10px 0;
+    font-size: 14px;
+    animation: slideIn 0.3s ease-out;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.comment-error-message {
+    background: #f8d7da;
+    border-left: 4px solid #dc3545;
+    color: #721c24;
+}
+
+.comment-success-message {
+    background: #d4edda;
+    border-left: 4px solid #28a745;
+    color: #155724;
+}
+
+.error-icon,
+.success-icon {
+    margin-right: 10px;
+    flex-shrink: 0;
+}
+
+.error-text,
+.success-text {
+    font-weight: 500;
+}
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* ========== 编辑表单组件 ========== */
+
+.edit-comment-form {
+    background: #f8f9fa;
+    padding: 20px;
+    border-radius: 8px;
+    border: 1px solid #e9ecef;
+    margin: 10px 0;
+    animation: fadeIn 0.3s ease-out;
+}
+
+.edit-comment-form .form-group {
+    margin-bottom: 15px;
+}
+
+.edit-comment-form .edit-textarea {
+    width: 100%;
+    padding: 12px 15px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    font-size: 14px;
+    resize: vertical;
+    min-height: 100px;
+    box-sizing: border-box;
+    transition: border-color 0.2s ease;
+}
+
+.edit-comment-form .edit-textarea:focus {
+    outline: none;
+    border-color: #007bff;
+    box-shadow: 0 0 0 2px rgba(0,123,255,0.25);
+}
+
+.edit-form-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+/* ========== 排序按钮区域 ========== */
+
+.comments-sort-area {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 20px;
+    gap: 10px;
+}
+
+.comments-sort-area .sort-btn {
+    background: #fff;
+    border: 1px solid #ddd;
+    padding: 8px 16px;
+    border-radius: 20px;
+    cursor: pointer;
+    font-size: 14px;
+    color: #666;
+    transition: all 0.3s ease;
+    font-weight: 500;
+}
+
+.comments-sort-area .sort-btn:hover {
+    background: #f8f9fa;
+    border-color: #007bff;
+    color: #007bff;
+    transform: translateY(-1px);
+}
+
+.comments-sort-area .sort-btn.active {
+    background: #007bff;
+    border-color: #007bff;
+    color: #fff;
+    box-shadow: 0 2px 8px rgba(0,123,255,0.3);
+}
+
+/* ========== 单条评论的样式 ========== */
+
+.comment {
+    display: flex;
+    margin-bottom: 25px;
+    padding-bottom: 20px;
+    border-bottom: 1px dashed #f0f0f0;
+    animation: slideInComment 0.5s ease-out;
+}
+
+.comment:last-of-type {
+    border-bottom: none;
+}
+
+.comment .inner-box {
+    display: flex;
+    width: 100%;
+    position: relative;
+}
+
+.comment .image {
+    flex-shrink: 0;
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    overflow: hidden;
+    margin-right: 15px;
+    border: 2px solid #f0f0f0;
+    transition: border-color 0.3s ease;
+}
+
+.comment:hover .image {
+    border-color: #007bff;
+}
+
+.comment .image img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.comment .comment-content-wrapper {
+    flex-grow: 1;
+}
+
+.comment h3 {
+    font-size: 18px;
+    color: #333;
+    margin-bottom: 5px;
+    font-weight: 600;
+}
+
+.comment .comment-meta {
+    font-size: 13px;
+    color: #888;
+    margin-bottom: 10px;
+}
+
+.comment .text {
+    font-size: 15px;
+    line-height: 1.8em;
+    color: #555;
+    margin-bottom: 15px;
+}
+
+/* @用户 标签样式 */
+.replied-to-user {
+    color: #007bff;
+    font-weight: bold;
+    margin-right: 5px;
+    display: inline-block;
+    background: rgba(0,123,255,0.1);
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 0.9em;
+}
+
+/* ========== 评论操作链接 ========== */
+
+.comment-actions-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 15px;
+    font-size: 14px;
+    margin-top: 10px;
+}
+
+.comment-actions-list a {
+    color: #666;
+    text-decoration: none;
+    transition: all 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 8px;
+    border-radius: 4px;
+}
+
+.comment-actions-list a:hover {
+    color: #007bff;
+    background: rgba(0,123,255,0.1);
+}
+
+.comment-actions-list i {
+    margin-right: 5px;
+}
+
+/* 点赞/踩激活状态 */
+.vote-link.active {
+    color: #007bff;
+    background: rgba(0,123,255,0.1);
+}
+
+/* ========== 嵌套评论（回复）样式 ========== */
+
+.comment.nested-comment {
+    margin-left: 70px;
+    border-left: 3px solid #f0f0f0;
+    padding-left: 20px;
+    margin-top: 20px;
+    background: rgba(0,123,255,0.02);
+    border-radius: 0 8px 8px 0;
+}
+
+.comment.nested-comment .image {
+    width: 45px;
+    height: 45px;
+}
+
+.comment.nested-comment h3 {
+    font-size: 16px;
+}
+
+.comment.nested-comment .comment-meta {
+    font-size: 12px;
+}
+
+/* ========== 查看回复按钮 ========== */
+
+.show-replies-btn {
+    background: #f8f8f8;
+    border: 1px solid #ddd;
+    padding: 8px 15px;
+    border-radius: 20px;
+    cursor: pointer;
+    font-size: 13px;
+    margin-top: 15px;
+    display: inline-block;
+    color: #666;
+    transition: all 0.3s ease;
+    font-weight: 500;
+}
+
+.show-replies-btn:hover {
+    background: #e0e0e0;
+    color: #333;
+    transform: translateY(-1px);
+}
+
+/* ========== 评论表单样式 ========== */
+
+.comment-form-template {
+    margin-top: 40px;
+    padding-top: 20px;
+    border-top: 1px solid #eee;
+}
+
+.comment-reply-form {
+    display: flex;
+    align-items: flex-start;
+    gap: 15px;
+    background: #fff;
+    padding: 25px;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    border: 1px solid #e9ecef;
+}
+
+.comment-reply-form .author-image {
+    flex-shrink: 0;
+    width: 60px;
+    height: 60px;
+    overflow: hidden;
+    border-radius: 50%;
+    border: 2px solid #f0f0f0;
+}
+
+.comment-reply-form .author-image img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.comment-reply-form form {
+    flex-grow: 1;
+}
+
+.comment-reply-form .form-group {
+    margin-bottom: 15px;
+}
+
+.comment-reply-form .form-control {
+    width: 100%;
+    padding: 12px 15px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    font-size: 16px;
+    resize: vertical;
+    min-height: 100px;
+    box-sizing: border-box;
+    transition: border-color 0.2s ease;
+}
+
+.comment-reply-form .form-control:focus {
+    outline: none;
+    border-color: #007bff;
+    box-shadow: 0 0 0 2px rgba(0,123,255,0.25);
+}
+
+.comment-form-actions-gretzia {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 15px;
+    margin-top: 10px;
+}
+
+.reply-to-info {
+    font-size: 14px;
+    color: #666;
+    display: flex;
+    align-items: center;
+    margin-right: auto;
+    background: #e9f5ff;
+    padding: 8px 12px;
+    border-radius: 5px;
+    border: 1px solid #b3d9ff;
+}
+
+.reply-to-info #cancel-reply {
+    margin-left: 10px;
+    background: none;
+    border: none;
+    color: #dc3545;
+    cursor: pointer;
+    font-weight: bold;
+    text-decoration: underline;
+    transition: color 0.2s ease;
+}
+
+.reply-to-info #cancel-reply:hover {
+    color: #a71d2a;
+}
+
+/* ========== 通用按钮样式 ========== */
+
+.theme-btn {
+    background-color: #007bff;
+    color: #fff;
+    padding: 10px 20px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 15px;
+    font-weight: 500;
+    transition: all 0.3s ease;
+    text-decoration: none;
+    display: inline-block;
+}
+
+.theme-btn:hover {
+    background-color: #0056b3;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0,123,255,0.3);
+    transition: all 0.2s ease;
+}
+
+.theme-btn:active {
+    transform: translateY(0);
+}
+
+.theme-btn-small {
+    background-color: #6c757d;
+    color: #fff;
+    padding: 6px 12px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: background-color 0.3s ease;
+}
+
+.theme-btn-small:hover {
+    background-color: #5a6268;
+}
+
+/* 加载更多按钮 */
+.load-more-btn {
+    display: block;
+    width: fit-content;
+    margin: 20px auto;
+    background-color: #28a745;
+}
+
+.load-more-btn:hover {
+    background-color: #218838;
+}
+
+/* ========== Markdown 渲染后的样式调整 ========== */
+
+.comment .text p:last-child {
+    margin-bottom: 0;
+}
+
+.comment .text pre {
+    background-color: #f5f5f5;
+    border: 1px solid #ccc;
+    padding: 15px;
+    border-radius: 5px;
+    overflow-x: auto;
+    margin: 15px 0;
+    font-size: 14px;
+}
+
+.comment .text code {
+    font-family: 'Consolas', 'Monaco', monospace;
+    background-color: #f8f8f8;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 0.9em;
+    border: 1px solid #e1e1e1;
+}
+
+.comment .text pre code {
+    background-color: transparent;
+    padding: 0;
+    border: none;
+}
+
+.comment .text ul,
+.comment .text ol {
+    margin-left: 25px;
+    margin-bottom: 15px;
+}
+
+.comment .text blockquote {
+    border-left: 4px solid #007bff;
+    padding-left: 15px;
+    color: #666;
+    margin: 15px 0;
+    font-style: italic;
+    background: #f8f9fa;
+    padding: 10px 15px;
+    border-radius: 0 5px 5px 0;
+}
+
+.comment .text img {
+    max-width: 100%;
+    height: auto;
+    display: block;
+    margin: 15px 0;
+    border-radius: 5px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+/* ========== 响应式设计 ========== */
+
+@media (max-width: 768px) {
+    .comment-box {
+        padding: 20px 15px;
+        margin-top: 20px;
+    }
+
+    .comment {
+        margin-bottom: 20px;
+    }
+
+    .comment .image {
+        width: 50px;
+        height: 50px;
+        margin-right: 12px;
+    }
+
+    .comment.nested-comment {
+        margin-left: 50px;
+        padding-left: 15px;
+    }
+
+    .comment.nested-comment .image {
+        width: 40px;
+        height: 40px;
+    }
+
+    .comment-reply-form {
+        padding: 20px 15px;
+        gap: 12px;
+    }
+
+    .comment-reply-form .author-image {
+        width: 50px;
+        height: 50px;
+    }
+
+    .comment-form-actions-gretzia {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+    }
+
+    .reply-to-info {
+        margin-right: 0;
+        margin-bottom: 10px;
+    }
+}
+
+/* ========== 动画效果 ========== */
+
+@keyframes slideInComment {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* 平滑滚动 */
+html {
+    scroll-behavior: smooth;
+}
+
+
+/* ========== 【核心修复】回复表单容器精确定位 ========== */
+
+/* 一级评论的回复表单容器 */
+.comment > .inner-box > .comment-content-wrapper > .dynamic-reply-form-container {
+    margin-top: 15px;
+    padding: 0;
+    border: none;
+    background: transparent;
+}
+
+/* 【修复】二级评论也需要显示回复表单容器 - 移除之前的 display: none */
+.comment.nested-comment > .inner-box > .comment-content-wrapper > .dynamic-reply-form-container {
+    margin-top: 15px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    /* 不再隐藏！允许在子评论下方显示回复框 */
+}
+
+/* ========== 回复状态视觉反馈 ========== */
+
+/* 正在回复的评论高亮效果 */
+.comment.comment-replying {
+    background: rgba(0, 123, 255, 0.05);
+    border-left: 3px solid #007bff;
+    padding-left: 17px;
+    border-radius: 0 8px 8px 0;
+    transition: all 0.3s ease;
+    box-shadow: 0 2px 8px rgba(0, 123, 255, 0.1);
+}
+
+.comment.nested-comment.comment-replying {
+    background: rgba(0, 123, 255, 0.08);
+    border-left: 3px solid #007bff;
+    margin-left: 67px;
+}
+
+/* ========== 活跃回复表单样式 ========== */
+
+.active-reply-form {
+    margin: 15px 0;
+    padding: 20px;
+    background: #f8f9fa;
+    border: 2px solid #007bff;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 123, 255, 0.15);
+    animation: replyFormSlideIn 0.3s ease-out;
+    position: relative;
+}
+
+.active-reply-form::before {
+    content: "";
+    position: absolute;
+    top: -8px;
+    left: 20px;
+    width: 0;
+    height: 0;
+    border-left: 8px solid transparent;
+    border-right: 8px solid transparent;
+    border-bottom: 8px solid #007bff;
+}
+
+.active-reply-form form {
+    margin: 0;
+}
+
+.active-reply-form .form-group {
+    margin-bottom: 15px;
+}
+
+.active-reply-form .form-control {
+    border: 1px solid #ced4da;
+    border-radius: 5px;
+    padding: 12px 15px;
+    font-size: 14px;
+    resize: vertical;
+    min-height: 80px;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.active-reply-form .form-control:focus {
+    border-color: #007bff;
+    box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.1);
+    outline: none;
+}
+
+.active-reply-form .comment-form-actions-gretzia {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 15px;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.active-reply-form .reply-to-info {
+    background: #e3f2fd;
+    border: 1px solid #90caf9;
+    color: #1565c0;
+    padding: 8px 12px;
+    border-radius: 5px;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.active-reply-form .reply-to-info #cancel-reply {
+    color: #d32f2f;
+    margin-left: 8px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    transition: background-color 0.2s ease;
+}
+
+.active-reply-form .reply-to-info #cancel-reply:hover {
+    background: rgba(211, 47, 47, 0.1);
+}
+
+/* ========== 【新增】嵌套评论中的回复框特殊样式 ========== */
+
+/* 在子评论下方的回复框，稍微调整样式以适应缩进空间 */
+.comment.nested-comment .active-reply-form {
+    margin-left: 0;
+    margin-right: 0;
+    /* 可以根据需要调整子评论下回复框的样式 */
+}
+
+/* 子评论下回复框的箭头位置调整 */
+.comment.nested-comment .active-reply-form::before {
+    left: 15px;
+}
+
+/* ========== 回复表单动画 ========== */
+
+@keyframes replyFormSlideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-20px) scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+/* 回复表单消失动画 */
+.active-reply-form.removing {
+    animation: replyFormSlideOut 0.3s ease-in forwards;
+}
+
+@keyframes replyFormSlideOut {
+    from {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+    to {
+        opacity: 0;
+        transform: translateY(-20px) scale(0.95);
+    }
+}
+
+/* ========== 层级控制 ========== */
+
+/* 确保嵌套评论不会影响父级的表单容器 */
+.comment.nested-comment {
+    position: relative;
+    z-index: 1;
+}
+
+.comment:not(.nested-comment) {
+    position: relative;
+    z-index: 2;
+}
+
+.active-reply-form {
+    position: relative;
+    z-index: 10;
+}
+
+/* ========== 表单按钮组优化 ========== */
+
+.active-reply-form .theme-btn {
+    padding: 8px 16px;
+    font-size: 14px;
+    min-width: 80px;
+}
+
+.active-reply-form .theme-btn-small {
+    padding: 6px 12px;
+    font-size: 12px;
+}
+
+/* ========== 响应式调整 ========== */
+
+@media (max-width: 768px) {
+    .comment.comment-replying {
+        padding-left: 12px;
+        margin-left: -5px;
+    }
+
+    .comment.nested-comment.comment-replying {
+        margin-left: 42px;
+    }
+
+    .active-reply-form {
+        margin: 10px 0;
+        padding: 15px;
+    }
+
+    .active-reply-form .comment-form-actions-gretzia {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .active-reply-form .reply-to-info {
+        margin-bottom: 10px;
+        text-align: center;
+    }
+
+    /* 移动端子评论下的回复框 */
+    .comment.nested-comment .active-reply-form {
+        padding: 12px;
+    }
+}
+
+/* ========== 错误状态样式 ========== */
+
+.active-reply-form.has-error {
+    border-color: #dc3545;
+    box-shadow: 0 4px 12px rgba(220, 53, 69, 0.15);
+}
+
+.active-reply-form.has-error::before {
+    border-bottom-color: #dc3545;
+}
+
+/* ========== 成功提交后的过渡效果 ========== */
+
+.comment.just-added {
+    animation: commentJustAdded 1s ease-out;
+}
+
+@keyframes commentJustAdded {
+    0% {
+        background: rgba(40, 167, 69, 0.1);
+        transform: scale(1.02);
+    }
+    100% {
+        background: transparent;
+        transform: scale(1);
+    }
+}
+
+.login-btn, .theme-btn {
+    cursor: pointer !important;
+    pointer-events: auto !important;
+    position: relative;
+    z-index: 10;
+}

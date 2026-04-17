@@ -1,0 +1,103 @@
+/*
+    文件路径: static/portfolio/css/wagtail_content_style.css
+    作用: 为通过 Wagtail StreamField 渲染的内容提供一套独立的、
+          模仿 Wagtail 后台编辑器的样式，以确保内容的可读性，
+          且不受 Gretzia 主题文字风格的影响。
+*/
+
+.wagtail-content-render {
+    /* 基础排版 */
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+    font-size: 16px;
+    line-height: 1.7;
+    color: #212529; /* 标准的深灰色文字 */
+}
+
+/* 标题 */
+.wagtail-content-render h1,
+.wagtail-content-render h2,
+.wagtail-content-render h3,
+.wagtail-content-render h4,
+.wagtail-content-render h5,
+.wagtail-content-render h6 {
+    font-family: inherit; /* 使用与基础排版相同的字体 */
+    font-weight: 600;
+    line-height: 1.3;
+    color: #121212; /* 标题颜色更深一些 */
+    margin-top: 1.5em;
+    margin-bottom: 0.75em;
+}
+
+.wagtail-content-render h1 { font-size: 2.25em; }
+.wagtail-content-render h2 { font-size: 1.8em; }
+.wagtail-content-render h3 { font-size: 1.5em; }
+.wagtail-content-render h4 { font-size: 1.25em; }
+.wagtail-content-render h5 { font-size: 1.1em; }
+.wagtail-content-render h6 { font-size: 1em; }
+
+
+/* 段落 */
+.wagtail-content-render p {
+    margin-bottom: 1.25em;
+}
+
+/* 链接 */
+.wagtail-content-render a {
+    color: #007bff; /* 标准蓝色链接 */
+    text-decoration: none;
+    transition: all 0.2s ease-in-out;
+}
+
+.wagtail-content-render a:hover {
+    color: #0056b3;
+    text-decoration: underline;
+}
+
+/* 列表 */
+.wagtail-content-render ul,
+.wagtail-content-render ol {
+    margin-bottom: 1.25em;
+    padding-left: 2em;
+}
+
+.wagtail-content-render li {
+    margin-bottom: 0.5em;
+}
+
+/* 引用块 */
+.wagtail-content-render blockquote {
+    font-size: 1.1em;
+    padding: 10px 20px;
+    margin: 0 0 20px;
+    border-left: 5px solid #e9ecef; /* 浅灰色左边框 */
+    color: #6c757d; /* 柔和的文字颜色 */
+    background-color: #f8f9fa; /* 非常浅的背景色 */
+}
+
+.wagtail-content-render blockquote p {
+    margin-bottom: 0;
+}
+
+/* 水平分割线 */
+.wagtail-content-render hr {
+    margin: 2em 0;
+    border: 0;
+    border-top: 1px solid #dee2e6; /* 标准浅灰色分割线 */
+}
+
+/* 行内代码 */
+.wagtail-content-render p > code,
+.wagtail-content-render li > code {
+    padding: .2em .4em;
+    margin: 0;
+    font-size: 85%;
+    background-color: rgba(27,31,35,.05);
+    border-radius: 3px;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
+}
+
+/*
+    注意: 对于 <pre> 中的代码块 (例如来自 MarkdownBlock)，
+    其样式应由您的语法高亮主题 (如 highlighting.css) 单独处理。
+    这可以确保我们不会覆盖语法高亮的主题。
+*/

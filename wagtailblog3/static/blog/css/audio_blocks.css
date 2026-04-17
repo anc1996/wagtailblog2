@@ -1,0 +1,33 @@
+/* static/blog/css/audio_blocks.css */
+
+.custom-audio-block-wrapper {
+    /* 设置一个最大宽度，例如 700px，你可以根据你的喜好调整 */
+    max-width: 700px;
+    width: 95%; /* 在小屏幕上占据更多宽度 */
+    margin: 2rem auto; /* 上下边距，并实现水平居中 */
+    padding: 1.5rem;
+    background-color: #f8f9fa; /* 浅灰色背景 */
+    border-left: 4px solid #0dcaf0; /* 左侧漂亮的强调色边框 (bs-info) */
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+    text-align: center; /* 内部元素居中，包括 audio 和 title */
+}
+
+.custom-audio-player-container audio {
+    /* 确保播放器宽度撑满容器 */
+    width: 100%;
+}
+
+.custom-audio-title {
+    font-size: 1.1em;
+    font-weight: 600;
+    color: #343a40; /* 深灰色文字 */
+    margin-top: 1rem; /* 与播放器的间距 */
+    margin-bottom: 0;
+    text-align: center; /* 标题居中 */
+}
+
+.custom-audio-title .fa-music {
+    margin-right: 0.5rem;
+    color: #0dcaf0; /* 图标颜色与边框匹配 */
+}

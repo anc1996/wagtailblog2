@@ -1,0 +1,106 @@
+<!-- archive/templates/archive/month_archive.html -->
+
+
+{% extends "base.html" %}
+{% load wagtailcore_tags wagtailimages_tags archive_tags blog_tags static %}
+
+{% block body_class %}{{ year }}年{{ month }}月文章归档{% endblock %}
+
+{% block extra_css %}
+    {{ block.super }}
+    <link rel="stylesheet" href="{% static 'blog/css/blog.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="row">
+        <div class="col-md-8">
+            <header>
+                <h1>{{ year }}年{{ month }}月文章归档</h1>
+                <p class="lead">共 {{ total_count }} 篇文章</p>
+            </header>
+
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb">
+                    <li class="breadcrumb-item"><a href="/">首页</a></li>
+                    <li class="breadcrumb-item"><a href="{% url 'archive:year_archive' year %}">{{ year }}年</a></li>
+                    <li class="breadcrumb-item active">{{ month }}月</li>
+                </ol>
+            </nav>
+
+            <!-- 搜索表单 -->
+            <div class="blog-search-filter">
+                <form method="get" action="{% url 'archive:month_archive' year month %}" class="search-filter-form">
+                    <div class="search-input-wrapper">
+                        <input type="text" name="search" value="{{ search_query|default:'' }}"
+                               placeholder="搜索标题..." class="search-input">
+                        <button type="submit" class="search-button">搜索</button>
+                    </div>
+
+                    <div class="filter-actions">
+                        {% if search_query %}
+                            <a href="{% url 'archive:month_archive' year month %}" class="clear-filter-btn">清除筛选</a>
+                        {% endif %}
+                    </div>
+                </form>
+            </div>
+
+            <!-- 搜索结果信息 -->
+            {% if search_query %}
+                <div class="search-results-info">
+                    {% if pages.paginator.count > 0 %}
+                        <p>找到 {{ pages.paginator.count }} 个结果 标题包含 "<strong>{{ search_query }}</strong>"</p>
+                    {% else %}
+                        <p>没有找到标题包含 "{{ search_query }}" 的结果</p>
+                    {% endif %}
+                </div>
+            {% endif %}
+
+            <div class="blog-list">
+                {% for post in pages %}
+                    <article class="blog-item">
+                        <h3><a href="{% pageurl post %}">{{ post.title }}</a></h3>
+
+                        <div class="meta">
+                            <i class="fas fa-calendar"></i> {{ post.date|date:"Y年m月d日" }}
+                            {% include "blog/stats_block.html" with page=post %}
+                        </div>
+
+                        {% if post.featured_image %}
+                            <a href="{% pageurl post %}" class="featured-image-link">
+                                {% image post.featured_image fill-300x200 class="thumbnail" %}
+                            </a>
+                        {% endif %}
+
+                        <div class="intro">{{ post.intro }}</div>
+                        <a href="{% pageurl post %}" class="read-more">阅读更多</a>
+                    </article>
+                {% empty %}
+                    <p>{{ year }}年{{ month }}月没有符合条件的文章。</p>
+                {% endfor %}
+            </div>
+
+            <!-- 分页 -->
+            {% if pages.paginator.num_pages > 1 %}
+            <div class="pagination">
+                <span class="page-info">
+                    第 {{ pages.number }} 页，共 {{ pages.paginator.num_pages }} 页
+                </span>
+
+                {% if pages.has_previous %}
+                    <a href="?page={{ pages.previous_page_number }}{% if search_query %}&search={{ search_query|urlencode }}{% endif %}" class="previous">上一页</a>
+                {% endif %}
+
+                {% if pages.has_next %}
+                    <a href="?page={{ pages.next_page_number }}{% if search_query %}&search={{ search_query|urlencode }}{% endif %}" class="next">下一页</a>
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
+
+        <div class="col-md-4">
+            {% archive_sidebar current_year=year current_month=month %}
+        </div>
+    </div>
+</div>
+{% endblock %}

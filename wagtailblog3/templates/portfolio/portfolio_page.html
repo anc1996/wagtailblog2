@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% load wagtailcore_tags wagtailimages_tags static %}
+
+{% block extra_css %}
+    {# 引用我们之前创建的 wagtail 内容样式文件 #}
+    <link rel="stylesheet" href="{% static 'portfolio/css/wagtail_content_style.css' %}">
+{% endblock %}
+
+{% block content %}
+<!--页面标题-->
+<section class="page-title" style="background-image:url({% static 'gretzia/images/background/2.jpg' %})">
+    <div class="auto-container">
+
+    </div>
+</section>
+<!--页面标题结束-->
+
+<!--主要内容区-->
+<div class="sidebar-page-container">
+    <div class="auto-container">
+
+        <div class="row clearfix">
+            <h1>{{ page.title }}</h1>
+            <!--内容区-->
+            <div class="content-side col-lg-12 col-md-12 col-sm-12">
+                <div class="wagtail-content-render">
+                    {% for block in page.body %}
+                        {% include_block block %}
+                    {% endfor %}
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
+{% endblock %}

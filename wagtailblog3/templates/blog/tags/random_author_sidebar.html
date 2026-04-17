@@ -1,0 +1,25 @@
+{# blog/templates/blog/tags/random_author_sidebar.html #}
+{% load wagtailimages_tags static wagtailcore_tags %}
+
+{% if random_author %}
+<h2><a href="{% url 'blog:author_detail' random_author.pk %}">{{ random_author.name }}</a></h2>
+<div class="inner-box">
+    <div class="image">
+        {% if random_author.author_image %}
+            {% image random_author.author_image fill-300x200 as author_img %}
+            <img src="{{ author_img.url }}" alt="{{ random_author.name }}" />
+        {% else %}
+            <img src="{% static 'gretzia/images/resource/about.jpg' %}" alt="默认头像" />
+        {% endif %}
+    </div>
+    <div class="text">
+        {# 使用新的截断方法显示作者简介 #}
+        {{ random_author.get_bio_preview_html|safe }}
+
+        {# 如果简介被截断，显示"查看更多"链接 #}
+        {% if random_author.bio %}
+            <a href="{% url 'blog:author_detail' random_author.pk %}" class="icon fa fa-arrow-right" aria-label="查看 {{ random_author.name }} 的详情">查看更多...</a>
+        {% endif %}
+    </div>
+</div>
+{% endif %}

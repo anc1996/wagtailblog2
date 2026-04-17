@@ -1,0 +1,190 @@
+{% extends "base.html" %}
+{% load wagtailcore_tags wagtailimages_tags search_tags static %}
+
+{% block body_class %}search-results{% endblock %}
+
+{% block extra_css %}
+    {{ block.super }}
+    <link rel="stylesheet" href="{% static 'search/css/search.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="search-container">
+    <header class="search-header">
+        <h1>搜索</h1>
+    </header>
+
+    <form action="{% url 'search:search' %}" method="get" class="search-form" id="search-form">
+        <div class="search-input-wrapper">
+            <input type="text"
+                   name="query"
+                   value="{% if search_query and search_query != 'None' %}{{ search_query }}{% endif %}"
+                   placeholder="搜索文章、页面..."
+                   class="search-input"
+                   id="search-input"
+                   autocomplete="off" />
+            <div class="suggestions" id="suggestions"></div>
+        </div>
+        <button type="submit" class="search-button">搜索</button>
+
+        <div class="search-advanced-options">
+            <div class="search-filters">
+                <button type="button" class="filter-button {% if search_type == 'all' %}active{% endif %}"
+                        data-type="all">全部</button>
+                <button type="button" class="filter-button {% if search_type == 'blog' %}active{% endif %}"
+                        data-type="blog">博客文章</button>
+                <button type="button" class="filter-button {% if search_type == 'pages' %}active{% endif %}"
+                        data-type="pages">其他页面--标题</button>
+                <input type="hidden" name="type" id="search-type-input" value="{{ search_type|default:'all' }}">
+            </div>
+
+            <div class="date-range-filter">
+                <span class="filter-label">发布时间:</span>
+                <input type="text"
+                       name="start_date"
+                       value="{% if start_date and start_date != 'None' %}{{ start_date }}{% endif %}"
+                       class="date-input flatpickr-input"
+                       id="start-date"
+                       placeholder="开始日期" />
+                <span class="date-separator">至</span>
+                <input type="text"
+                       name="end_date"
+                       value="{% if end_date and end_date != 'None' %}{{ end_date }}{% endif %}"
+                       class="date-input flatpickr-input"
+                       id="end-date"
+                       placeholder="结束日期" />
+            </div>
+
+            <div class="sort-options">
+                <span class="filter-label">排序:</span>
+                <select name="order_by" class="sort-select" id="order-by">
+                    <option value="" {% if not order_by or order_by == 'None' %}selected{% endif %}>相关性</option>
+                    <option value="-date" {% if order_by == '-date' %}selected{% endif %}>最新发布</option>
+                    <option value="date" {% if order_by == 'date' %}selected{% endif %}>最早发布</option>
+                </select>
+            </div>
+
+            <button type="button" id="clear-filters" class="clear-filters-button">清除筛选</button>
+        </div>
+    </form>
+
+    {% if popular_search_terms %}
+    <div class="popular-searches-container">
+        <span class="popular-searches-label">热门搜索：</span>
+        <ul class="popular-search-tags">
+            {% for term_item in popular_search_terms %}
+                <li>
+                    <a href="{% url 'search:search' %}?query={{ term_item.query|urlencode }}&type={{ search_type|default:'all' }}" class="popular-tag">
+                        {{ term_item.query }}
+                    </a>
+                </li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
+    {% if search_query and search_query != 'None' %}
+        <div class="search-results-info">
+            {% if search_results.paginator.count > 0 %}
+                找到 {{ search_results.paginator.count }} 条关于 "<strong>{{ search_query }}</strong>" 的结果
+                {% if start_date and start_date != 'None' or end_date and end_date != 'None' %}
+                <span class="date-filter-info">
+                    {% if start_date and start_date != 'None' %}从 {{ start_date }}{% endif %}
+                    {% if end_date and end_date != 'None' %}到 {{ end_date }}{% endif %}
+                </span>
+                {% endif %}
+            {% else %}
+                未找到关于 "<strong>{{ search_query }}</strong>" 的结果
+            {% endif %}
+        </div>
+    {% endif %}
+
+    <div class="results-list">
+        {% for result in search_results %}
+            <article class="search-result">
+                <h2 class="result-title">
+                    <a href="{% pageurl result %}">{{ result.title|safe }}</a>
+                </h2>
+
+                <div class="result-meta">
+                    <span class="result-type">{{ result|verbose_name }}</span>
+                    {% if result.specific.date %}
+                        <span class="result-date">{{ result.specific.date|date:"Y年m月d日" }}</span>
+                    {% endif %}
+                </div>
+
+                {% if result.specific.intro %}
+                    <div class="result-intro">
+                        {{ result.specific.intro|truncatewords:30 }}
+                    </div>
+                {% endif %}
+
+                <a href="{% pageurl result %}" class="view-result">查看详情 →</a>
+            </article>
+        {% empty %}
+            {% if search_query and search_query != 'None' %}
+                <div class="no-results">
+                    <p>没有找到相关内容</p>
+                    <p>建议：</p>
+                    <ul>
+                        <li>检查拼写是否正确</li>
+                        <li>尝试使用不同的关键词</li>
+                        <li>使用更通用的搜索词</li>
+                        {% if start_date and start_date != 'None' or end_date and end_date != 'None' %}
+                        <li>尝试放宽时间范围限制</li>
+                        {% endif %}
+                    </ul>
+                </div>
+            {% endif %}
+        {% endfor %}
+    </div>
+
+    {% if search_results.has_other_pages %}
+        <nav class="pagination">
+            {% if search_results.has_previous %}
+                <a href="?{% if search_query and search_query != 'None' %}query={{ search_query }}&{% endif %}type={{ search_type }}&page={{ search_results.previous_page_number }}{% if start_date and start_date != 'None' %}&start_date={{ start_date }}{% endif %}{% if end_date and end_date != 'None' %}&end_date={{ end_date }}{% endif %}{% if order_by and order_by != 'None' %}&order_by={{ order_by }}{% endif %}"
+                   class="pagination-button">上一页</a>
+            {% else %}
+                <span class="pagination-button disabled">上一页</span>
+            {% endif %}
+
+            <span class="pagination-info">
+                第 {{ search_results.number }} 页，共 {{ search_results.paginator.num_pages }} 页
+            </span>
+
+            <form method="get" action="{% url 'search:search' %}" class="jump-to-page-form" id="jump-to-page-form-nav">
+                {% if search_query and search_query != 'None' %}<input type="hidden" name="query" value="{{ search_query }}">{% endif %}
+                <input type="hidden" name="type" value="{{ search_type }}">
+                {% if start_date and start_date != 'None' %}<input type="hidden" name="start_date" value="{{ start_date }}">{% endif %}
+                {% if end_date and end_date != 'None' %}<input type="hidden" name="end_date" value="{{ end_date }}">{% endif %}
+                {% if order_by and order_by != 'None' %}<input type="hidden" name="order_by" value="{{ order_by }}">{% endif %}
+
+                <input type="number" name="page" min="1" max="{{ search_results.paginator.num_pages }}"
+                       placeholder="页码" value="{{ search_results.number }}"
+                       aria-label="跳转到页码" class="jump-page-input" required>
+                <button type="submit" class="jump-page-button">跳转</button>
+            </form>
+
+            {% if search_results.has_next %}
+                <a href="?{% if search_query and search_query != 'None' %}query={{ search_query }}&{% endif %}type={{ search_type }}&page={{ search_results.next_page_number }}{% if start_date and start_date != 'None' %}&start_date={{ start_date }}{% endif %}{% if end_date and end_date != 'None' %}&end_date={{ end_date }}{% endif %}{% if order_by and order_by != 'None' %}&order_by={{ order_by }}{% endif %}"
+                   class="pagination-button">下一页</a>
+            {% else %}
+                <span class="pagination-button disabled">下一页</span>
+            {% endif %}
+        </nav>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+    {{ block.super }}
+    <script>
+        const currentSearchQuery = "{% if search_query and search_query != 'None' %}{{ search_query|escapejs }}{% endif %}";
+        const currentSearchType = "{{ search_type|default:'all'|escapejs }}";
+        const currentStartDate = "{% if start_date and start_date != 'None' %}{{ start_date|escapejs }}{% endif %}";
+        const currentEndDate = "{% if end_date and end_date != 'None' %}{{ end_date|escapejs }}{% endif %}";
+        const currentOrderBy = "{% if order_by and order_by != 'None' %}{{ order_by|escapejs }}{% endif %}";
+    </script>
+    <script src="{% static 'js/frontend_datepicker.js' %}"></script>
+    <script src="{% static 'search/js/search.js' %}"></script>
+{% endblock %}

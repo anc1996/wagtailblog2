@@ -1,0 +1,428 @@
+{% extends "base.html" %}
+{% load wagtailcore_tags wagtailimages_tags static blog_tags %}
+
+{% block body_class %}template-formpage{% endblock %}
+
+{% block content %}
+<div class="sidebar-page-container contact-page">
+    <div class="auto-container">
+        <div class="row clearfix">
+
+            <!-- 主内容区域 -->
+            <div class="content-side col-lg-8 col-md-8 col-sm-12 col-xs-12">
+                <div class="content-inner">
+
+                    <!-- 页面标题 -->
+                    <h2>{{ page.title }}</h2>
+
+                    <!-- 特色图片 -->
+                    <div class="image">
+                        {% if page.feature_image %}
+                            {% image page.feature_image fill-600x400 alt=page.title %}
+                        {% else %}
+                            <img src="{% static 'gretzia/images/resource/contact.jpg' %}" alt="{{ page.title }}" />
+                        {% endif %}
+                    </div>
+
+                    <!-- 介绍文本 -->
+                    {% if page.intro %}
+                        <div class="text">{{ page.intro|richtext }}</div>
+                    {% endif %}
+
+                    <!-- 表单区域 -->
+                    <div class="contact-form">
+                        <!-- 表单错误提示 -->
+                        {% if form.non_field_errors %}
+                            <div class="alert alert-danger">
+                                {% for error in form.non_field_errors %}
+                                    <p>{{ error }}</p>
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+
+                        <!-- 表单成功提示 -->
+                        {% if messages %}
+                            {% for message in messages %}
+                                <div class="alert alert-{{ message.tags }}">
+                                    {{ message }}
+                                </div>
+                            {% endfor %}
+                        {% endif %}
+
+                        <!-- 联系表单 -->
+                        <form class="page-form" action="{% pageurl page %}" method="POST" id="contact-form" enctype="multipart/form-data">
+                            {% csrf_token %}
+
+                            <!-- 必填的邮箱字段（固定在最前面） -->
+                            <div class="form-group required-email-group">
+                                <div class="field-wrapper">
+                                    <input
+                                        type="email"
+                                        name="email"
+                                        id="user_email"
+                                        placeholder="您的邮箱地址 *"
+                                        value="{% if request.method == 'POST' %}{{ request.POST.email|default_if_none:"" }}{% endif %}"
+                                        required
+                                        class="required-field"
+                                    >
+                                    <small class="help-text">
+                                        <i class="fa fa-info-circle"></i>
+                                        请填写您的邮箱地址，我们将向此邮箱发送确认邮件和回复消息
+                                    </small>
+                                </div>
+                            </div>
+
+                            <!-- 动态表单字段 -->
+                            {% for field in form %}
+                                {% if field.name != 'email' %}
+                                    <div class="form-group {% if field.errors %}has-error{% endif %}">
+
+                                        <!-- 帮助文本 -->
+                                        {% if field.help_text %}
+                                            <small class="help-text">{{ field.help_text }}</small>
+                                        {% endif %}
+
+                                        <!-- 字段渲染 -->
+                                        {% with field_type=field.field.widget.input_type %}
+                                            {% if field_type == 'textarea' %}
+                                                <!-- 多行文本 -->
+                                                <textarea
+                                                    name="{{ field.html_name }}"
+                                                    id="{{ field.id_for_label }}"
+                                                    placeholder="{{ field.label }}"
+                                                    {% if field.field.required %}required{% endif %}
+                                                    rows="5"
+                                                >{{ field.value|default_if_none:"" }}</textarea>
+
+                                            {% elif field_type == 'email' %}
+                                                <!-- 邮箱字段 - 跳过，因为已经在上面处理 -->
+
+                                            {% elif field_type == 'text' %}
+                                                <!-- 文本字段 -->
+                                                <input
+                                                    type="text"
+                                                    name="{{ field.html_name }}"
+                                                    id="{{ field.id_for_label }}"
+                                                    placeholder="{{ field.label }}"
+                                                    value="{{ field.value|default_if_none:"" }}"
+                                                    {% if field.field.required %}required{% endif %}
+                                                >
+
+                                            {% elif field_type == 'tel' %}
+                                                <!-- 电话字段 -->
+                                                <input
+                                                    type="tel"
+                                                    name="{{ field.html_name }}"
+                                                    id="{{ field.id_for_label }}"
+                                                    placeholder="{{ field.label }}"
+                                                    value="{{ field.value|default_if_none:"" }}"
+                                                    {% if field.field.required %}required{% endif %}
+                                                >
+
+                                            {% elif field_type == 'url' %}
+                                                <!-- URL字段 -->
+                                                <input
+                                                    type="url"
+                                                    name="{{ field.html_name }}"
+                                                    id="{{ field.id_for_label }}"
+                                                    placeholder="{{ field.label }}"
+                                                    value="{{ field.value|default_if_none:"" }}"
+                                                    {% if field.field.required %}required{% endif %}
+                                                >
+
+                                            {% elif field_type == 'number' %}
+                                                <!-- 数字字段 -->
+                                                <input
+                                                    type="number"
+                                                    name="{{ field.html_name }}"
+                                                    id="{{ field.id_for_label }}"
+                                                    placeholder="{{ field.label }}"
+                                                    value="{{ field.value|default_if_none:"" }}"
+                                                    {% if field.field.required %}required{% endif %}
+                                                >
+
+                                            {% elif field_type == 'date' %}
+                                                <!-- 日期字段 -->
+                                                <input
+                                                    type="date"
+                                                    name="{{ field.html_name }}"
+                                                    id="{{ field.id_for_label }}"
+                                                    value="{{ field.value|default_if_none:"" }}"
+                                                    {% if field.field.required %}required{% endif %}
+                                                >
+                                                <label for="{{ field.id_for_label }}" class="date-label">{{ field.label }}</label>
+
+                                            {% elif field_type == 'checkbox' %}
+                                                <!-- 复选框字段 -->
+                                                <label class="checkbox-label">
+                                                    <input
+                                                        type="checkbox"
+                                                        name="{{ field.html_name }}"
+                                                        id="{{ field.id_for_label }}"
+                                                        {% if field.value %}checked{% endif %}
+                                                        {% if field.field.required %}required{% endif %}
+                                                    >
+                                                    <span class="checkmark"></span>
+                                                    {{ field.label }}
+                                                </label>
+
+                                            {% elif field_type == 'select' %}
+                                                <!-- 下拉选择字段 -->
+                                                <select
+                                                    name="{{ field.html_name }}"
+                                                    id="{{ field.id_for_label }}"
+                                                    {% if field.field.required %}required{% endif %}
+                                                >
+                                                    <option value="">请选择 {{ field.label }}</option>
+                                                    {% for choice_value, choice_label in field.field.choices %}
+                                                        <option value="{{ choice_value }}" {% if choice_value == field.value %}selected{% endif %}>
+                                                            {{ choice_label }}
+                                                        </option>
+                                                    {% endfor %}
+                                                </select>
+
+                                            {% elif field_type == 'radio' %}
+                                                <!-- 单选按钮组 -->
+                                                <fieldset class="radio-group">
+                                                    <legend>{{ field.label }}</legend>
+                                                    {% for choice_value, choice_label in field.field.choices %}
+                                                        <label class="radio-label">
+                                                            <input
+                                                                type="radio"
+                                                                name="{{ field.html_name }}"
+                                                                value="{{ choice_value }}"
+                                                                {% if choice_value == field.value %}checked{% endif %}
+                                                                {% if field.field.required %}required{% endif %}
+                                                            >
+                                                            <span class="radio-custom"></span>
+                                                            {{ choice_label }}
+                                                        </label>
+                                                    {% endfor %}
+                                                </fieldset>
+
+                                            {% else %}
+                                                <!-- 默认文本输入字段 -->
+                                                <input
+                                                    type="text"
+                                                    name="{{ field.html_name }}"
+                                                    id="{{ field.id_for_label }}"
+                                                    placeholder="{{ field.label }}"
+                                                    value="{{ field.value|default_if_none:"" }}"
+                                                    {% if field.field.required %}required{% endif %}
+                                                >
+                                            {% endif %}
+                                        {% endwith %}
+
+                                        <!-- 字段错误信息 -->
+                                        {% if field.errors %}
+                                            <div class="field-errors">
+                                                {% for error in field.errors %}
+                                                    <span class="error-text">{{ error }}</span>
+                                                {% endfor %}
+                                            </div>
+                                        {% endif %}
+                                    </div>
+                                {% endif %}
+                            {% endfor %}
+
+                            <!-- 调试信息（开发环境可显示） -->
+                            {% if settings.DEBUG %}
+                                <div class="debug-info" style="display: none;">
+                                    <h4>调试信息：</h4>
+                                    <p>表单字段数量: {{ form|length }}</p>
+                                    <p>POST数据中的email: {{ request.POST.email|default:"无" }}</p>
+                                </div>
+                            {% endif %}
+
+                            <!-- 提交按钮和说明 -->
+                            <div class="form-group">
+                                <div class="submit-section">
+                                    <button class="theme-btn btn-style-one" type="submit" name="submit-form">
+                                        <span class="txt">提交留言</span>
+                                        <span class="icon fa fa-send"></span>
+                                    </button>
+
+                                    <!-- 提交说明 -->
+                                    <div class="submit-info">
+                                        <div class="info-item">
+                                            <i class="fa fa-envelope-o"></i>
+                                            <span>提交后您将收到确认邮件</span>
+                                        </div>
+                                        <div class="info-item">
+                                            <i class="fa fa-clock-o"></i>
+                                            <span>我们将在24小时内回复</span>
+                                        </div>
+                                        <div class="info-item">
+                                            <i class="fa fa-shield"></i>
+                                            <span>您的信息将被妥善保护</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 侧边栏 -->
+            <div class="sidebar-side col-lg-4 col-md-4 col-sm-12 col-xs-12">
+                <aside class="sidebar sticky-top">
+
+                    <!-- 关于作者部分 -->
+                    <div class="sidebar-widget about-widget">
+                        {% random_author_sidebar  %}
+                    </div>
+
+                    <!-- 联系信息部分 -->
+                    <div class="sidebar-widget contact-widget">
+                        <h2>联系方式</h2>
+                        <div class="inner-box">
+                            <div class="contact-info">
+                                <div class="info-item">
+                                    <span class="icon fa fa-envelope"></span>
+                                    <span class="text">邮箱咨询</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="icon fa fa-clock-o"></span>
+                                    <span class="text">24小时内回复</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="icon fa fa-check-circle"></span>
+                                    <span class="text">确认邮件通知</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 表单提示部分 -->
+                    <div class="sidebar-widget tips-widget">
+                        <h2>填写提示</h2>
+                        <div class="inner-box">
+                            <ul class="tips-list">
+                                <li>
+                                    <i class="fa fa-star"></i>
+                                    请确保邮箱地址正确，以便我们及时回复
+                                </li>
+                                <li>
+                                    <i class="fa fa-edit"></i>
+                                    详细描述您的问题或建议
+                                </li>
+                                <li>
+                                    <i class="fa fa-bell"></i>
+                                    提交后请注意查收确认邮件
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+
+                </aside>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+<!-- 表单验证和增强脚本 -->
+<script>
+$(document).ready(function() {
+    var $form = $('#contact-form');
+
+    if ($form.length) {
+        // 增强邮箱验证
+        var $emailInput = $('#user_email');
+        if ($emailInput.length) {
+            $emailInput.on('blur', function() {
+                var email = $(this).val();
+                var $formGroup = $(this).closest('.form-group');
+
+                if (email && !isValidEmail(email)) {
+                    $formGroup.addClass('has-error');
+                } else {
+                    $formGroup.removeClass('has-error');
+                }
+            });
+        }
+
+        // 表单提交验证
+        $form.on('submit', function(e) {
+            var isValid = true;
+            var $requiredFields = $form.find('[required]');
+
+            // 清除之前的错误样式
+            $form.find('.form-group').removeClass('has-error');
+
+            // 验证必填字段
+            $requiredFields.each(function() {
+                var $field = $(this);
+                if (!$.trim($field.val())) {
+                    isValid = false;
+                    $field.closest('.form-group').addClass('has-error');
+                }
+            });
+
+            // 特别验证邮箱字段
+            var $emailFields = $form.find('input[type="email"]');
+            $emailFields.each(function() {
+                var $field = $(this);
+                var email = $field.val();
+                if (email && !isValidEmail(email)) {
+                    isValid = false;
+                    $field.closest('.form-group').addClass('has-error');
+                }
+            });
+
+            if (!isValid) {
+                e.preventDefault();
+                // 显示错误提示
+                showErrorMessage('请检查并填写所有必填字段');
+                // 滚动到第一个错误字段
+                var $firstError = $form.find('.has-error').first();
+                if ($firstError.length) {
+                    $('html, body').animate({
+                        scrollTop: $firstError.offset().top - 100
+                    }, 500);
+                }
+            } else {
+
+                // 显示提交中状态
+                showSubmittingState();
+
+                // 调试：输出表单数据
+                console.log('表单提交数据:');
+                var formData = new FormData($form[0]);
+                for (var pair of formData.entries()) {
+                    console.log(pair[0] + ': ' + pair[1]);
+                }
+            }
+        });
+    }
+
+    function isValidEmail(email) {
+        var emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        return emailRegex.test(email);
+    }
+
+    function showErrorMessage(message) {
+        // 移除旧的错误消息
+        $('.alert-danger').remove();
+
+        // 创建新的错误消息
+        var alertHtml = '<div class="alert alert-danger">' +
+                       '<p><i class="fa fa-exclamation-triangle"></i> ' + message + '</p>' +
+                       '</div>';
+
+        var $contactForm = $('.contact-form');
+        $contactForm.prepend(alertHtml);
+    }
+
+    function showSubmittingState() {
+        var $submitBtn = $('button[type="submit"]');
+        if ($submitBtn.length) {
+            $submitBtn.html('<span class="txt">提交中...</span><span class="icon fa fa-spinner fa-spin"></span>');
+            $submitBtn.prop('disabled', true);
+        }
+    }
+});
+</script>
+
+{% endblock content %}

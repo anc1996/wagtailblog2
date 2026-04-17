@@ -1,0 +1,268 @@
+/*
+ * =================================================================
+ * 文件: markdown-theme.css
+ * 描述: 最终版 Markdown 主题。所有样式都封装在 .markdown-body 内，
+ * 实现了完美的组件化和样式隔离。
+ * =================================================================
+*/
+
+/* 第一部分：Pygments 代码高亮样式 (保持不变) */
+.highlight .hll { background-color: #404040; }
+.highlight .c { color: #999999; font-style: italic; }
+/* ... (您文件中已有的所有 .highlight 样式) ... */
+pre { line-height: 125%; }
+td.linenos .normal { color: #6e7681; background-color: #0d1117; padding-left: 5px; padding-right: 5px; }
+span.linenos { color: #6e7681; background-color: #0d1117; padding-left: 5px; padding-right: 5px; }
+td.linenos .special { color: #e6edf3; background-color: #6e7681; padding-left: 5px; padding-right: 5px; }
+span.linenos.special { color: #e6edf3; background-color: #6e7681; padding-left: 5px; padding-right: 5px; }
+.highlight .hll { background-color: #6e7681 }
+.highlight { background: #0d1117; color: #E6EDF3 }
+.highlight .c { color: #8B949E; font-style: italic } /* Comment */
+.highlight .err { color: #F85149 } /* Error */
+.highlight .esc { color: #E6EDF3 } /* Escape */
+.highlight .g { color: #E6EDF3 } /* Generic */
+.highlight .k { color: #FF7B72 } /* Keyword */
+.highlight .l { color: #A5D6FF } /* Literal */
+.highlight .n { color: #E6EDF3 } /* Name */
+.highlight .o { color: #FF7B72; font-weight: bold } /* Operator */
+.highlight .ch { color: #8B949E; font-style: italic } /* Comment.Hashbang */
+.highlight .cm { color: #8B949E; font-style: italic } /* Comment.Multiline */
+.highlight .cp { color: #8B949E; font-weight: bold; font-style: italic } /* Comment.Preproc */
+.highlight .cpf { color: #8B949E; font-style: italic } /* Comment.PreprocFile */
+.highlight .c1 { color: #8B949E; font-style: italic } /* Comment.Single */
+.highlight .cs { color: #8B949E; font-weight: bold; font-style: italic } /* Comment.Special */
+.highlight .gd { color: #FFA198; background-color: #490202 } /* Generic.Deleted */
+.highlight .ge { color: #E6EDF3; font-style: italic } /* Generic.Emph */
+.highlight .gh { color: #79C0FF; font-weight: bold } /* Generic.Heading */
+.highlight .gi { color: #56D364; background-color: #05260C } /* Generic.Inserted */
+.highlight .go { color: #8B949E } /* Generic.Output */
+.highlight .gp { color: #8B949E } /* Generic.Prompt */
+.highlight .gs { color: #E6EDF3; font-weight: bold } /* Generic.Strong */
+.highlight .gu { color: #79C0FF; font-weight: bold } /* Generic.Subheading */
+.highlight .gt { color: #F85149 } /* Generic.Traceback */
+.highlight .kc { color: #79C0FF } /* Keyword.Constant */
+.highlight .kd { color: #FF7B72 } /* Keyword.Declaration */
+.highlight .kn { color: #FF7B72 } /* Keyword.Namespace */
+.highlight .kp { color: #79C0FF } /* Keyword.Pseudo */
+.highlight .kr { color: #FF7B72 } /* Keyword.Reserved */
+.highlight .kt { color: #FF7B72 } /* Keyword.Type */
+.highlight .ld { color: #A5D6FF } /* Literal.Date */
+.highlight .m { color: #A5D6FF } /* Literal.Number */
+.highlight .s { color: #A5D6FF } /* Literal.String */
+.highlight .na { color: #E6EDF3 } /* Name.Attribute */
+.highlight .nb { color: #E6EDF3 } /* Name.Builtin */
+.highlight .nc { color: #F0C674 } /* Name.Class */
+.highlight .no { color: #79C0FF } /* Name.Constant */
+.highlight .nd { color: #D2A8FF; font-weight: bold } /* Name.Decorator */
+.highlight .ni { color: #E6EDF3 } /* Name.Entity */
+.highlight .ne { color: #F85149; font-weight: bold } /* Name.Exception */
+.highlight .nf { color: #D2A8FF; font-weight: bold } /* Name.Function */
+.highlight .nl { color: #79C0FF; font-weight: bold } /* Name.Label */
+.highlight .nn { color: #E6EDF3 } /* Name.Namespace */
+.highlight .nx { color: #E6EDF3 } /* Name.Other */
+.highlight .py { color: #79C0FF } /* Name.Property */
+.highlight .nt { color: #7EE787 } /* Name.Tag */
+.highlight .nv { color: #79C0FF } /* Name.Variable */
+.highlight .ow { color: #FF7B72; font-weight: bold } /* Operator.Word */
+.highlight .w { color: #E6EDF3 } /* Text.Whitespace */
+.highlight .mb { color: #A5D6FF } /* Literal.Number.Bin */
+.highlight .mf { color: #A5D6FF } /* Literal.Number.Float */
+.highlight .mh { color: #A5D6FF } /* Literal.Number.Hex */
+.highlight .mi { color: #A5D6FF } /* Literal.Number.Integer */
+.highlight .mo { color: #A5D6FF } /* Literal.Number.Oct */
+.highlight .sa { color: #A5D6FF } /* Literal.String.Affix */
+.highlight .sb { color: #A5D6FF } /* Literal.String.Backtick */
+.highlight .sc { color: #A5D6FF } /* Literal.String.Char */
+.highlight .dl { color: #A5D6FF } /* Literal.String.Delimiter */
+.highlight .sd { color: #A5D6FF } /* Literal.String.Doc */
+.highlight .s2 { color: #A5D6FF } /* Literal.String.Double */
+.highlight .se { color: #79C0FF } /* Literal.String.Escape */
+.highlight .sh { color: #A5D6FF } /* Literal.String.Heredoc */
+.highlight .si { color: #A5D6FF } /* Literal.String.Interpol */
+.highlight .sx { color: #A5D6FF } /* Literal.String.Other */
+.highlight .sr { color: #79C0FF } /* Literal.String.Regex */
+.highlight .s1 { color: #A5D6FF } /* Literal.String.Single */
+.highlight .ss { color: #A5D6FF } /* Literal.String.Symbol */
+.highlight .bp { color: #E6EDF3 } /* Name.Builtin.Pseudo */
+.highlight .fm { color: #D2A8FF; font-weight: bold } /* Name.Function.Magic */
+.highlight .vc { color: #79C0FF } /* Name.Variable.Class */
+.highlight .vg { color: #79C0FF } /* Name.Variable.Global */
+.highlight .vi { color: #79C0FF } /* Name.Variable.Instance */
+.highlight .vm { color: #79C0FF } /* Name.Variable.Magic */
+.highlight .il { color: #A5D6FF } /* Literal.Number.Integer.Long */
+
+/*
+ * =================================================================
+ * 文件: markdown-theme.css
+ * 描述: 最终版 Markdown 主题。所有样式都封装在 .markdown-body 内，
+ * 实现了完美的组件化和样式隔离，风格统一参考 GitHub。
+ * =================================================================
+*/
+
+/*
+ * =================================================================
+ * 第二部分：Markdown 全局内容样式 (使用 .markdown-body 作为根)
+ * =================================================================
+*/
+
+[data-block-type="markdown_block"] {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  font-size: 16px;
+  line-height: 1.5;
+  word-wrap: break-word;
+  color: #24292f; /* 主要文字颜色，深灰色 */
+  background-color: #ffffff; /* 背景色，白色 */
+}
+
+[data-block-type="markdown_block"]::before {
+  display: table;
+  content: "";
+}
+
+[data-block-type="markdown_block"]::after {
+  display: table;
+  clear: both;
+  content: "";
+}
+
+[data-block-type="markdown_block"] > *:first-child {
+  margin-top: 0 !important;
+}
+
+[data-block-type="markdown_block"] > *:last-child {
+  margin-bottom: 0 !important;
+}
+
+[data-block-type="markdown_block"] a {
+  color: #0969da; /* 链接颜色，蓝色 */
+  text-decoration: none;
+}
+
+[data-block-type="markdown_block"] a:hover {
+  text-decoration: underline;
+}
+
+[data-block-type="markdown_block"] p,
+[data-block-type="markdown_block"] blockquote,
+[data-block-type="markdown_block"] ul,
+[data-block-type="markdown_block"] ol,
+[data-block-type="markdown_block"] dl,
+[data-block-type="markdown_block"] table,
+[data-block-type="markdown_block"] pre,
+[data-block-type="markdown_block"] details {
+  margin-top: 0;
+  margin-bottom: 16px;
+}
+
+[data-block-type="markdown_block"] hr {
+  height: .25em;
+  padding: 0;
+  margin: 24px 0;
+  background-color: #d0d7de; /* 分割线颜色 */
+  border: 0;
+}
+
+[data-block-type="markdown_block"] blockquote {
+  padding: 0 1em;
+  color: #57606a; /* 引用文字颜色 */
+  border-left: .25em solid #d0d7de; /* 引用左侧边框 */
+}
+
+[data-block-type="markdown_block"] h1,
+[data-block-type="markdown_block"] h2,
+[data-block-type="markdown_block"] h3,
+[data-block-type="markdown_block"] h4,
+[data-block-type="markdown_block"] h5,
+[data-block-type="markdown_block"] h6 {
+  margin-top: 24px;
+  margin-bottom: 16px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+[data-block-type="markdown_block"] h1 {
+  padding-bottom: .3em;
+  font-size: 2em;
+  border-bottom: 1px solid #d8dee4;
+}
+
+[data-block-type="markdown_block"] h2 {
+  padding-bottom: .3em;
+  font-size: 1.5em;
+  border-bottom: 1px solid #d8dee4;
+}
+
+[data-block-type="markdown_block"] h3 {
+  font-size: 1.25em;
+}
+
+[data-block-type="markdown_block"] h4 {
+  font-size: 1em;
+}
+
+[data-block-type="markdown_block"] h5 {
+  font-size: .875em;
+}
+
+[data-block-type="markdown_block"] h6 {
+  font-size: .85em;
+  color: #57606a;
+}
+
+[data-block-type="markdown_block"] ul,
+[data-block-type="markdown_block"] ol {
+  padding-left: 2em;
+}
+
+[data-block-type="markdown_block"] ol ol,
+[data-block-type="markdown_block"] ul ol {
+  list-style-type: lower-roman;
+}
+
+[data-block-type="markdown_block"] ul ul ol,
+[data-block-type="markdown_block"] ul ol ol,
+[data-block-type="markdown_block"] ol ul ol,
+[data-block-type="markdown_block"] ol ol ol {
+  list-style-type: lower-alpha;
+}
+
+[data-block-type="markdown_block"] li > p {
+  margin-top: 16px;
+}
+
+[data-block-type="markdown_block"] li + li {
+  margin-top: .25em;
+}
+
+[data-block-type="markdown_block"] table:not(.highlighttable) {
+  width: 100%;
+  display: table;
+  border-collapse: collapse;
+  border-spacing: 0;
+}
+
+[data-block-type="markdown_block"] table:not(.highlighttable) tr {
+  background-color: #ffffff;
+  border-top: 1px solid #c6cbd1;
+}
+
+[data-block-type="markdown_block"] table:not(.highlighttable) tr:nth-child(2n) {
+  background-color: #f6f8fa; /* 隔行变色 */
+}
+
+[data-block-type="markdown_block"] table:not(.highlighttable) th,
+[data-block-type="markdown_block"] table:not(.highlighttable) td {
+  padding: 6px 13px;
+  border: 1px solid #d0d7de;
+}
+
+[data-block-type="markdown_block"] table:not(.highlighttable) th {
+  font-weight: 600;
+}
+
+[data-block-type="markdown_block"] img {
+  max-width: 100%;
+  box-sizing: content-box;
+  background-color: #ffffff;
+}
+

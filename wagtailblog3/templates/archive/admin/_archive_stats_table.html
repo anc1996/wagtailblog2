@@ -1,0 +1,85 @@
+{% load archive_tags %}
+
+{% if archive_data_for_sidebar %}
+    <div class="archive-stats-wrapper">
+        <table class="listing listing--full-width">
+            <thead>
+                <tr>
+                    <th class="archive-year">年份</th>
+                    {% for month_num in range_1_to_12 %}
+                        <th class="archive-month">{{ month_num }}月</th>
+                    {% endfor %}
+                    <th class="archive-total">年总计</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for year, year_data in archive_data_for_sidebar.items %}
+                    <tr>
+                        <td class="archive-year">
+                            <a href="{% url 'archive:year_archive' year %}">{{ year }}</a>
+                        </td>
+                        {% for month_num_int in range_1_to_12 %}
+                            {% with month_entry=year_data.months|get_item:month_num_int %}
+                                <td class="archive-month">
+                                    {% if month_entry and month_entry.count > 0 %}
+                                        <a href="{% url 'archive:month_archive' year month_num_int %}">
+                                            {{ month_entry.count }}
+                                        </a>
+                                    {% elif month_entry %}
+                                        <span class="muted">0</span>
+                                    {% else %}
+                                        <span class="muted">-</span>
+                                    {% endif %}
+                                </td>
+                            {% endwith %}
+                        {% endfor %}
+                        <td class="archive-total">
+                            <a href="{% url 'archive:year_archive' year %}">
+                                <strong>{{ year_data.count }}</strong>
+                            </a>
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    
+    {# 归档统计分页 #}
+    {% if archive_pagination.has_other_pages %}
+        <div class="archive-pagination">
+            {% if archive_pagination.has_previous %}
+                <button type="button" 
+                        class="button button-small button-secondary"
+                        onclick="loadArchiveStatsPage({{ archive_pagination.previous_page_number }})">
+                    上一页
+                </button>
+            {% else %}
+                <button type="button" 
+                        class="button button-small button-secondary" 
+                        disabled>
+                    上一页
+                </button>
+            {% endif %}
+            
+            <span class="page-info">
+                第 {{ archive_pagination.number }} / {{ archive_pagination.paginator.num_pages }} 页
+            </span>
+            
+            {% if archive_pagination.has_next %}
+                <button type="button" 
+                        class="button button-small button-secondary"
+                        onclick="loadArchiveStatsPage({{ archive_pagination.next_page_number }})">
+                    下一页
+                </button>
+            {% else %}
+                <button type="button" 
+                        class="button button-small button-secondary" 
+                        disabled>
+                    下一页
+                </button>
+            {% endif %}
+        </div>
+    {% endif %}
+{% else %}
+    <p class="help-block help-info">暂无归档数据。</p>
+{% endif %}

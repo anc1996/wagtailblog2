@@ -1,0 +1,77 @@
+{% load static comment_tags %}
+
+{% for reply in replies %}
+{# 对于回复，其 root-comment-id 应该始终是其父评论的 ID ##}
+<div class="comment nested-comment" {# 使用 Gretzia 的 comment 类，并添加 nested-comment 以便样式区分 #}
+     id="comment-{{ reply.id }}"
+     data-comment-id="{{ reply.id }}"
+     data-root-comment-id="{{ reply.parent.id }}">
+
+    <div class="inner-box"> {# 对应 Gretzia 的 inner-box #}
+        <div class="image"> {# 对应 Gretzia 的 image #}
+            <img src="{% static 'comments/img/default-avatar.png' %}" alt="{{ reply.author_user.username }}" />
+        </div>
+
+        <div class="comment-content-wrapper"> {# 新增一个wrapper来包裹右侧内容 #}
+            {# 作者名称，对应 Gretzia 的 h3 #}
+            <h3>{{ reply.author_user.username }}</h3>
+
+            {# 评论时间 #}
+            <div class="comment-meta">
+                <span class="comment-time">{{ reply.created_at|date:"Y-m-d H:i" }}</span>
+                {% if reply.updated_at != reply.created_at %}
+                    <span class="comment-edited">(已编辑)</span>
+                {% endif %}
+            </div>
+
+            {# 评论内容，对应 Gretzia 的 .text #}
+            <div class="text" id="comment-text-{{ reply.id }}">
+                {% if reply.replied_to_user %}
+                    <span class="replied-to-user">@{{ reply.replied_to_user.username }} </span>
+                {% endif %}
+                {{ reply.content|render_markdown }} {# 应用 render_markdown 过滤器 #}
+            </div>
+
+            {# 评论操作 #}
+            <div class="comment-actions-list"> {# 新增一个列表容器来组织操作按钮 #}
+                <a href="javascript:void(0);" class="reply-comment reply-btn"
+                    data-comment-id="{{ reply.id }}"
+                    data-username="{{ reply.author_user.username }}"
+                    data-user-id="{{ reply.author_user.id }}"
+                    data-root-comment-id="{{ reply.parent.id }}"
+                    >回复</a>
+
+                <a href="javascript:void(0);"
+                   class="vote-link like-btn"
+                   data-comment-id="{{ reply.id }}"
+                   data-reaction="1"
+                   data-url="{% url 'comments:react_to_comment' %}"> <i class="icon-like">👍</i> <span class="like-count">{{ reply.like_count }}</span>
+                </a>
+                <a href="javascript:void(0);"
+                   class="vote-link dislike-btn"
+                   data-comment-id="{{ reply.id }}"
+                   data-reaction="-1"
+                   data-url="{% url 'comments:react_to_comment' %}"> <i class="icon-dislike">👎</i> <span class="dislike-count">{{ reply.dislike_count }}</span>
+                </a>
+
+                {% if user.is_authenticated and user.id == reply.author_user.id and reply.is_editable %}
+                    <a href="javascript:void(0);" class="action-link edit-btn"
+                       data-comment-id="{{ reply.id }}" data-url="{% url 'comments:edit_comment' %}"> 编辑</a>
+                {% endif %}
+
+                {% if user.is_authenticated %}
+                    {% if user.id == reply.author_user.id or user.is_staff %}
+                        <a href="javascript:void(0);"
+                           class="action-link delete-btn"
+                           data-comment-id="{{ reply.id }}"
+                           data-url="{% url 'comments:delete_comment' %}"> 删除
+                        </a>
+                    {% endif %}
+                {% endif %}
+            </div>
+            {# 动态回复表单容器 #}
+            <div class="dynamic-reply-form-container"></div>
+        </div> {# End comment-content-wrapper #}
+    </div> {# End inner-box #}
+</div> {# End comment #}
+{% endfor %}

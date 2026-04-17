@@ -1,0 +1,26 @@
+{# portfolio/templates/portfolio/blocks/card_block.html #}
+{% load wagtailcore_tags wagtailimages_tags %}
+
+
+
+<section class="default-section">
+    <div class="auto-container">
+        <!-- 居中标题 -->
+        <div class="sec-title centered">
+            <h2>{{ self.heading }}</h2>
+        </div>
+
+        <!-- 图片居中容器 -->
+        {% if self.image %}
+            <div class="text-center" style="margin-bottom: 30px;">
+                {% image self.image max-800x600 as card_img %}
+                <img src="{{ card_img.url }}" alt="{{ card_img.alt }}" style="display: inline-block; border-radius: 8px;">
+            </div>
+        {% endif %}
+
+        <!-- 文本内容 -->
+        <div class="text wagtail-content-render">
+            {{ self.text|richtext }}
+        </div>
+    </div>
+</section>

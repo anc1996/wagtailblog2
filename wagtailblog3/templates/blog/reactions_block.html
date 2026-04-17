@@ -1,0 +1,36 @@
+{% load static wagtailcore_tags %}
+{% if page.pk %}
+<div class="reaction-buttons"
+     data-page-id="{{ page.id }}"
+     data-action-url="{% url 'blog:toggle_reaction' page.id %}">
+
+    {% for reaction in page.get_reactions %}
+        <button
+            class="reaction-btn {% if reaction.id == user_reaction %}active{% endif %}"
+            data-reaction-id="{{ reaction.id }}"
+            title="{{ reaction.name }}"
+            type="button"
+        >
+            {% if reaction.name == '点赞' %}<i class="fa fa-thumbs-up"></i>
+            {% elif reaction.name == '喜爱' %}<i class="fa fa-heart"></i>
+            {% elif reaction.name == '惊讶' %}<i class="fa fa-surprise"></i>
+            {% elif reaction.name == '思考' %}<i class="fa fa-lightbulb-o"></i>
+            {% else %}<i class="fa fa-star"></i>{% endif %}
+
+            <span class="count">{{ reaction.count }}</span>
+        </button>
+    {% endfor %}
+</div>
+
+
+{% else %}
+
+{# 预览模式下显示占位内容 #}
+<div class="reaction-buttons reaction-preview-placeholder">
+    <p class="preview-notice">
+        <i class="fa fa-info-circle"></i>
+        文章反应功能将在发布后可用
+    </p>
+</div>
+
+{% endif %}

@@ -1,0 +1,252 @@
+{% extends "base.html" %}
+{% load wagtailcore_tags wagtailimages_tags static blog_tags comment_tags %}
+{% block title %}{{ page.title }}{% endblock %}
+
+{% block extra_css %}
+    <link rel="stylesheet" href="{% static 'blog/css/markdown-theme.css' %}">
+    <link rel="stylesheet" href="{% static 'blog/css/rich-text-theme.css' %}">
+    <link rel="stylesheet" href="{% static 'blog/css/katex/katex.min.css' %}">
+    <link rel="stylesheet" href="{% static 'blog/css/lightbox/lightbox.css' %}">
+    <link rel="stylesheet" href="{% static 'blog/css/jquery-ui/jquery-ui.css' %}">
+    <link rel="stylesheet" href="{% static 'blog/css/blog.css' %}">
+
+    <!-- 🆕 添加拖动布局CSS -->
+    <link rel="stylesheet" href="{% static 'blog/css/blog-resize.css' %}">
+
+    <link rel="stylesheet" href="{% static 'blog/css/image_blocks.css' %}">
+    <link rel="stylesheet" href="{% static 'blog/css/video_blocks.css' %}">
+    <link rel="stylesheet" href="{% static 'blog/css/audio_blocks.css' %}">
+    <link rel="stylesheet" href="{% static 'blog/css/embed_blocks.css' %}">
+    <link rel="stylesheet" href="{% static 'blog/css/table_blocks.css' %}">
+    <link rel="stylesheet" href="{% static 'blog/css/mermaid_block.css' %}">
+    <link rel="stylesheet" href="{% static 'comments/css/comments.css' %}">
+    {{ block.super }}
+
+    {# 禁用主题自带的 mCustomScrollbar #}
+    {% block custom_scrollbar_assets_js %}{% endblock custom_scrollbar_assets_js %}
+
+{% endblock %}
+
+{% block content %}
+<div class="blog-page-wrapper">
+    <section class="blog-hero">
+        {% if page.featured_image %}
+            {% image page.featured_image original class="blog-featured-image" %}
+        {% endif %}
+        <div class="blog-container hero-container">
+            <div class="blog-hero-content">
+                <h1 class="blog-title">{{ page.title }}</h1>
+                {% if page.intro %}
+                    <div class="blog-intro">{{ page.intro|richtext }}</div>
+                {% endif %}
+                <div class="blog-meta">
+                    {% if page.authors.all %}
+                        <div class="blog-meta-item">
+                            <i class="fa fa-user"></i>
+                            <span>
+                                {% for author in page.authors.all %}
+                                    {{ author.name }}{% if not forloop.last %}, {% endif %}
+                                {% endfor %}
+                            </span>
+                        </div>
+                    {% endif %}
+                    <div class="blog-meta-item">
+                        <i class="fa fa-calendar"></i>
+                        <span>{{ page.date|date:"Y年m月d日" }}</span>
+                    </div>
+                    <div class="blog-meta-item">
+                        <i class="fa fa-eye"></i>
+                        <span>{{ page.get_view_count.total }} 次浏览</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <div class="blog-container full-width-container">
+
+        <div id="zen-trigger-left" class="zen-trigger left" title="切换目录">
+            <i class="fa fa-angle-left"></i>
+        </div>
+
+        <div class="blog-layout-container" id="blog-layout-container">
+
+            <aside class="blog-sidebar-left" id="sidebar-left">
+                <div class="toc-wrapper">
+                    <div class="toc-header">
+                        <i class="fa fa-list-ol"></i> 目录
+                    </div>
+                    <div id="toc-content" class="toc-content"></div>
+                </div>
+            </aside>
+
+          <!-- 🆕 左侧分隔条 -->
+          <div class="resize-handle resize-handle-left"
+               id="resize-handle-left"
+               data-side="left"
+               title="拖动调整目录宽度 | 双击恢复默认">
+            <div class="resize-handle-line"></div>
+            <div class="resize-handle-indicator">
+              <i class="fa fa-ellipsis-v"></i>
+            </div>
+            <div class="resize-tooltip">
+              <span class="tooltip-width">272px</span>
+              <span class="tooltip-percent">17%</span>
+            </div>
+          </div>
+
+            <!-- 中间栏：文章 -->
+            <main class="blog-center-column">
+                <div id="article-scroll-container" class="article-scroll-container">
+                    <div class="article-body-content">
+                        <div class="content-blocks">
+                            {% for block in page.body %}
+                                <div class="content-block-wrapper" data-block-type="{{ block.block_type }}">
+                                    {% include_block block %}
+                                </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+                <div id="mobile-interactions-placeholder"></div>
+            </main>
+
+
+            <!-- 🆕 右侧分隔条 -->
+              <div class="resize-handle resize-handle-right"
+                   id="resize-handle-right"
+                   data-side="right"
+                   title="拖动调整工具栏宽度 | 双击恢复默认">
+                <div class="resize-handle-line"></div>
+                <div class="resize-handle-indicator">
+                  <i class="fa fa-ellipsis-v"></i>
+                </div>
+                <div class="resize-tooltip">
+                  <span class="tooltip-width">320px</span>
+                  <span class="tooltip-percent">20%</span>
+                </div>
+              </div>
+
+            <aside class="blog-sidebar-right" id="sidebar-right">
+                <div class="sidebar-scroll-area">
+                    <div class="sidebar-widget reaction-widget">
+                        <div class="widget-title">文章反应</div>
+                        {% include 'blog/reactions_block.html' %}
+                    </div>
+
+                    {% with related_posts=page.get_related_posts_by_tags %}
+                        {% if related_posts %}
+                            <div class="sidebar-widget related-widget">
+                                <div class="widget-title">相关推荐</div>
+                                <div class="related-list">
+                                    {% for post in related_posts %}
+                                        <a href="{{ post.url }}" class="related-item-small">
+                                            <div class="related-thumb">
+                                                {% if post.featured_image %}
+                                                    {% image post.featured_image fill-60x60 crop="center" %}
+                                                {% else %}
+                                                    <div class="no-image"><i class="fa fa-file-text"></i></div>
+                                                {% endif %}
+                                            </div>
+                                            <div class="related-info">
+                                                <h5>{{ post.title }}</h5>
+                                                <span class="date">{{ post.date|date:"m-d" }}</span>
+                                            </div>
+                                        </a>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                        {% endif %}
+                    {% endwith %}
+
+                    {% with prev_post=page.get_prev_post next_post=page.get_next_post %}
+                        {% if prev_post or next_post %}
+                            <div class="sidebar-widget nav-widget">
+                                {% if prev_post %}
+                                    <a href="{{ prev_post.url }}" class="nav-btn prev">
+                                        <span class="label"><i class="fa fa-angle-left"></i> 上一篇</span>
+                                        <span class="title">{{ prev_post.title }}</span>
+                                    </a>
+                                {% endif %}
+                                {% if next_post %}
+                                    <a href="{{ next_post.url }}" class="nav-btn next">
+                                        <span class="label">下一篇 <i class="fa fa-angle-right"></i></span>
+                                        <span class="title">{{ next_post.title }}</span>
+                                    </a>
+                                {% endif %}
+                            </div>
+                        {% endif %}
+                    {% endwith %}
+                </div>
+            </aside>
+
+            <!-- 🆕 布局状态指示器（可选） -->
+            <div class="layout-status-indicator" id="layout-status">
+              <div class="status-item">
+                <span class="status-label">布局模式</span>
+                <span class="status-value" id="layout-mode">标准</span>
+              </div>
+              <button class="status-reset" id="reset-layout" title="重置布局">
+                <i class="fa fa-undo"></i>
+              </button>
+            </div>
+
+        </div>
+
+        <div id="zen-trigger-right" class="zen-trigger right" title="切换侧栏">
+            <i class="fa fa-angle-right"></i>
+        </div>
+
+        {% if page.gallery_images.all %}
+            <div class="blog-gallery">
+                <h4><i class="fa fa-images"></i> 图片画廊</h4>
+                <div class="gallery-grid">
+                    {% for gallery_image in page.gallery_images.all %}
+                        <div class="gallery-item">
+                            <a href="{% image_url gallery_image.image 'original' %}" data-lightbox="gallery" data-title="{{ gallery_image.caption }}">
+                                {% image gallery_image.image width-400 %}
+                            </a>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+        {% endif %}
+
+        {% if page.pk %}
+        <div class="blog-comments-section">
+            {% render_comments page %}
+        </div>
+        {% else %}
+        {# 预览模式下显示占位内容 #}
+        <div class="blog-comments-section">
+            <p class="preview-notice">
+                <i class="fa fa-info-circle"></i>
+                文章反应功能将在发布后可用
+            </p>
+        </div>
+        {% endif %}
+
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+    {{ block.super }}
+    <!-- 使用 ES6 模块 -->
+    <script type="module" src="{% static 'comments/js/comments.js' %}"></script>
+
+    <script src="{% static 'blog/js/blog_page.js' %}" async></script>
+
+    <!-- 🆕 添加拖动布局JS -->
+    <script src="{% static 'blog/js/resize-manager.js' %}"></script>
+
+    <script src="{% static 'blog/css/katex/katex.js' %}" async></script>
+    <script src="{% static 'blog/js/katex/auto-render.min.js' %}" async></script>
+    <script src="{% static 'blog/js/lightbox/lightbox.js' %}" async></script>
+    <script src="{% static 'blog/js/jquery-ui/jquery-ui.js' %}" async></script>
+    <script src="{% static 'blog/js/mermaid_block.js' %}" async></script>
+    <script src="{% static 'blog/js/image_blocks.js' %}" async></script>
+    <script src="{% static 'blog/js/video_blocks.js' %}" async></script>
+    <script src="{% static 'blog/js/editor-enhancements.js' %}" async></script>
+
+{% endblock %}

@@ -1,0 +1,64 @@
+{% load navigation_tags %}
+
+<!--wagtailblog3/templates/includes/footer.html-->
+
+<footer>
+
+    <!--Subscribe Section-->
+    <section class="subscribe-section">
+    	<div class="auto-container">
+        	<h2>Subscribe</h2>
+            <div class="text">Built with Wagtail 7.1 </div>
+            <!--Subscribe form-->
+            <div class="subscribe-form">
+                <form method="post" action="contact.html">
+                    <div class="form-group">
+                        <input type="email" name="email" value="" placeholder="Email Address" required>
+                        <button type="submit" class="theme-btn">Sign Up</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </section>
+    <!--End Subscribe Section-->
+
+    <div class="social-boxed text-center">
+        {# 添加新的社交媒体字段别名 #}
+        {% with linkedin_url=settings.base.NavigationSettings.linkedin_url  github_url=settings.base.NavigationSettings.github_url bilibili_url=settings.base.NavigationSettings.bilibili_url  wechat_url=settings.base.NavigationSettings.wechat_url  %}
+        Follow me on:
+        <div class="social-boxed text-center"> {# <-- 只保留一个 div #}
+            <ul class="social-icon-two">
+                {# GitHub: 使用 fa-github #}
+                {% if github_url %}
+                    <li><a href="{{ github_url }}" target="_blank" rel="noopener noreferrer" title="GitHub"><span class="icon fa fa-github"></span></a></li>
+                {% endif %}
+
+                {# LinkedIn: 使用 fa-linkedin #}
+                {% if linkedin_url %}
+                    <li><a href="{{ linkedin_url }}" target="_blank" rel="noopener noreferrer" title="LinkedIn"><span class="icon fa fa-linkedin"></span></a></li>
+                {% endif %}
+
+                {# Bilibili: 使用 fa-television (替代图标) #}
+                {% if bilibili_url %}
+                    <li><a href="{{ bilibili_url }}" target="_blank" rel="noopener noreferrer" title="Bilibili"><span class="icon fa fa-television"></span></a></li>
+                {% endif %}
+
+                {# WeChat: 使用 fa-weixin #}
+                {% if wechat_url %}
+                    <li><a href="{{ wechat_url }}" target="_blank" rel="noopener noreferrer" title="WeChat"><span class="icon fa fa-weixin"></span></a></li>
+                {% endif %}
+
+                {# Instagram: 使用 fa-instagram #}
+                {% if instagram_url %}
+                    <li><a href="{{ instagram_url }}" target="_blank" rel="noopener noreferrer" title="Instagram"><span class="icon fa fa-instagram"></span></a></li>
+                {% endif %}
+            </ul>
+        </div>
+        {% endwith %}
+    </div>
+
+    <div class="main-footer">
+    {#  获取页脚内容：在base/naviagtion_tags.py #}
+    {% get_footer_text %}
+    </div>
+</footer>

@@ -8,22 +8,28 @@ from wagtail.documents.models import Document, AbstractDocument
 from django.template.loader import render_to_string
 from wagtail import blocks
 
+from wagtail import blocks
+
 
 class MermaidBlock(blocks.StructBlock):
 	"""
-	一个专门用于Mermaid图表代码的StreamField Block。
+	一个专门用于 Mermaid 图表代码的 StreamField Block。
 	"""
 	code = blocks.TextBlock(
 		label="Mermaid 代码",
+		required=True,
 		help_text="在此处粘贴您的 Mermaid.js 语法代码 (例如: graph TD; A-->B;)"
 	)
 	
 	class Meta:
 		icon = 'code'  # 在编辑器中显示一个代码图标
 		label = 'Mermaid 图表'
-		# 关键！指定一个模板用于前端渲染
-		# 这个路径对应我们在 settings.py 中配置的全局 templates 目录
-		template = "blog/streams/mermaid_block.html"
+		
+		# 1. 前台展示模板（读者看文章时调用，带放大缩小按钮）
+		template = 'blog/streams/mermaid_block.html'
+		
+		# 2. 后台编辑模板（作者写文章时调用，左边代码右边预览）
+		form_template = 'blog/admin/mermaid_block_form.html'
 
 
 # 自定义文档模型

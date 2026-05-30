@@ -1,44 +1,61 @@
-// wagtailblog3/static/blog/js/highlighting.js
-// 全新的增强脚本，请完整替换旧文件
+/* * wagtailblog3/static/blog/js/highlighting.js
+ * 纯 jQuery 架构重构版
+ */
+$(function() {
+    console.log("🚀 Markdown Enhancer v3.0 (jQuery Mode) 启动...");
 
-document.addEventListener('DOMContentLoaded', () => {
-    console.log("🚀 Markdown Enhancer v2.0 启动...");
-
-    // 函数 1: 添加代码复制按钮
+    // 函数 1: 为官方 Highlight.js 生成的代码块添加复制按钮
     function addCopyButtons() {
-        const codeBlocks = document.querySelectorAll('div.highlight');
-        codeBlocks.forEach((block, index) => {
-            const button = document.createElement('button');
-            button.className = 'code-copy-button';
-            button.type = 'button';
-            button.innerText = 'Copy';
+        // jQuery 选择器遍历所有的代码块
+        $('pre > code').each(function() {
+            const $code = $(this);
+            const $pre = $code.parent();
 
-            button.addEventListener('click', () => {
-                // 找到 pre > code 或者 pre 元素来获取文本
-                const codeElement = block.querySelector('pre');
-                if (codeElement) {
-                    navigator.clipboard.writeText(codeElement.innerText).then(() => {
-                        button.innerText = 'Copied!';
-                        button.classList.add('copied');
-                        setTimeout(() => {
-                            button.innerText = 'Copy';
-                            button.classList.remove('copied');
-                        }, 2000);
-                    }).catch(err => {
-                        console.error('复制失败', err);
-                        button.innerText = 'Error';
-                    });
+            // 给 pre 加上相对定位
+            $pre.css('position', 'relative');
+
+            // jQuery 一键创建按钮、写入属性并附带 CSS 样式
+            const $button = $('<button>', {
+                class: 'code-copy-button',
+                type: 'button',
+                text: 'Copy',
+                css: {
+                    position: 'absolute',
+                    top: '8px',
+                    right: '8px',
+                    padding: '4px 8px',
+                    fontSize: '12px',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                    background: 'rgba(255,255,255,0.2)',
+                    color: '#fff',
+                    border: 'none'
                 }
             });
 
-            block.appendChild(button);
+            // 绑定点击复制事件
+            $button.on('click', function() {
+                const $btn = $(this);
+                // 调用浏览器原生剪贴板 API
+                navigator.clipboard.writeText($code.text()).then(function() {
+                    $btn.text('Copied!').css('background', 'rgba(0,255,0,0.4)');
+
+                    // 2秒后恢复原状
+                    setTimeout(function() {
+                        $btn.text('Copy').css('background', 'rgba(255,255,255,0.2)');
+                    }, 2000);
+                }).catch(function(err) {
+                    console.error('复制失败', err);
+                    $btn.text('Error');
+                });
+            });
+
+            // 将按钮追加到 pre 容器中
+            $pre.append($button);
         });
-        if (codeBlocks.length > 0) {
-            console.log(`📋 为 ${codeBlocks.length} 个代码块添加了复制按钮`);
-        }
     }
 
-    // 函数 2: 渲染数学公式
+    // 函数 2: 渲染数学公式 (这部分调用外部独立引擎，维持原状)
     function renderMath() {
         if (typeof renderMathInElement === 'function') {
             renderMathInElement(document.body, {
@@ -48,13 +65,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 ],
                 throwOnError: false
             });
-            console.log('🧮 数学公式渲染完成');
         }
     }
 
-    // 执行所有增强功能
+    // 执行增强功能
     addCopyButtons();
     renderMath();
-
-    console.log("🎉 Markdown 增强完成!");
 });

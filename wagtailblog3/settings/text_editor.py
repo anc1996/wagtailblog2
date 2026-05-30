@@ -254,12 +254,11 @@ WAGTAILMARKDOWN = {
 		},
 		
 		# 代码高亮配置
-		"pymdownx.highlight": {
-			"linenums": False,
-			"guess_lang": False,
-			"use_pygments": True,
-			"pygments_style": "monokai",
-		}
+        "pymdownx.highlight": {
+            "use_pygments": False,  # ★ 核心：关闭后端上色，抛弃旧架构
+            "guess_lang": True,     # 开启语言自动猜测
+        }
+		
 	},
 	
 	# 🔥 Bleach 清理配置 - 必须允许 pre 和 code

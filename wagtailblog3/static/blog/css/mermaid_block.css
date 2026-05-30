@@ -1,20 +1,55 @@
 /*
  * wagtailblog3/static/blog/css/mermaid_block.css
- * 专用于 Mermaid Block 的样式，所有样式均封装在 .mermaid-diagram-wrapper 内
+ * 专用于 Mermaid Block 的样式 (包含全屏弹窗与完美日夜主题切换)
  */
 
-/* 1. 根容器 */
+/* ================================================== */
+/* ★★★ 1. 日夜主题变量定义区 ★★★ */
+/* ================================================== */
+
+/* 默认亮色模式 (白天效果) */
+.mermaid-diagram-wrapper, #mermaid-lightbox {
+    --mm-block-bg: linear-gradient(135deg, #f5f7fa 0%, #cbd5e1 100%);
+    --mm-modal-bg: #ffffff;
+    --mm-modal-header: #f8f9fa;
+    --mm-modal-body: #ffffff;
+    --mm-border: #e2e8f0;
+    --mm-text: #1e293b;
+    --mm-overlay: rgba(0, 0, 0, 0.45);
+    --mm-btn-bg: #0066cc;
+    --mm-btn-hover: #0052a3;
+}
+
+/* 激活暗色模式时的变量覆盖 (黑夜效果) */
+.mermaid-diagram-wrapper.dark-theme, #mermaid-lightbox.dark-theme {
+    --mm-block-bg: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+    --mm-modal-bg: #2d333b;
+    --mm-modal-header: #3c424c;
+    --mm-modal-body: #22272e;
+    --mm-border: #555555;
+    --mm-text: #e0e0e0;
+    --mm-overlay: rgba(0, 0, 0, 0.85);
+    --mm-btn-bg: #0056b3;
+    --mm-btn-hover: #004085;
+}
+
+/* ================================================== */
+/* ★★★ 2. 网页内嵌容器样式区 ★★★ */
+/* ================================================== */
+
+/* 根容器 */
 .mermaid-diagram-wrapper {
     border: 2px solid #0066cc;
     border-radius: 8px;
-    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+    background: var(--mm-block-bg) !important;
     margin: 20px 0;
     overflow: hidden;
     box-shadow: 0 4px 6px rgba(0,0,0,0.1);
     position: relative;
+    transition: background 0.3s ease;
 }
 
-/* 2. 标题栏 */
+/* 标题栏 */
 .mermaid-diagram-wrapper .mermaid-header {
     background: #0066cc;
     color: white;
@@ -25,321 +60,156 @@
     cursor: pointer;
     user-select: none;
 }
+.mermaid-diagram-wrapper .mermaid-header .toggle-icon { font-size: 14px; }
+.mermaid-diagram-wrapper .mermaid-header .mermaid-title { font-weight: bold; font-size: 16px; margin-left: 10px; }
+.mermaid-diagram-wrapper .mermaid-header .mermaid-toggle-hint { font-size: 12px; opacity: 0.9; }
 
-.mermaid-diagram-wrapper .mermaid-header .toggle-icon {
-    font-size: 14px;
-}
-
-.mermaid-diagram-wrapper .mermaid-header .mermaid-title {
-    font-weight: bold;
-    font-size: 16px;
-    margin-left: 10px;
-}
-
-.mermaid-diagram-wrapper .mermaid-header .mermaid-toggle-hint {
-    font-size: 12px;
-    opacity: 0.9;
-}
-
-/* 3. 内容区域 (包含折叠动画) */
+/* 内容区域 (包含折叠动画) */
 .mermaid-diagram-wrapper .mermaid-content {
     padding: 20px;
-    background: white;
+    background: var(--mm-modal-bg);
     transition: all 0.3s ease;
-    max-height: 5000px; /* 允许展开的高度 */
+    max-height: 5000px;
     overflow: hidden;
     opacity: 1;
 }
-
 .mermaid-diagram-wrapper .mermaid-content.collapsed {
     max-height: 0 !important;
     padding: 0 20px !important;
     opacity: 0;
 }
 
-/* 4. 调试面板 (details/summary) */
+/* 调试面板 (details/summary) */
 .mermaid-diagram-wrapper .mermaid-content details {
     margin-bottom: 20px;
-    background: #f8f9fa;
+    background: var(--mm-modal-header);
     padding: 15px;
     border-radius: 4px;
     border-left: 4px solid #0066cc;
+    color: var(--mm-text);
 }
-
 .mermaid-diagram-wrapper .mermaid-content summary {
-    cursor: pointer;
-    font-weight: bold;
-    color: #0066cc;
-    outline: none;
+    cursor: pointer; font-weight: bold; color: #0066cc; outline: none;
 }
-
 .mermaid-diagram-wrapper .mermaid-content details pre {
-    background: white;
-    padding: 15px;
-    overflow-x: auto;
-    margin-top: 10px;
-    white-space: pre-wrap;
-    word-wrap: break-word;
-    border: 1px solid #e0e0e0;
-    border-radius: 4px;
-    font-family: 'Courier New', monospace;
-    font-size: 13px;
+    background: var(--mm-modal-body);
+    padding: 15px; overflow-x: auto; margin-top: 10px; white-space: pre-wrap; word-wrap: break-word;
+    border: 1px solid var(--mm-border); border-radius: 4px; font-family: 'Courier New', monospace; font-size: 13px;
+    color: var(--mm-text);
 }
-
 .mermaid-diagram-wrapper .mermaid-content details p {
-    margin-top: 10px;
-    color: #666;
-    font-size: 0.9em;
+    margin-top: 10px; color: var(--mm-text); opacity: 0.8; font-size: 0.9em;
 }
 
-/* 5. 缩放控制区域 */
+/* 缩放控制与按钮区域 */
 .mermaid-diagram-wrapper .zoom-controls {
-    margin-bottom: 15px;
-    display: flex;
-    gap: 10px;
-    align-items: center;
-    padding: 10px;
-    background: #f0f4f8;
-    border-radius: 4px;
+    margin-bottom: 15px; display: flex; gap: 10px; align-items: center; padding: 10px;
+    background: var(--mm-modal-header); border-radius: 4px; flex-wrap: wrap;
 }
-
 .mermaid-diagram-wrapper .zoom-controls .zoom-title {
-    font-weight: bold;
-    color: #333;
-    font-size: 14px;
+    font-weight: bold; color: var(--mm-text); font-size: 14px;
 }
-
 .mermaid-diagram-wrapper .zoom-controls button {
-    padding: 8px 16px;
-    background: #0066cc;
-    color: white;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    font-weight: bold;
-    transition: background 0.2s, transform 0.2s, box-shadow 0.2s;
+    padding: 8px 16px; background: var(--mm-btn-bg); color: white; border: none; border-radius: 4px;
+    cursor: pointer; font-weight: bold; transition: background 0.2s, transform 0.2s, box-shadow 0.2s;
 }
-
-.mermaid-diagram-wrapper .zoom-controls button[data-zoom="reset"] {
-    background: #6c757d;
-}
-
-/* 悬停效果 */
 .mermaid-diagram-wrapper .zoom-controls button:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    transform: translateY(-1px); box-shadow: 0 2px 4px rgba(0,0,0,0.2); background: var(--mm-btn-hover);
 }
 
-.mermaid-diagram-wrapper .zoom-controls button[data-zoom="in"]:hover,
-.mermaid-diagram-wrapper .zoom-controls button[data-zoom="out"]:hover {
-    background: #0052a3;
-}
+/* 特定按钮的独立颜色 */
+.mermaid-diagram-wrapper .zoom-controls button[data-zoom="reset"] { background: #6c757d; }
+.mermaid-diagram-wrapper .zoom-controls button[data-zoom="reset"]:hover { background: #5a6268; }
+.mermaid-diagram-wrapper .zoom-controls button.theme-toggle-btn { background: #6f42c1; }
+.mermaid-diagram-wrapper .zoom-controls button.theme-toggle-btn:hover { background: #5a32a3; }
+.mermaid-diagram-wrapper .zoom-controls button.mermaid-fullscreen-btn { background: #198754; margin-left: auto; margin-right: 10px; }
+.mermaid-diagram-wrapper .zoom-controls button.mermaid-fullscreen-btn:hover { background: #157347; }
 
-.mermaid-diagram-wrapper .zoom-controls button[data-zoom="reset"]:hover {
-    background: #5a6268;
-}
-
+/* 缩放比率显示框 */
 .mermaid-diagram-wrapper .zoom-controls .zoom-level {
-    margin-left: 10px;
-    padding: 6px 12px;
-    background: white;
-    border-radius: 4px;
-    font-weight: bold;
-    color: #0066cc;
-    font-size: 14px;
+    margin-left: 10px; padding: 6px 12px; background: var(--mm-modal-body); border-radius: 4px;
+    font-weight: bold; color: #0099ff; font-size: 14px; border: 1px solid var(--mm-border);
 }
 
-/* 6. 图表容器 */
+/* 网页内嵌图表容器 */
 .mermaid-diagram-wrapper .mermaid-chart-container {
-    text-align: center;
-    overflow: auto;
-    padding: 20px;
-    background: white;
-    border: 1px solid #e0e0e0;
-    border-radius: 4px;
-    min-height: 200px;
+    text-align: center; overflow: auto; padding: 20px;
+    background: var(--mm-modal-body); border: 1px solid var(--mm-border); border-radius: 4px; min-height: 200px;
 }
-
 .mermaid-diagram-wrapper .mermaid-inner {
-    transform: scale(1);
-    transform-origin: 0 0;
-    transition: transform 0.3s ease;
-    display: inline-block;
+    transform: scale(1); transform-origin: center center; transition: transform 0.3s ease; display: inline-block;
 }
-
-
-.mermaid-diagram-wrapper .zoom-controls .zoom-level {
-    margin-left: 10px;
-    padding: 6px 12px;
-    background: white;
-    border-radius: 4px;
-    font-weight: bold;
-    color: #0066cc;
-    font-size: 14px;
-}
-
-/* 6. 图表容器 */
-.mermaid-diagram-wrapper .mermaid-chart-container {
-    text-align: center;
-    overflow: auto;
-    padding: 20px;
-    background: white;
-    border: 1px solid #e0e0e0;
-    border-radius: 4px;
-    min-height: 200px;
-}
-
-.mermaid-diagram-wrapper .mermaid-inner {
-    transform: scale(1);
-    transform-origin: center center;
-    transition: transform 0.3s ease;
-    display: inline-block;
-}
-
 
 /* ================================================== */
-/* ★★★ 新增：Mermaid Lightbox (弹窗) 样式 ★★★ */
+/* ★★★ 3. Mermaid Lightbox (全屏弹窗) 样式区 ★★★ */
 /* ================================================== */
 
-/* 7. 全屏按钮特定样式 */
-.mermaid-diagram-wrapper .zoom-controls button.mermaid-fullscreen-btn {
-    background: #198754; /* 绿色，表示“进入” */
-    margin-left: auto; /* 推到右侧 */
-    margin-right: 10px;
-}
-.mermaid-diagram-wrapper .zoom-controls button.mermaid-fullscreen-btn:hover {
-    background: #157347;
-}
-
-
-/* 8. 遮罩层 (覆盖整个页面) */
+/* 遮罩层 */
 #mermaid-lightbox {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(0, 0, 0, 0.75); /* 半透明黑色背景 */
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 9998;
-    padding: 20px;
-    box-sizing: border-box;
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: var(--mm-overlay) !important; backdrop-filter: blur(4px);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 9998; padding: 20px; box-sizing: border-box;
+    transition: background 0.3s ease;
 }
 
-/* 9. 弹窗主体 */
+/* 弹窗主体 */
 .mermaid-lightbox-modal {
-    width: 90%;
-    height: 90%;
-    background: #2d333b; /* 深色背景 */
-    border-radius: 8px;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
+    width: 90%; height: 90%;
+    background: var(--mm-modal-bg) !important;
+    border-radius: 10px; box-shadow: 0 20px 50px rgba(0,0,0,0.3);
+    display: flex; flex-direction: column; overflow: hidden;
     transition: width 0.3s ease, height 0.3s ease;
 }
-
-/* 9a. 弹窗最大化样式 */
 .mermaid-lightbox-modal.maximized {
-    width: 100% !important;
-    height: 100% !important;
-    border-radius: 0;
-    padding: 0;
-    top: 0;
-    left: 0;
-    position: absolute;
+    width: 100% !important; height: 100% !important;
+    border-radius: 0; padding: 0; top: 0; left: 0; position: absolute;
 }
 
-/* 10. 弹窗头部 (模拟 Mac 窗口) */
+/* 弹窗头部 (模拟 Mac 窗口) */
 .mermaid-lightbox-header {
-    padding: 12px 15px;
-    background: #3c424c;
-    border-bottom: 1px solid #555;
-    display: flex;
-    align-items: center;
-    user-select: none;
+    padding: 12px 15px; background: var(--mm-modal-header) !important;
+    border-bottom: 1px solid var(--mm-border) !important;
+    display: flex; align-items: center; user-select: none;
 }
-
-.mermaid-lightbox-window-controls {
-    display: flex;
-    gap: 8px;
-}
-
+.mermaid-lightbox-window-controls { display: flex; gap: 8px; }
 .mermaid-lightbox-window-controls button {
-    width: 14px;
-    height: 14px;
-    border-radius: 50%;
-    border: none;
-    cursor: pointer;
-    padding: 0;
+    width: 14px; height: 14px; border-radius: 50%; border: none; cursor: pointer; padding: 0;
 }
-/* 关闭按钮 (红) */
 #mermaid-lightbox-close { background-color: #ff5f57; }
-/* 最小化按钮 (黄) */
 #mermaid-lightbox-minimize { background-color: #febc2e; }
-/* 最大化按钮 (绿) */
 #mermaid-lightbox-maximize { background-color: #28c840; }
 
 .mermaid-lightbox-title {
-    color: #e0e0e0;
-    font-weight: bold;
-    text-align: center;
-    flex-grow: 1;
-    margin-right: 50px; /* 留出按钮空间 */
+    color: var(--mm-text) !important; font-weight: bold; text-align: center;
+    flex-grow: 1; margin-right: 50px;
 }
 
-/* 11. 弹窗内容区域 (可平移) */
+/* 弹窗内容区域 */
 #mermaid-lightbox-body {
-    flex-grow: 1;
-    overflow: auto; /* ★ 关键：平移的容器 */
-    text-align: center;
-    padding: 20px;
-    box-sizing: border-box;
-    background: #22272e;
+    flex-grow: 1; overflow: auto; text-align: center; padding: 20px; box-sizing: border-box;
+    background: var(--mm-modal-body) !important;
 }
-
-/* 弹窗内的 .mermaid-inner (与原容器的 .mermaid-inner 样式一致) */
 #mermaid-lightbox-body .mermaid-inner {
-    transform: scale(1);
-    transform-origin: 0 0; /* <--- 修改后的行 */
-    transition: transform 0.3s ease;
-    display: inline-block;
+    transform: scale(1); transform-origin: 0 0; transition: transform 0.3s ease; display: inline-block;
 }
 
-/* 12. 弹窗控制栏 (独立的缩放) */
+/* 弹窗底部控制栏 */
 .mermaid-lightbox-controls {
-    padding: 10px 15px;
-    background: #3c424c;
-    border-top: 1px solid #555;
-    display: flex;
-    align-items: center;
-    gap: 10px;
+    padding: 10px 15px; background: var(--mm-modal-header) !important;
+    border-top: 1px solid var(--mm-border) !important;
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
 }
-
 .mermaid-lightbox-controls button {
-    padding: 6px 14px;
-    background: #0066cc;
-    color: white;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    font-weight: bold;
+    padding: 6px 14px; background: var(--mm-btn-bg); color: white;
+    border: none; border-radius: 4px; cursor: pointer; font-weight: bold;
 }
-.mermaid-lightbox-controls button[data-zoom="reset"] {
-    background: #6c757d;
-}
-.mermaid-lightbox-controls button:hover {
-    opacity: 0.8;
-}
+.mermaid-lightbox-controls button:hover { opacity: 0.8; background: var(--mm-btn-hover); }
+.mermaid-lightbox-controls button[data-zoom="reset"] { background: #6c757d; }
+.mermaid-lightbox-controls button[data-zoom="reset"]:hover { background: #5a6268; }
 
 .mermaid-lightbox-controls .zoom-level {
-    padding: 6px 12px;
-    background: #22272e;
-    border-radius: 4px;
-    font-weight: bold;
-    color: #0099ff;
-    font-size: 14px;
-    margin-left: auto; /* 推到右侧 */
+    padding: 6px 12px; background: var(--mm-modal-body) !important; border-radius: 4px;
+    font-weight: bold; color: #0099ff; font-size: 14px; margin-left: auto;
+    border: 1px solid var(--mm-border) !important;
 }

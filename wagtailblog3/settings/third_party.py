@@ -110,3 +110,8 @@ SWAGGER_SETTINGS = {
         }
     }
 }
+
+import mimetypes
+
+# 强制让 Django 认识 .mjs 是合法的 JavaScript 文件
+mimetypes.add_type("application/javascript", ".mjs", True)

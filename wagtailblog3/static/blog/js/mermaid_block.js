@@ -1,148 +1,124 @@
 /*
  * wagtailblog3/static/blog/js/mermaid_block.js
- * 专用于 Mermaid Block 的 jQuery 脚本
- *
- * v2.0:
- * - 提高原容器缩放上限 (500%)
- * - 提高原容器平移灵敏度 (* 3)
- * - 增加 Lightbox (弹窗) 功能，实现独立缩放/平移
+ * 核心升级版：完美支持缩放 (Zoom) 与硬件加速平移拖拽 (Pan)
  */
-
-/**
- * ==================================================
- * 1. 原容器内缩放 (In-Block Zoom)
- * ==================================================
- * @param {HTMLElement} button - 被点击的按钮
- * @param {string} action - 'in', 'out', or 'reset'
- */
-function zoomMermaid(button, action) {
-    const $button = $(button);
-    const $wrapper = $button.closest('.mermaid-diagram-wrapper');
-    const $chartInner = $wrapper.find('.mermaid-inner');
-    const $zoomLevelDisplay = $wrapper.find('.zoom-level');
-
-    const currentTransform = $chartInner.css('transform');
-    let currentScale = 1;
-
-    if (currentTransform && currentTransform !== 'none') {
-        const matrix = currentTransform.match(/matrix\(([^)]+)\)/);
-        if (matrix && matrix[1]) {
-            currentScale = parseFloat(matrix[1].split(',')[0]);
-        }
-    }
-
-    let newScale = currentScale;
-    const zoomStep = 0.2;
-    const minScale = 0.2;
-    const maxScale = 5.0; // ★★★ 需求 1: 上限提高到 500% ★★★
-
-    switch(action) {
-        case 'in':
-            newScale = Math.min(currentScale + zoomStep, maxScale);
-            break;
-        case 'out':
-            newScale = Math.max(currentScale - zoomStep, minScale);
-            break;
-        case 'reset':
-            newScale = 1;
-            break;
-    }
-
-    $chartInner.css('transform', `scale(${newScale})`);
-    $zoomLevelDisplay.text(`${Math.round(newScale * 100)}%`);
-
-    const $container = $wrapper.find('.mermaid-chart-container');
-    $container.css('cursor', newScale > 1.2 ? 'move' : 'default');
-
-
-}
-
-
-/**
- * ==================================================
- * 2. ★★★ (新增) 弹窗内缩放 (Modal Zoom) ★★★
- * ==================================================
- */
-function zoomMermaidModal(action) {
-    const $chartInner = $('#mermaid-lightbox-body .mermaid-inner');
-    if (!$chartInner.length) return; // 安全检查
-
-    const $zoomLevelDisplay = $('.mermaid-lightbox-controls .zoom-level');
-
-    const currentTransform = $chartInner.css('transform');
-    let currentScale = 1;
-
-    if (currentTransform && currentTransform !== 'none') {
-        const matrix = currentTransform.match(/matrix\(([^)]+)\)/);
-        if (matrix && matrix[1]) {
-            currentScale = parseFloat(matrix[1].split(',')[0]);
-        }
-    }
-
-    let newScale = currentScale;
-    const zoomStep = 0.2;
-    const minScale = 0.2;
-    const maxScale = 10.0; // 弹窗内允许 1000% 放大
-
-    switch(action) {
-        case 'in':
-            newScale = Math.min(currentScale + zoomStep, maxScale);
-            break;
-        case 'out':
-            newScale = Math.max(currentScale - zoomStep, minScale);
-            break;
-        case 'reset':
-            newScale = 1;
-            break;
-    }
-
-    $chartInner.css('transform', `scale(${newScale})`);
-    $zoomLevelDisplay.text(`${Math.round(newScale * 100)}%`);
-
-    $('#mermaid-lightbox-body').css('cursor', newScale > 1.0 ? 'move' : 'default');
-}
-
-/**
- * ==================================================
- * 3. ★★★ (新增) 构建弹窗 HTML ★★★
- * ==================================================
- */
-function buildMermaidModal() {
-    return `
-        <div id="mermaid-lightbox">
-            <div class="mermaid-lightbox-modal">
-                <div class="mermaid-lightbox-header">
-                    <div class="mermaid-lightbox-window-controls">
-                        <button id="mermaid-lightbox-close" title="关闭"></button>
-                        <button id="mermaid-lightbox-minimize" title="最小化"></button>
-                        <button id="mermaid-lightbox-maximize" title="最大化/还原"></button>
-                    </div>
-                    <div class="mermaid-lightbox-title">Mermaid 图表查看器</div>
-                </div>
-                
-                <div id="mermaid-lightbox-body">
-                    </div>
-                
-                <div class="mermaid-lightbox-controls">
-                    <button data-zoom="in">🔍 放大</button>
-                    <button data-zoom="out">🔍 缩小</button>
-                    <button data-zoom="reset">↺ 重置</button>
-                    <span class="zoom-level">100%</span>
-                </div>
-            </div>
-        </div>
-    `;
-}
-
-
-// ==================================================
-// 4. jQuery 事件绑定
-// ==================================================
 $(function() {
 
-    // 4.1. 原容器 - 折叠/展开
+    // 1. 核心状态机：为每个图表容器独立保存缩放和位移状态
+    function getState($container) {
+        let state = $container.data('mm-state');
+        if (!state) {
+            state = { scale: 1, tx: 0, ty: 0, isDragging: false };
+            $container.data('mm-state', state);
+        }
+        return state;
+    }
+
+    // 2. 核心渲染器：应用 Transform 变形进行硬件加速
+    function applyTransform($container, state) {
+        const $inner = $container.find('.mermaid-inner');
+        // 拖拽时取消过渡动画以保证鼠标绝对跟手，缩放时恢复柔和动画
+        const transition = state.isDragging ? 'none' : 'transform 0.2s ease';
+
+        $inner.css({
+            'transform': `translate(${state.tx}px, ${state.ty}px) scale(${state.scale})`,
+            'transform-origin': 'center center',
+            'transition': transition
+        });
+
+        // 同步更新 UI 上的百分比文字
+        const $wrapper = $container.closest('.mermaid-diagram-wrapper, .mermaid-lightbox-modal');
+        $wrapper.find('.zoom-level').text(`${Math.round(state.scale * 100)}%`);
+    }
+
+    // ==========================================
+    // 功能 A：缩放逻辑 (支持网页内嵌和全屏弹窗)
+    // ==========================================
+    $('body').on('click', 'button[data-zoom]', function(e) {
+        e.stopPropagation();
+        const action = $(this).data('zoom');
+        if (action === 'fullscreen') return; // 全屏按钮走独立逻辑
+
+        const isModal = $(this).closest('#mermaid-lightbox').length > 0;
+        const $container = isModal ? $('#mermaid-lightbox-body') : $(this).closest('.mermaid-diagram-wrapper').find('.mermaid-chart-container');
+
+        if (!$container.length) return;
+
+        const state = getState($container);
+        const step = 0.2;
+        const maxScale = isModal ? 10.0 : 5.0; // 弹窗允许放大 10 倍
+        const minScale = 0.2;
+
+        if (action === 'in') {
+            state.scale = Math.min(state.scale + step, maxScale);
+        } else if (action === 'out') {
+            state.scale = Math.max(state.scale - step, minScale);
+        } else if (action === 'reset') {
+            state.scale = 1;
+            state.tx = 0;
+            state.ty = 0; // 重置时归位到中心
+        }
+
+        state.isDragging = false;
+        applyTransform($container, state);
+    });
+
+    // ==========================================
+    // 功能 B：丝滑拖拽平移逻辑
+    // ==========================================
+
+    // 给容器加上默认的“可抓取”手势光标
+    $('.mermaid-chart-container').css('cursor', 'grab');
+
+    $('body').on('mousedown', '.mermaid-chart-container, #mermaid-lightbox-body', function(e) {
+        e.preventDefault(); // 防止拖拽时误选中旁边的文字
+
+        const $container = $(this);
+        const state = getState($container);
+
+        state.isDragging = true;
+        // 记录鼠标按下的初始坐标和容器的初始位移
+        state.startX = e.pageX;
+        state.startY = e.pageY;
+        state.startTx = state.tx;
+        state.startTy = state.ty;
+
+        $container.css('cursor', 'grabbing');
+        applyTransform($container, state);
+    });
+
+    $('body').on('mousemove', '.mermaid-chart-container, #mermaid-lightbox-body', function(e) {
+        const $container = $(this);
+        const state = getState($container);
+
+        if (!state.isDragging) return;
+
+        // 计算鼠标移动的差值
+        const deltaX = e.pageX - state.startX;
+        const deltaY = e.pageY - state.startY;
+
+        // 实时更新当前位移
+        state.tx = state.startTx + deltaX;
+        state.ty = state.startTy + deltaY;
+
+        applyTransform($container, state);
+    });
+
+    $('body').on('mouseup mouseleave', '.mermaid-chart-container, #mermaid-lightbox-body', function(e) {
+        const $container = $(this);
+        const state = getState($container);
+
+        if (state.isDragging) {
+            state.isDragging = false;
+            $container.css('cursor', 'grab'); // 恢复手势
+            applyTransform($container, state);
+        }
+    });
+
+    // ==========================================
+    // 功能 C：手风琴 折叠/展开
+    // ==========================================
     $('body').on('click', '.mermaid-header', function() {
-        // ... (此部分代码无变化) ...
         const $header = $(this);
         const $wrapper = $header.closest('.mermaid-diagram-wrapper');
         const $content = $wrapper.find('.mermaid-content');
@@ -152,149 +128,74 @@ $(function() {
         $icon.text($content.hasClass('collapsed') ? '▼' : '▲');
     });
 
-    // 4.2. 原容器 - 缩放按钮
-    $('body').on('click', '.zoom-controls button[data-zoom]', function(e) {
+    // ==========================================
+    // 功能 D：构建全屏弹窗 DOM
+    // ==========================================
+    function buildMermaidModal() {
+        return `
+            <div id="mermaid-lightbox">
+                <div class="mermaid-lightbox-modal">
+                    <div class="mermaid-lightbox-header">
+                        <div class="mermaid-lightbox-window-controls">
+                            <button id="mermaid-lightbox-close" title="关闭"></button>
+                            <button id="mermaid-lightbox-minimize" title="最小化"></button>
+                            <button id="mermaid-lightbox-maximize" title="最大化/还原"></button>
+                        </div>
+                        <div class="mermaid-lightbox-title">Mermaid 图表查看器</div>
+                    </div>
+                    
+                    <div id="mermaid-lightbox-body" style="cursor: grab;">
+                    </div>
+                    
+                    <div class="mermaid-lightbox-controls">
+                        <button data-zoom="in">🔍 放大</button>
+                        <button data-zoom="out">🔍 缩小</button>
+                        <button data-zoom="reset">↺ 重置</button>
+                        <span class="zoom-level">100%</span>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    // ==========================================
+    // 功能 E：全屏弹窗打开/关闭逻辑
+    // ==========================================
+    $('body').on('click', '.mermaid-fullscreen-btn', function(e) {
         e.stopPropagation();
-        const action = $(this).data('zoom');
+        if ($('#mermaid-lightbox').length) return; // 防连点
 
-        if (action === 'fullscreen') {
-            // ★★★ (新增) 全屏按钮逻辑 ★★★
-            if ($('#mermaid-lightbox').length) return; // 防止重复打开
+        const $wrapper = $(this).closest('.mermaid-diagram-wrapper');
+        const $diagram = $wrapper.find('.mermaid-inner').clone();
 
-            // 1. 找到图表并克隆
-            const $wrapper = $(this).closest('.mermaid-diagram-wrapper');
-            const $diagram = $wrapper.find('.mermaid-inner').clone();
+        // 关键修复：移除 SVG 被强加的 maxWidth，让其在弹窗中能自由放大不被裁剪
+        $diagram.find('svg').css('max-width', 'none');
 
-            // 2. 构建并添加 Modal
-            $('body').append(buildMermaidModal());
+        $('body').append(buildMermaidModal());
 
-            // 3. 注入图表
-            $('#mermaid-lightbox-body').append($diagram);
-
-            // 4. 显示
-            $('#mermaid-lightbox').fadeIn(200);
-
-        } else {
-            // 原有缩放逻辑
-            zoomMermaid(this, action);
-        }
-    });
-
-    // 4.3. 原容器 - 平移拖动
-    $('.mermaid-chart-container').each(function() {
-        const $container = $(this);
-        let isDragging = false, startX, startY, scrollLeft, scrollTop;
-
-        function getScale() {
-            // ... (此部分代码无变化) ...
-            const $chartInner = $container.find('.mermaid-inner');
-            const transform = $chartInner.css('transform');
-            let scale = 1;
-            if (transform && transform !== 'none') {
-                const matrix = transform.match(/matrix\(([^)]+)\)/);
-                if (matrix && matrix[1]) scale = parseFloat(matrix[1].split(',')[0]);
-            }
-            return scale;
+        // 完美继承当前原图表的黑夜/白天主题
+        if ($wrapper.hasClass('dark-theme')) {
+            $('#mermaid-lightbox').addClass('dark-theme');
         }
 
-        $container.on('mousedown', function(e) {
-            if (getScale() > 1.2) {
-                isDragging = true;
-                startX = e.pageX - $container.offset().left;
-                startY = e.pageY - $container.offset().top;
-                scrollLeft = $container.scrollLeft();
-                scrollTop = $container.scrollTop();
-                $container.css('cursor', 'grabbing');
-            }
-        });
+        $('#mermaid-lightbox-body').append($diagram);
 
-        $container.on('mouseup mouseleave', function() {
-            isDragging = false;
-            $container.css('cursor', getScale() > 1.2 ? 'move' : 'default');
-        });
+        // 初始化弹窗的独立坐标与缩放状态
+        getState($('#mermaid-lightbox-body'));
 
-        $container.on('mousemove', function(e) {
-            if (!isDragging) return;
-            e.preventDefault();
-            const x = e.pageX - $container.offset().left;
-            const y = e.pageY - $container.offset().top;
-
-            // ★★★ 需求 2: 灵敏度 * 2 调整为 * 3 ★★★
-            const walkX = (x - startX) * 3;
-            const walkY = (y - startY) * 3;
-
-            $container.scrollLeft(scrollLeft - walkX);
-            $container.scrollTop(scrollTop - walkY);
-        });
+        $('#mermaid-lightbox').fadeIn(200);
     });
 
-
-    // ==================================================
-    // 4.4. ★★★ (新增) 弹窗事件绑定 (使用事件委托) ★★★
-    // ==================================================
-
-    // 弹窗 - 关闭 / 最小化
+    // 弹窗关闭与最小化
     $('body').on('click', '#mermaid-lightbox-close, #mermaid-lightbox-minimize', function() {
         $('#mermaid-lightbox').fadeOut(200, function() {
-            $(this).remove(); // 关闭后彻底移除
+            $(this).remove(); // 淡出后清除DOM
         });
     });
 
-    // 弹窗 - 最大化 / 还原
+    // 弹窗最大化/还原
     $('body').on('click', '#mermaid-lightbox-maximize', function() {
         $(this).closest('.mermaid-lightbox-modal').toggleClass('maximized');
-    });
-
-    // 弹窗 - 缩放按钮
-    $('body').on('click', '.mermaid-lightbox-controls button[data-zoom]', function() {
-        const action = $(this).data('zoom');
-        zoomMermaidModal(action);
-    });
-
-    // 弹窗 - 平移拖动 (逻辑同 4.3, 仅选择器不同)
-    $('body').on('mousedown', '#mermaid-lightbox-body', function(e) {
-        const $container = $(this);
-        const $chartInner = $container.find('.mermaid-inner');
-        let scale = 1;
-        const transform = $chartInner.css('transform');
-        if (transform && transform !== 'none') {
-            const matrix = transform.match(/matrix\(([^)]+)\)/);
-            if (matrix && matrix[1]) scale = parseFloat(matrix[1].split(',')[0]);
-        }
-
-        if (scale > 1.0) { // 弹窗内超过 100% 即可拖动
-            $container.data('isDragging', true);
-            $container.data('startX', e.pageX - $container.offset().left);
-            $container.data('startY', e.pageY - $container.offset().top);
-            $container.data('scrollLeft', $container.scrollLeft());
-            $container.data('scrollTop', $container.scrollTop());
-            $container.css('cursor', 'grabbing');
-        }
-    }).on('mouseup mouseleave', '#mermaid-lightbox-body', function() {
-        $(this).data('isDragging', false);
-        const $container = $(this);
-        // ... [计算 scale, 同上] ...
-        let scale = 1;
-        const transform = $container.find('.mermaid-inner').css('transform');
-        if (transform && transform !== 'none') {
-            const matrix = transform.match(/matrix\(([^)]+)\)/);
-            if (matrix && matrix[1]) scale = parseFloat(matrix[1].split(',')[0]);
-        }
-        $container.css('cursor', scale > 1.0 ? 'move' : 'default');
-
-    }).on('mousemove', '#mermaid-lightbox-body', function(e) {
-        const $container = $(this);
-        if (!$container.data('isDragging')) return;
-
-        e.preventDefault();
-        const x = e.pageX - $container.offset().left;
-        const y = e.pageY - $container.offset().top;
-
-        const walkX = (x - $container.data('startX')) * 3; // 弹窗内也使用 3 倍灵敏度
-        const walkY = (y - $container.data('startY')) * 3;
-
-        $container.scrollLeft($container.data('scrollLeft') - walkX);
-        $container.scrollTop($container.data('scrollTop') - walkY);
     });
 
 });

@@ -1,7 +1,7 @@
-{% load mermaid %}
+{% load static %}
 
 <div class="mermaid-diagram-wrapper">
-    {# 标题栏和控制按钮 #}
+    {# --- 标题栏和折叠控制 --- #}
     <div class="mermaid-header">
         <div style="display: flex; align-items: center;">
             <span class="toggle-icon">▲</span>
@@ -10,7 +10,7 @@
         <div class="mermaid-toggle-hint">点击折叠/展开</div>
     </div>
 
-    {# 内容区域 #}
+    {# --- 核心内容区域 --- #}
     <div class="mermaid-content">
         {# 调试面板 #}
         <details>
@@ -19,35 +19,80 @@
             <p>💡 如果图表未显示，请检查上面的代码语法是否正确</p>
         </details>
 
-        {# 缩放控制按钮 #}
+        {# 工具栏：缩放、主题切换、全屏 #}
         <div class="zoom-controls">
             <span class="zoom-title">缩放控制：</span>
-            <button data-zoom="in">
-                🔍 放大
-            </button>
-            <button data-zoom="out">
-                🔍 缩小
-            </button>
-            <button data-zoom="reset">
-                ↺ 重置
-            </button>
-
-            {# ================================================== #}
-            {# ★★★ 新增：全屏查看按钮 ★★★ #}
-            {# ================================================== #}
+            <button data-zoom="in">🔍 放大</button>
+            <button data-zoom="out">🔍 缩小</button>
+            <button data-zoom="reset">↺ 重置</button>
+            <button type="button" class="theme-toggle-btn" style="background: #6f42c1; color: white;">🌓 切换主题</button>
             <button data-zoom="fullscreen" class="mermaid-fullscreen-btn">
                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display: inline-block; vertical-align: middle; margin-right: 5px;"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg>
                 全屏查看
             </button>
-
             <span class="zoom-level">100%</span>
         </div>
 
-        {# Mermaid 图表容器 #}
+        {# 图表渲染容器 #}
         <div class="mermaid-chart-container">
-            <div class="mermaid-inner">
-                {% mermaid value.code %}
-            </div>
+            <textarea class="mermaid-raw-source" style="display: none;">{{ value.code|safe }}</textarea>
+
+            <div class="mermaid-inner"></div>
         </div>
     </div>
 </div>
+
+{# ========================================================================= #}
+{# 核心渲染引擎 (必须写在 HTML 中，因为需要解析 Django 的 static 标签路径) #}
+{# ========================================================================= #}
+<script type="module">
+    import mermaid from "{% static 'blog/js/mermaid/mermaid.esm.min.mjs' %}";
+
+    mermaid.initialize({
+        startOnLoad: false,
+        securityLevel: 'loose'
+    });
+
+    document.querySelectorAll('.mermaid-diagram-wrapper:not([data-mm-init])').forEach((wrapper) => {
+        wrapper.setAttribute('data-mm-init', 'true');
+
+        const rawSource = wrapper.querySelector('.mermaid-raw-source').value.trim();
+        const innerContainer = wrapper.querySelector('.mermaid-inner');
+        const toggleBtn = wrapper.querySelector('.theme-toggle-btn');
+        const graphId = 'fs-graph-' + Math.random().toString(36).substring(2, 11);
+
+        // 探测系统是否处于深色模式
+        let currentTheme = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'default';
+
+        if (currentTheme === 'dark') wrapper.classList.add('dark-theme');
+
+        async function renderMermaidChart(themeName) {
+            if (!rawSource) return;
+            try {
+                innerContainer.innerHTML = '';
+                const { svg } = await mermaid.render(graphId + '-' + themeName, rawSource);
+                innerContainer.innerHTML = svg;
+            } catch (error) {
+                console.error("Mermaid 动态主题重绘失败:", error);
+            }
+        }
+
+        // 首屏渲染
+        renderMermaidChart(currentTheme);
+
+        // 主题切换按钮事件
+        if (toggleBtn) {
+            toggleBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (currentTheme === 'default') {
+                    currentTheme = 'dark';
+                    wrapper.classList.add('dark-theme');
+                } else {
+                    currentTheme = 'default';
+                    wrapper.classList.remove('dark-theme');
+                }
+                renderMermaidChart(currentTheme);
+            });
+        }
+    });
+</script>

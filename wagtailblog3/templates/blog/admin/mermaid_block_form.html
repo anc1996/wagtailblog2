@@ -1,0 +1,86 @@
+{% load static %}
+
+<div class="mermaid-admin-editor" style="display: flex; gap: 20px; background: #f8fafc; padding: 15px; border-radius: 6px; border: 1px solid #e2e8f0; margin-bottom: 10px;">
+
+    <div style="flex: 1; min-width: 0;" data-contentpath="code">
+        <label for="{{ children.code.id_for_label }}" style="font-weight: bold; margin-bottom: 8px; display: block; color: #1e293b; border-bottom: 2px solid #cbd5e1; padding-bottom: 5px;">
+            ⌨️ 代码输入区
+        </label>
+
+        <div style="margin-bottom: 10px;">
+            {{ children.code.render_form }}
+        </div>
+
+        <div style="font-size: 12px; color: #64748b; margin-top: 5px;">
+            提示：无需加 <code>```mermaid</code> 标记，直接写语法即可。包含中文或特殊符号的节点请用双引号 <code>"内容"</code> 包裹。
+        </div>
+    </div>
+
+    <div style="flex: 1; border: 1px dashed #94a3b8; padding: 10px; background: #ffffff; border-radius: 4px; min-height: 200px; display: flex; flex-direction: column;">
+        <label style="font-weight: bold; margin-bottom: 8px; display: block; color: #1e293b; border-bottom: 2px solid #cbd5e1; padding-bottom: 5px;">
+            👁️ 实时预览区
+        </label>
+
+        <div id="mermaid-preview-{{ prefix }}" style="flex: 1; width: 100%; display: flex; justify-content: center; align-items: center; overflow: auto; min-height: 150px;">
+            <span style="color: #94a3b8;">输入代码后将在此处渲染...</span>
+        </div>
+    </div>
+</div>
+
+<script type="module">
+    // 引入我们在静态目录下载的最新的 v11 版本
+    import mermaid from '{% static "blog/js/mermaid/mermaid.esm.min.mjs" %}';
+
+    // 初始化配置：关闭自动加载 (startOnLoad: false)，由我们手动接管渲染
+    mermaid.initialize({
+        startOnLoad: false,
+        theme: 'default',
+        securityLevel: 'loose'
+    });
+
+    // 1. 获取 Wagtail 动态生成的输入框 DOM
+    const textarea = document.getElementById('{{ children.code.id_for_label }}');
+    // 2. 获取预览区域 DOM
+    const previewDiv = document.getElementById('mermaid-preview-{{ prefix }}');
+    // 3. 生成一个合法的唯一图表 ID
+    const graphId = 'graph-{{ prefix }}'.replace(/[^a-zA-Z0-9]/g, '');
+
+    let renderTimeout = null;
+
+    // 核心渲染函数
+    async function updateMermaidPreview() {
+        if (!textarea || !previewDiv) return;
+
+        const code = textarea.value.trim();
+
+        // 如果输入框为空，恢复提示文字
+        if (!code) {
+            previewDiv.innerHTML = '<span style="color: #94a3b8;">输入代码后将在此处渲染...</span>';
+            return;
+        }
+
+        try {
+            // 调用 Mermaid 原生 API 渲染 SVG
+            const { svg } = await mermaid.render(graphId, code);
+            previewDiv.innerHTML = svg;
+        } catch (error) {
+            // 捕获异常：用户打字过程中语法还没写完，肯定会报错，属于正常现象。
+            // 我们在控制台静默输出，不打断用户输入。
+            console.debug("Mermaid 正在等待语法完成...");
+        }
+    }
+
+    // 绑定事件：如果输入框存在，监听用户的键盘输入
+    if (textarea) {
+        // 使用 500ms 的防抖(Debounce)，防止用户每敲一个字母就渲染一次导致浏览器卡死
+        textarea.addEventListener('input', () => {
+            clearTimeout(renderTimeout);
+            renderTimeout = setTimeout(updateMermaidPreview, 500);
+        });
+
+        // 页面初始化时（例如编辑已经写好的文章），立即渲染一次图表
+        if (textarea.value) {
+            updateMermaidPreview();
+        }
+    }
+</script>

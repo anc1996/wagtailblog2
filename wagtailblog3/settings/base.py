@@ -33,7 +33,6 @@ INSTALLED_APPS = [
     
     # 第三方应用
     "storages",  # 添加 Django Storages
-	"django_mermaid",  # django-mermaid 包
     "wagtailmarkdown", # wagtail-markdown包
     "wagtailmedia", # wagtail-media 包
     'wagtailcodeblock', #  Wagtail CMS 源代码的语法高亮器块

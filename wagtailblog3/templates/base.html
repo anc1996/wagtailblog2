@@ -61,6 +61,13 @@
     {# 你的全局覆盖样式 #}
     <link rel="stylesheet" type="text/css" href="{% static 'css/wagtailblog3.css' %}">
 
+
+    {# ================================================== #}
+    {# ★★★ 新增：Highlight.js 官方前端高亮主题 ★★★ #}
+    {# 你可以把 github-dark.min.css 换成你喜欢的任何主题 #}
+    {# ================================================== #}
+    <link rel="stylesheet" href="{% static 'blog/js/highlightjs/styles/github-dark.min.css' %}">
+
     {% block extra_css %}{% endblock %}
 
 </head>
@@ -114,6 +121,17 @@
     <script src="{% static 'gretzia/js/enhanced-jquery-compatibility.js' %}"></script>
     <script src="{% static 'gretzia/js/jquery.mCustomScrollbar.js' %}"></script>
     <script type="text/javascript" src="{% static 'js/wagtailblog3.js' %}"></script>
+
+    {# ================================================== #}
+    {# ★★★ 新增：Highlight.js 核心库与自动高亮触发 ★★★ #}
+    {# ================================================== #}
+    <script src="{% static 'blog/js/highlightjs/highlight.min.js' %}"></script>
+    <script>
+        // 当 HTML DOM 加载完成后，自动寻找页面上所有的 <pre><code> 标签并进行高亮上色
+        document.addEventListener('DOMContentLoaded', (event) => {
+            hljs.highlightAll();
+        });
+    </script>
 
     {% block extra_js %}
         <script src="{% static 'js/flatpickr.js' %}"></script>

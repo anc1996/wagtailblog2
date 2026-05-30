@@ -58,16 +58,57 @@ def global_admin_js_mermaid():
 	)
 
 
-# (如果文件已有其他 hook，请保留它们)
+@hooks.register("insert_editor_css", order=100)
+def editor_css_easymde():
+	"""为 Wagtail 后台编辑页注入代码高亮和公式的离线 CSS"""
+	return format_html(
+		"""
+		<link rel="stylesheet" href="{}">
+		<link rel="stylesheet" href="{}">
+		<style>
+			/* ⚠️ 【强制规范】在 format_html 中写 CSS 必须用双大括号 {{ 和 }} */
 
-@hooks.register("insert_global_admin_js", order=100)
-def global_admin_js_easymde():
-	"""
-	在 Wagtail 管理后台的所有页面上加载自定义的 JS 文件，
-	用于配置 EasyMDE (MarkdownBlock) 编辑器的工具栏。
-	"""
-	return format_html('<script src="{}"></script>', static("blog/js/easymde_custom.js"))
+			/* 修正后台暗黑模式对预览区的影响，确保白底黑字基础阅读正常 */
+			.editor-preview, .editor-preview-side {{
+				color: #333 !important;
+				background-color: #fff !important;
+			}}
 
+			/* 强制干掉 Wagtail 的灰色，换成 Github Dark 的深空黑 */
+			.editor-preview pre, .editor-preview-side pre {{
+				background-color: #0d1117 !important;
+				padding: 16px !important;
+				border-radius: 6px !important;
+			}}
+
+			/* 释放字体颜色的控制权给 Highlight.js */
+			.editor-preview pre code.hljs, .editor-preview-side pre code.hljs {{
+				background-color: transparent !important;
+				color: #c9d1d9 !important;
+				text-shadow: none !important;
+			}}
+		</style>
+		""",
+		static('blog/js/highlightjs/styles/github-dark.min.css'),
+		static('blog/css/katex/katex.min.css')
+	)
+
+
+@hooks.register("insert_editor_js", order=100)
+def editor_js_easymde():
+    """为 Wagtail 后台编辑页注入 JS 引擎及自定义配置"""
+    return format_html(
+        """
+        <script src="{}"></script>
+        <script src="{}"></script>
+        <script src="{}"></script>
+        <script src="{}"></script>
+        """,
+        static('blog/js/highlightjs/highlight.min.js'),
+        static('blog/css/katex/katex.min.js'),
+        static('blog/js/katex/auto-render.min.js'),
+        static('blog/js/easymde_custom.js')
+    )
 
 # 在编辑页面前从MongoDB加载内容
 @hooks.register('before_edit_page')

@@ -102,6 +102,74 @@ window.wagtailMarkdown.options.toolbar = [
     'guide'
 ];
 
+
+// ==========================================================
+// 后台 EasyMDE 预览区动态渲染接管 (代码高亮 + KaTeX) - jQuery 架构版
+// ==========================================================
+$(document).ready(function() {
+    let renderTimeout;
+
+    // MutationObserver 必须是原生 API，用于监听底层 DOM 重绘
+    const observer = new MutationObserver(function(mutations) {
+        let needsRender = false;
+
+        for (let mutation of mutations) {
+            const $target = $(mutation.target);
+
+            // 只要变动节点的自身或其祖先包含预览区类名，即触发重新渲染
+            if ($target.hasClass('editor-preview-side') ||
+                $target.hasClass('editor-preview') ||
+                $target.closest('.editor-preview-side, .editor-preview').length > 0) {
+                needsRender = true;
+                break;
+            }
+        }
+
+        if (needsRender) {
+            // 300ms 防抖
+            clearTimeout(renderTimeout);
+            renderTimeout = setTimeout(function() {
+                // 用 jQuery 精准获取当前激活的预览容器
+                const $previews = $('.editor-preview-active, .editor-preview-active-side');
+
+                $previews.each(function() {
+                    // this 指向当前遍历到的原生 DOM 元素
+
+                    // 1. 唤醒数学公式渲染 (KaTeX 需要传入原生 DOM 节点)
+                    if (typeof renderMathInElement === 'function') {
+                        renderMathInElement(this, {
+                            delimiters: [
+                                {left: "$$", right: "$$", display: true},
+                                {left: "\\[", right: "\\]", display: true},
+                                {left: "$", right: "$", display: false},
+                                {left: "\\(", right: "\\)", display: false}
+                            ],
+                            throwOnError: false
+                        });
+                    }
+
+                    // 2. 唤醒代码块高亮 (Highlight.js)
+                    if (typeof hljs !== 'undefined') {
+                        $(this).find('pre code').each(function() {
+                            // 避免重复高亮
+                            if (!$(this).hasClass('hljs')) {
+                                hljs.highlightElement(this); // this 指向对应的 code 原生节点
+                            }
+                        });
+                    }
+                });
+            }, 300);
+        }
+    });
+
+    // 监听整个 body 的子元素变动
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        characterData: true
+    });
+});
+
 // --- 其他推荐的配置 ---
 window.wagtailMarkdown.options.lineNumbers = true;
 window.wagtailMarkdown.options.spellChecker = false;

@@ -6,18 +6,18 @@
 # MySQL 数据库配置
 # ==========================================================
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.mysql',
-        'NAME': 'wagtailsoftblog_test',
-        'USER': 'root',
-        'PASSWORD': '123456',
-        'HOST': 'localhost',
-        'PORT': '3306',
-        'OPTIONS': {
-            'charset': 'utf8mb4',
-            'collation': 'utf8mb4_general_ci',
-        }
-    }
+	'default': {
+		'ENGINE': 'django.db.backends.mysql',
+		'NAME': 'wagtailsoftblog_test',
+		'USER': 'root',
+		'PASSWORD': '123456',
+		'HOST': 'localhost',
+		'PORT': '3306',
+		'OPTIONS': {
+			'charset': 'utf8mb4',
+			'collation': 'utf8mb4_general_ci',
+		}
+	}
 }
 
 # ==========================================================
@@ -30,31 +30,31 @@ REDIS_DB = 1  # 用于计数器的数据库
 
 # Redis 缓存配置
 CACHES = {
-    'default': {
-        'BACKEND': 'django_redis.cache.RedisCache',
-        'LOCATION': 'redis://127.0.0.1:6379/1',
-        'OPTIONS': {
-            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
-            'PASSWORD': '123456'
-        }
-    },
-    'comment_rate_limit_cache': {  # 新的缓存实例，专门用于评论频率限制
-        'BACKEND': 'django_redis.cache.RedisCache',
-        'LOCATION': 'redis://127.0.0.1:6379/2',  # 使用不同的Redis DB，例如 DB 2
-        'OPTIONS': {
-            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
-            'PASSWORD': '123456'
-        }
-    }
+	'default': {
+		'BACKEND': 'django_redis.cache.RedisCache',
+		'LOCATION': 'redis://127.0.0.1:6379/1',
+		'OPTIONS': {
+			'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+			'PASSWORD': '123456'
+		}
+	},
+	'comment_rate_limit_cache': {  # 新的缓存实例，专门用于评论频率限制
+		'BACKEND': 'django_redis.cache.RedisCache',
+		'LOCATION': 'redis://127.0.0.1:6379/2',  # 使用不同的Redis DB，例如 DB 2
+		'OPTIONS': {
+			'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+			'PASSWORD': '123456'
+		}
+	}
 }
 
 # ==========================================================
 # MongoDB 配置
 # ==========================================================
 MONGO_DB = {
-    'NAME': 'wagtailblog_test',
-    'HOST': 'localhost',
-    'PORT': 27017,
+	'NAME': 'wagtailblog_test',
+	'HOST': 'localhost',
+	'PORT': 27017,
 }
 
 # MongoDB调试信息开关
@@ -68,14 +68,12 @@ AWS_S3_ENDPOINT_URL = 'http://192.168.20.2:9000'
 AWS_ACCESS_KEY_ID = 'admin'
 AWS_SECRET_ACCESS_KEY = '12345678'
 AWS_S3_OBJECT_PARAMETERS = {
-    'CacheControl': 'max-age=86400',
+	'CacheControl': 'max-age=86400',
 }
 AWS_QUERYSTRING_AUTH = False
 AWS_S3_FILE_OVERWRITE = False
 AWS_DEFAULT_ACL = 'public-read'
 AWS_S3_VERIFY = False
-
-
 
 # ==========================================================
 # 存储后端配置
@@ -83,25 +81,25 @@ AWS_S3_VERIFY = False
 # 默认存储设置，以及更新后的静态文件存储。
 # 参见 https://docs.djangoproject.com/en/5.1/ref/settings/#std-setting-STORAGES
 STORAGES = {
-    "default": {
-        "BACKEND": "wagtailblog3.storage_backends.MinioMediaStorage",
-    },
-    "staticfiles": {
-        "BACKEND": "django.contrib.staticfiles.storage.ManifestStaticFilesStorage",
-    },
-    "images": {
-        "BACKEND": "wagtailblog3.storage_backends.MinioImageStorage",
-    },
-    "original_images": {
-        "BACKEND": "wagtailblog3.storage_backends.MinioOriginalImageStorage",
-    },
-    "documents": {
-        "BACKEND": "wagtailblog3.storage_backends.MinioDocumentStorage",
-    },
-    # 添加媒体文件存储后端
-    "wagtailmedia": {
-        "BACKEND": "wagtailblog3.storage_backends.MinioMediaStorage",
-    },
+	"default": {
+		"BACKEND": "wagtailblog3.storage_backends.MinioMediaStorage",
+	},
+	"staticfiles": {
+		"BACKEND": "django.contrib.staticfiles.storage.ManifestStaticFilesStorage",
+	},
+	"images": {
+		"BACKEND": "wagtailblog3.storage_backends.MinioImageStorage",
+	},
+	"original_images": {
+		"BACKEND": "wagtailblog3.storage_backends.MinioOriginalImageStorage",
+	},
+	"documents": {
+		"BACKEND": "wagtailblog3.storage_backends.MinioDocumentStorage",
+	},
+	# 添加媒体文件存储后端
+	"wagtailmedia": {
+		"BACKEND": "wagtailblog3.storage_backends.MinioMediaStorage",
+	},
 }
 
 

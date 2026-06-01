@@ -213,3 +213,55 @@
     font-weight: bold; color: #0099ff; font-size: 14px; margin-left: auto;
     border: 1px solid var(--mm-border) !important;
 }
+
+
+/* ================================================== */
+/* ★★★ 4. 滚动条 (滑块) UI 美化区 ★★★ */
+/* ================================================== */
+
+.mm-zoom-slider {
+    -webkit-appearance: none;
+    width: 160px;
+    height: 6px;
+    border-radius: 3px;
+    outline: none;
+    cursor: pointer;
+    /* 背景色交由 JS 里的 linear-gradient 接管控制 */
+    background: var(--mm-border);
+}
+
+/* Chrome, Safari, Edge 等 WebKit 浏览器的滑块圆球 */
+.mm-zoom-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #ffffff;
+    border: 2px solid var(--mm-btn-bg); /* 跟你的放大按钮颜色一致 */
+    cursor: pointer;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+    transition: transform 0.1s ease, border-color 0.2s ease;
+}
+
+.mm-zoom-slider::-webkit-slider-thumb:hover {
+    transform: scale(1.2);
+    border-color: var(--mm-btn-hover);
+}
+
+/* Firefox 浏览器的滑块圆球 */
+.mm-zoom-slider::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #ffffff;
+    border: 2px solid var(--mm-btn-bg);
+    cursor: pointer;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+    transition: transform 0.1s ease, border-color 0.2s ease;
+}
+
+.mm-zoom-slider::-moz-range-thumb:hover {
+    transform: scale(1.2);
+    border-color: var(--mm-btn-hover);
+}

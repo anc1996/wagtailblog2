@@ -2,6 +2,7 @@
 
 import traceback, logging
 
+import uuid
 from django.db.models.functions import Coalesce, Lower
 from django.utils import timezone
 from django.core.paginator import EmptyPage, PageNotAnInteger, Paginator
@@ -37,9 +38,11 @@ from wagtail_ai.panels import AITitleFieldPanel, AIDescriptionFieldPanel
 from wagtailmarkdown.blocks import MarkdownBlock
 from wagtailcodeblock.blocks import CodeBlock
 
+
 from blog.blocks import AudioBlock, VideoBlock, CustomTableBlock, MermaidBlock
-from wagtailblog3.mongo import MongoManager
+
 from wagtailblog3.mongodb import MongoDBStreamFieldAdapter
+from wagtailblog3.mongo import MongoManager
 
 logger = logging.getLogger(__name__)
 
@@ -462,77 +465,188 @@ class BlogPage(Page):
 		indexes = [
 			models.Index(fields=['date']),  # 为博客发布日期添加索引，优化时间筛选查询
 		]
+		
+	# =========================================================================
+	# 网关 1：拦截快照序列化 (保存草稿、生成历史记录时自动触发)
+	# =========================================================================
+	def serializable_data(self):
+		"""Wagtail 将对象序列化为 JSON 存入 wagtailcore_revision 表前触发：剥离大文本"""
+		data = super().serializable_data()
+		
+		# 拦截大文本 body，准备剥离
+		if 'body' in data and data['body']:
+			pointer = f"rev_{self.pk or 'new'}_{uuid.uuid4().hex}"
+			
+			try:
+				mongo_manager = MongoManager()
+				# 优雅调用：通过属性直接向我们在 _connect 中挂载的 blog_revisions 插入数据
+				if getattr(mongo_manager, 'blog_revisions', None) is not None:
+					mongo_manager.blog_revisions.insert_one({
+						'_id': pointer,
+						'page_id': self.pk,
+						'body': data['body'],
+						'created_at': timezone.now().isoformat()
+					})
+				
+				# ！！！核心抽离：将大文本换成空数组，让 MySQL 的 Revision 负担变为 0 ！！！
+				data['body'] = []
+				# 注入自定义指针，等待反序列化时抓取
+				data['mongo_draft_pointer'] = pointer
+				
+				logger.info(f"成功将快照 body 剥离至 MongoDB: {pointer}")
+			except Exception as e:
+				logger.error(f"剥离快照至 MongoDB 失败: {e}")
+		
+		return data
 	
-	def delete(self, *args, **kwargs):
-		"""重写删除方法，同时删除 MongoDB 中的内容"""
-		if self.mongo_content_id:
-			mongo_manager = MongoManager()
-			mongo_manager.delete_blog_content(self.mongo_content_id)
-		super().delete(*args, **kwargs)
+	# =========================================================================
+	# 网关 2：反序列化还原 (后台点击预览、查看历史记录时自动触发)
+	# =========================================================================
+	@classmethod
+	def from_serializable_data(cls, data):
+		"""Wagtail 从 JSON 字符串重建模型实例时触发：通过指针捞回 MongoDB 文本"""
+		pointer = data.pop('mongo_draft_pointer', None)
+		
+		if pointer:
+			try:
+				mongo_manager = MongoManager()
+				# 借尸还魂：直接读取挂载的属性，不带任何硬编码的集合名称
+				if getattr(mongo_manager, 'blog_revisions', None) is not None:
+					doc = mongo_manager.blog_revisions.find_one({'_id': pointer})
+					
+					if doc and 'body' in doc:
+						data['body'] = doc['body']
+						logger.info(f"成功从 MongoDB 恢复草稿大文本: {pointer}")
+			except Exception as e:
+				logger.error(f"从 MongoDB 恢复草稿大文本失败: {e}")
+		
+		return super().from_serializable_data(data)
 	
-	# 在BlogPage类中
+	# =========================================================================
+	# 网关 3：正式线上保存防线 (点击发布、或更新状态时触发)
+	# =========================================================================
 	def save(self, *args, **kwargs):
+		"""确保 MySQL 正式表体中维持 0 文本包袱"""
 		is_new = self.pk is None
-		temp_body = self.body
+		update_fields = kwargs.get('update_fields')
 		
-		# 临时清空body以避免存储到MySQL
-		temp_body_raw = self.body.raw_data if hasattr(self.body, 'raw_data') else None
+		# 【核心防御】：识别是不是只是在存草稿（存草稿仅局部更新 has_unpublished_changes 等）
+		is_draft_metadata_update = update_fields is not None and 'body' not in update_fields
+		
+		if not is_draft_metadata_update:
+			# 只有明确的全量保存（例如点击“发布”），才推送到线上正式集合 blog_content
+			temp_body_raw = self.body.raw_data if hasattr(self.body, 'raw_data') else None
+			if temp_body_raw is None and self.body:
+				temp_body_raw = MongoDBStreamFieldAdapter.to_mongodb(self.body)
+			
+			content_data = {
+				'page_id': self.pk,
+				'title': self.title,
+				'intro': self.intro,
+				'last_updated': self.last_published_at.isoformat() if getattr(self, 'last_published_at',
+				                                                              None) else None,
+				'body': temp_body_raw or []
+			}
+			try:
+				mongo_manager = MongoManager()
+				content_id = mongo_manager.save_blog_content(content_data, getattr(self, 'mongo_content_id', None))
+				self.mongo_content_id = content_id
+			except Exception as e:
+				logger.error(f"保存线上主内容至 MongoDB 失败: {e}")
+		
+		# 黄金障眼法：永远清空 body 后再存入 MySQL，保持 blog_blogpage 表的绝对轻量
+		real_body = self.body
 		self.body = []
-		super().save(*args, **kwargs)
-		
-		# 恢复body
-		if temp_body_raw is not None:
-			self.body = StreamValue(self.body.stream_block, temp_body_raw, is_lazy=True)
-		else:
-			self.body = temp_body
-		
-		# 准备MongoDB内容
-		content_data = {
-			'page_id': self.pk,
-			'title': self.title,
-			'intro': self.intro,
-			'last_updated': self.last_published_at.isoformat() if self.last_published_at else None,
-		}
-		
 		try:
-			if hasattr(self.body, 'raw_data') and self.body.raw_data:
-				content_data['body'] = self.body.raw_data
-			else:
-				content_data['body'] = MongoDBStreamFieldAdapter.to_mongodb(self.body)
-		except Exception as e:
-			logger.error(f"转换StreamField数据出错: {e}, {traceback.format_exc()}")
-			if temp_body_raw:
-				content_data['body'] = temp_body_raw
+			super().save(*args, **kwargs)
+		finally:
+			# 立刻满血复原内存态，保障本次请求周期后续逻辑拿到的是完好的 body
+			self.body = real_body
 		
-		# 保存到MongoDB
-		mongo_manager = MongoManager()
-		content_id = mongo_manager.save_blog_content(content_data, self.mongo_content_id)
-		
-		# 更新mongo_content_id
-		if is_new or self.mongo_content_id != content_id:
-			self.mongo_content_id = content_id
-			type(self).objects.filter(pk=self.pk).update(mongo_content_id=content_id, body=[])
+		# 新页面发布后的自增外键反向回填
+		if is_new and self.pk and not is_draft_metadata_update:
+			type(self).objects.filter(pk=self.pk).update(mongo_content_id=self.mongo_content_id)
+			try:
+				mongo_manager = MongoManager()
+				if getattr(mongo_manager, 'blog_content', None) is not None:
+					mongo_manager.blog_content.update_one(
+						{'_id': self.mongo_content_id},
+						{'$set': {'page_id': self.pk}}
+					)
+			except Exception:
+				pass
 	
+	# =========================================================================
+	# 核心网关 4：物理删除与异构集群同步 (在后台点击“删除页面”时触发)
+	# =========================================================================
+	def delete(self, *args, **kwargs):
+		"""彻底斩断异构数据库的数据残留"""
+		page_id = self.pk
+		mongo_content_id = getattr(self, 'mongo_content_id', None)
+		
+		# 1. 优先执行原生删除
+		super().delete(*args, **kwargs)
+		
+		# 2. 接管分布式清理，调用封装好的 MongoDB 管理器方法
+		try:
+			mongo_manager = MongoManager()
+			
+			# 清理线上正式版主内容
+			if mongo_content_id:
+				mongo_manager.delete_blog_content(mongo_content_id)
+			
+			# 【优雅调用】清理该页面对应的所有草稿历史快照
+			if page_id and hasattr(mongo_manager, 'delete_page_revisions'):
+				mongo_manager.delete_page_revisions(page_id)
+		
+		except Exception as e:
+			logger.error(f"级联清理 MongoDB 关联数据时遭遇异常: {e}")
+	
+	# =========================================================================
+	# 网关 4：前台数据读取网关 (用于博客详情页 serve 渲染时提取真实数据)
+	# =========================================================================
 	def get_content_from_mongodb(self):
-		if not self.mongo_content_id:
+		if not getattr(self, 'mongo_content_id', None):
 			return None
 		try:
 			mongo_manager = MongoManager()
 			content = mongo_manager.get_blog_content(self.mongo_content_id)
+			
 			if not content or 'body' not in content or not isinstance(content['body'], list):
 				return None
 			
-			for i, block in enumerate(content['body']):
+			# 补齐前端 React/Draftail 需要的固有属性
+			for block in content['body']:
 				if isinstance(block, dict):
 					if 'id' not in block or not block['id']:
-						import uuid
 						block['id'] = str(uuid.uuid4())
 					if 'value' not in block:
 						block['value'] = ""
 			return content
 		except Exception as e:
-			logger.error(f"从MongoDB获取内容时出错: {e}, {traceback.format_exc()}")
 			return None
+	
+	# =========================================================================
+	# 核心安全补丁：修复 Django 5.x 严格类型校验，防止未发布页面预览引发 ValueError
+	# =========================================================================
+	def get_prev_post(self):
+		if not self.pk or not getattr(self, 'first_published_at', None): return None
+		if not self.categories.exists():
+			return BlogPage.objects.live().filter(first_published_at__lt=self.first_published_at).order_by(
+				'-first_published_at').first()
+		return BlogPage.objects.live().filter(categories__id__in=self.categories.values_list('id', flat=True),
+		                                      first_published_at__lt=self.first_published_at).distinct().order_by(
+			'-first_published_at').first()
+	
+	def get_next_post(self):
+		if not self.pk or not getattr(self, 'first_published_at', None): return None
+		if not self.categories.exists():
+			return BlogPage.objects.live().filter(first_published_at__gt=self.first_published_at).order_by(
+				'first_published_at').first()
+		return BlogPage.objects.live().filter(categories__id__in=self.categories.values_list('id', flat=True),
+		                                      first_published_at__gt=self.first_published_at).distinct().order_by(
+			'first_published_at').first()
+
 	
 	def _render_markdown_in_body(self, body_data):
 		"""
@@ -573,6 +687,8 @@ class BlogPage(Page):
 			# 如果出错，返回原始数据，避免整个页面崩溃
 			return body_data
 	
+
+	
 	def serve(self, request):
 		"""
 		重写serve方法，在将数据传递给模板前，对MongoDB中的Markdown内容进行渲染。
@@ -596,44 +712,7 @@ class BlogPage(Page):
 		# 4. 调用父类的serve方法，使用我们准备好的body内容去渲染模板
 		return super().serve(request)
 	
-	def get_prev_post(self):
-		"""获取同类别的上一篇文章"""
-		# ✅ 预览模式保护
-		if not self.pk:
-			return None
-		
-		if not self.categories.exists():
-			# 没有分类时，按时间获取
-			return BlogPage.objects.live().filter(
-				first_published_at__lt=self.first_published_at
-			).order_by('-first_published_at').first()
-		# 获取当前文章的分类
-		category_ids = self.categories.values_list('id', flat=True)
-		# 同类别且发布日期早于当前文章的最新一篇
-		return BlogPage.objects.live().filter(
-			categories__id__in=category_ids,
-			first_published_at__lt=self.first_published_at
-		).distinct().order_by('-first_published_at').first()
-	
-	def get_next_post(self):
-		"""获取同类别的下一篇文章"""
-		# ✅ 预览模式保护
-		if not self.pk:
-			return None
-		
-		if not self.categories.exists():
-			# 没有分类时，按时间获取
-			return BlogPage.objects.live().filter(
-				first_published_at__gt=self.first_published_at
-			).order_by('first_published_at').first()
-		# 获取当前文章的分类
-		category_ids = self.categories.values_list('id', flat=True)
-		# 同类别且发布日期晚于当前文章的最早一篇
-		return BlogPage.objects.live().filter(
-			categories__id__in=category_ids,
-			first_published_at__gt=self.first_published_at
-		).distinct().order_by('first_published_at').first()
-	
+
 	def get_related_posts_by_tags(self, max_posts=5):
 		"""根据标签获取相关文章"""
 		

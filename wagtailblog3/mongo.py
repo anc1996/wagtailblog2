@@ -40,6 +40,7 @@ class MongoManager:
 			
 			self.db = client[mongo_settings['NAME']]
 			self.blog_content = self.db['blog_content']
+			self.blog_revisions = self.db['blog_page_revision_bodies']  # 是草稿的历史文档集合
 			
 			# 创建索引
 			self._ensure_indexes()
@@ -303,6 +304,64 @@ class MongoManager:
 		except Exception as e:
 			logger.error(f"MongoDB删除内容错误: {e}")
 			return False
+	
+	def delete_page_revisions(self, page_id):
+		"""从 MongoDB 删除指定博客页面的所有历史版本快照"""
+		# 🚨 修复点：PyMongo 强制要求使用 is None
+		if not page_id or self.blog_revisions is None:
+			return 0
+		
+		try:
+			result = self.blog_revisions.delete_many({'page_id': page_id})
+			deleted_count = result.deleted_count
+			
+			if deleted_count > 0:
+				logger.info(f"成功删除页面 [ID: {page_id}] 的所有MongoDB历史快照，共 {deleted_count} 条")
+			
+			return deleted_count
+		except Exception as e:
+			logger.error(f"MongoDB批量删除历史快照错误: {e}")
+			return 0
+	
+	def delete_single_revision(self, pointer_id):
+		"""从 MongoDB 删除单条历史草稿快照"""
+		# 🚨 修复点：PyMongo 强制要求使用 is None
+		if not pointer_id or self.blog_revisions is None:
+			return False
+		
+		try:
+			result = self.blog_revisions.delete_one({'_id': pointer_id})
+			deleted = result.deleted_count > 0
+			
+			if deleted:
+				logger.info(f"成功删除MongoDB单条历史快照: {pointer_id}")
+			else:
+				logger.warning(f"MongoDB中未找到要删除的快照ID: {pointer_id}")
+			
+			return deleted
+		except Exception as e:
+			logger.error(f"MongoDB删除单条快照错误: {e}")
+			return False
+	
+	def save_page_revision(self, pointer_id, page_id, body_data):
+		"""保存单条草稿历史快照到 MongoDB"""
+		# 🚨 修复点：PyMongo 强制要求使用 is None
+		if self.blog_revisions is None:
+			return False
+		
+		try:
+			from django.utils import timezone
+			self.blog_revisions.insert_one({
+				'_id': pointer_id,
+				'page_id': page_id,
+				'body': body_data,
+				'created_at': timezone.now().isoformat()
+			})
+			return True
+		except Exception as e:
+			logger.error(f"MongoDB保存历史快照失败: {e}")
+			return False
+	
 	
 	def search_blog_content(self, query):
 		"""

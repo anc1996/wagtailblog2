@@ -110,27 +110,27 @@ def editor_js_easymde():
         static('blog/js/easymde_custom.js')
     )
 
-# 在编辑页面前从MongoDB加载内容
-@hooks.register('before_edit_page')
-def before_edit_page(request, page):
-	if hasattr(page, 'get_content_from_mongodb') and hasattr(page, 'body'):
-		try:
-			content = page.get_content_from_mongodb()
-			
-			if content and 'body' in content and isinstance(content['body'], list):
-				from wagtail.blocks.stream_block import StreamValue
-				from wagtailblog3.mongodb import MongoDBStreamFieldAdapter
-				
-				stream_block = page.body.stream_block
-				
-				try:
-					page.body = MongoDBStreamFieldAdapter.from_mongodb(content['body'], stream_block)
-				except Exception as e:
-					logger.error(f"从MongoDB创建StreamValue失败: {e}")
-					page.body = StreamValue(stream_block, content['body'], is_lazy=True)
-		except Exception as e:
-			import traceback
-			logger.error(f"在编辑页面前加载MongoDB内容时出错: {e}, {traceback.format_exc()}")
+# # 在编辑页面前从MongoDB加载内容
+# @hooks.register('before_edit_page')
+# def before_edit_page(request, page):
+# 	if hasattr(page, 'get_content_from_mongodb') and hasattr(page, 'body'):
+# 		try:
+# 			content = page.get_content_from_mongodb()
+#
+# 			if content and 'body' in content and isinstance(content['body'], list):
+# 				from wagtail.blocks.stream_block import StreamValue
+# 				from wagtailblog3.mongodb import MongoDBStreamFieldAdapter
+#
+# 				stream_block = page.body.stream_block
+#
+# 				try:
+# 					page.body = MongoDBStreamFieldAdapter.from_mongodb(content['body'], stream_block)
+# 				except Exception as e:
+# 					logger.error(f"从MongoDB创建StreamValue失败: {e}")
+# 					page.body = StreamValue(stream_block, content['body'], is_lazy=True)
+# 		except Exception as e:
+# 			import traceback
+# 			logger.error(f"在编辑页面前加载MongoDB内容时出错: {e}, {traceback.format_exc()}")
 
 
 # 添加JavaScript支持到编辑器

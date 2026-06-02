@@ -1,5 +1,5 @@
 # blog/models.py
-
+import json
 import traceback, logging
 
 import uuid
@@ -20,9 +20,10 @@ from modelcluster.fields import ParentalKey, ParentalManyToManyField
 from modelcluster.contrib.taggit import ClusterTaggableManager
 
 from taggit.models import TaggedItemBase, Tag
+from wagtail.admin.forms import WagtailAdminPageForm
 
 from wagtail.embeds.blocks import EmbedBlock
-from wagtail.models import Page, Orderable
+from wagtail.models import Page, Orderable, Revision
 from wagtail.fields import StreamField, RichTextField
 from wagtail.admin.panels import FieldPanel, MultiFieldPanel, InlinePanel
 from wagtail.search import index
@@ -326,6 +327,49 @@ class BlogIndexPage(Page):
 		verbose_name_plural = "博客索引页"
 
 
+class BlogPageForm(WagtailAdminPageForm):
+	def __init__(self, *args, **kwargs):
+		instance = kwargs.get('instance')
+		
+		# 只要当前表单有关联的真实页面实例，立即启动拦截
+		if instance and instance.pk:
+			# 强行透视：检查当前关系型数据库（MySQL）吐出来的 body 是不是空壳
+			is_body_empty = not instance.body or (hasattr(instance.body, '__len__') and len(instance.body) == 0)
+			
+			if is_body_empty:
+				mongo_manager = MongoManager()
+				content = None
+				
+				# 【第一阶段】：直接越过脆弱的视图层，利用 Wagtail 4.0+ 的泛型关联管理器捞取最新快照
+				latest_revision = instance.revisions.order_by('-created_at').first()
+				if latest_revision:
+					try:
+						# 提取我们在 serializable_data 里刻录的跨集群外键暗号
+						rev_data = latest_revision.content
+						if isinstance(rev_data, str):
+							rev_data = json.loads(rev_data)
+						
+						if isinstance(rev_data, dict):
+							draft_pointer = rev_data.get('mongo_draft_pointer')
+							if draft_pointer:
+								# 去 MongoDB 专属草稿快照集合定点捞取大文本
+								content = mongo_manager.get_blog_revision_body(draft_pointer)
+					except Exception as e:
+						logger.error(f"BlogPageForm 穿透解析历史快照遭遇异常: {e}")
+				
+				# 【第二阶段】：如果快照没捞到（例如全新发布后清空了历史，或者老数据迁移残留），直接降级穿透到 Mongo 线上 Live 主表
+				if (not content or 'body' not in content) and getattr(instance, 'mongo_content_id', None):
+					content = mongo_manager.get_blog_content(instance.mongo_content_id)
+				
+				# 【第三阶段】：对捞出来的 MongoDB 松散字典实施 Hydration，重塑为严格的 React UI 渲染树
+				if content and 'body' in content:
+					# 直接调用模型内封装好的 UUID 补齐与 StreamValue 重建方法
+					instance.body = instance._hydrate_streamfield_from_mongo(content['body'])
+					logger.info(f"💾 异构表单拦截成功！已为页面 [{instance.title}] 完美复活 MongoDB 文本负载。")
+		
+		# 缝合完毕，将饱满的 instance 交还给 Django 核心表单，开始绑定字段渲染前端
+		super().__init__(*args, **kwargs)
+
 # 博客页面
 class BlogPage(Page):
 	"""博客页面，内容存储在 MongoDB"""
@@ -418,6 +462,9 @@ class BlogPage(Page):
 		('video_block', VideoBlock(icon='media', label="视频块")),
 	], use_json_field=True, blank=True, null=True)
 	
+	# 【核心绑定】：强行让当前模型使用我们定制的穿透式缝合表单类
+	base_form_class = BlogPageForm
+	
 	# 索引字段
 	search_fields = Page.search_fields + [
 		index.SearchField('intro'),
@@ -465,37 +512,44 @@ class BlogPage(Page):
 		indexes = [
 			models.Index(fields=['date']),  # 为博客发布日期添加索引，优化时间筛选查询
 		]
+	
+	def _hydrate_streamfield_from_mongo(self, body_data):
+		"""核心防线：从 Mongo 字典重建 Wagtail Draftail 所需的严格 StreamValue 对象"""
+		if not body_data or not isinstance(body_data, list):
+			return []
 		
+
+		# 黑客防线：为所有缺乏 id 的 block 自动补齐 uuid，防止前端 React 崩溃
+		for block in body_data:
+			if isinstance(block, dict) and 'id' not in block:
+				block['id'] = str(uuid.uuid4())
+		
+		try:
+			return MongoDBStreamFieldAdapter.from_mongodb(body_data, self.body.stream_block)
+		except Exception as e:
+			logger.error(f"StreamField 反序列化降级: {e}")
+			return StreamValue(self.body.stream_block, body_data, is_lazy=True)
+	
 	# =========================================================================
 	# 网关 1：拦截快照序列化 (保存草稿、生成历史记录时自动触发)
 	# =========================================================================
 	def serializable_data(self):
-		"""Wagtail 将对象序列化为 JSON 存入 wagtailcore_revision 表前触发：剥离大文本"""
+		"""拦截生成 Revision 的快照动作，截流大文本送入 MongoDB 历史草稿集合"""
 		data = super().serializable_data()
 		
-		# 拦截大文本 body，准备剥离
-		if 'body' in data and data['body']:
-			pointer = f"rev_{self.pk or 'new'}_{uuid.uuid4().hex}"
-			
-			try:
-				mongo_manager = MongoManager()
-				# 优雅调用：通过属性直接向我们在 _connect 中挂载的 blog_revisions 插入数据
-				if getattr(mongo_manager, 'blog_revisions', None) is not None:
-					mongo_manager.blog_revisions.insert_one({
-						'_id': pointer,
-						'page_id': self.pk,
-						'body': data['body'],
-						'created_at': timezone.now().isoformat()
-					})
-				
-				# ！！！核心抽离：将大文本换成空数组，让 MySQL 的 Revision 负担变为 0 ！！！
-				data['body'] = []
-				# 注入自定义指针，等待反序列化时抓取
-				data['mongo_draft_pointer'] = pointer
-				
-				logger.info(f"成功将快照 body 剥离至 MongoDB: {pointer}")
-			except Exception as e:
-				logger.error(f"剥离快照至 MongoDB 失败: {e}")
+		if hasattr(self.body, 'raw_data') and self.body.raw_data:
+			draft_content = self.body.raw_data
+		else:
+			draft_content = MongoDBStreamFieldAdapter.to_mongodb(self.body)
+		
+		# 【对齐调用】：把当前最新的草稿形态，送入无唯一索引限制的历史表，斩获专属快照 OID
+		mongo_manager = MongoManager()
+		draft_pointer = mongo_manager.save_blog_revision_body(self.pk, draft_content)
+		
+		# 跨集群把这个特定版本的 OID 指针刻录进当前这条 MySQL Revision 记录里
+		data['mongo_draft_pointer'] = str(draft_pointer)
+		# 将 MySQL 这边的单条行体积抽空，保持大版本跃迁后的轻量化
+		data['body'] = '[]'
 		
 		return data
 	
@@ -504,23 +558,46 @@ class BlogPage(Page):
 	# =========================================================================
 	@classmethod
 	def from_serializable_data(cls, data):
-		"""Wagtail 从 JSON 字符串重建模型实例时触发：通过指针捞回 MongoDB 文本"""
-		pointer = data.pop('mongo_draft_pointer', None)
+		"""反序列化历史记录：优化为级联式全自动捞取，彻底打通草稿表与正式表的兜底链路"""
+		obj = super().from_serializable_data(data)
+		mongo_manager = MongoManager()
+		content = None
 		
-		if pointer:
-			try:
-				mongo_manager = MongoManager()
-				# 借尸还魂：直接读取挂载的属性，不带任何硬编码的集合名称
-				if getattr(mongo_manager, 'blog_revisions', None) is not None:
-					doc = mongo_manager.blog_revisions.find_one({'_id': pointer})
-					
-					if doc and 'body' in doc:
-						data['body'] = doc['body']
-						logger.info(f"成功从 MongoDB 恢复草稿大文本: {pointer}")
-			except Exception as e:
-				logger.error(f"从 MongoDB 恢复草稿大文本失败: {e}")
+		# 1. 第一阶段：优先提取隐藏在历史记录里的暗号指针，去草稿/历史集合捞取
+		draft_pointer = data.get('mongo_draft_pointer')
+		if draft_pointer:
+			content = mongo_manager.get_blog_revision_body(draft_pointer)
 		
-		return super().from_serializable_data(data)
+		# 2. 第二阶段（核心修复点）：如果草稿没捞到，或者捞出来的 body 是空的
+		#    绝对不能用 elif 阻断！必须直接穿透到线上正式表（Live表）进行最终兜底！
+		is_content_empty = not content or 'body' not in content or not content['body']
+		if is_content_empty and obj.mongo_content_id:
+			content = mongo_manager.get_blog_content(obj.mongo_content_id)
+		
+		# 3. 第三阶段：完美回填并注入结构体
+		if content and 'body' in content:
+			obj.body = obj._hydrate_streamfield_from_mongo(content['body'])
+		
+		return obj
+	
+	def get_latest_revision_as_object(self):
+		"""
+		拦截 EditView 初始化表单。
+		升级铁娘子级空值防线，防止因 StreamValue 对象的 truthy 判定历史残留导致逃过拦截。
+		"""
+		obj = super().get_latest_revision_as_object()
+		
+		# 极为严苛的空值判定防线：有些 Wagtail 版本的空 StreamValue 在 bool() 下可能为 True
+		# 我们建立双重锁定：不仅看它本身，还要强行透视它内部包含的 block 长度是否为 0
+		is_body_empty = not obj.body or (hasattr(obj.body, '__len__') and len(obj.body) == 0)
+		
+		if is_body_empty and self.mongo_content_id:
+			mongo_manager = MongoManager()
+			content = mongo_manager.get_blog_content(self.mongo_content_id)
+			if content and 'body' in content:
+				obj.body = self._hydrate_streamfield_from_mongo(content['body'])
+		
+		return obj
 	
 	# =========================================================================
 	# 网关 3：正式线上保存防线 (点击发布、或更新状态时触发)

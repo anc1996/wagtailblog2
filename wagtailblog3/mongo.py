@@ -181,6 +181,60 @@ class MongoManager:
 			except Exception as e2:
 				logger.error(f"MongoDB二次尝试保存内容错误: {e2}")
 				raise
+		
+	# =============================================================================
+	# 异构草稿/历史快照专属持久化网关（无 page_id 唯一索引限制）
+	# =============================================================================
+	def save_blog_revision_body(self, page_id, body_data):
+		"""将草稿/历史版本的 StreamField 原始数据，存入专属的历史大文本集合中"""
+		# 预处理数据，确保所有特殊类型数据都是 MongoDB 可序列化的
+		prepared_body = self._prepare_for_mongo(body_data)
+		
+		document = {
+			'page_id': page_id,
+			'body': prepared_body,
+			'created_at': datetime.now().isoformat()
+		}
+		
+		try:
+			# 核心隔离：写入 blog_revisions 集合，规避主表的 unique page_id 限制
+			result = self.blog_revisions.insert_one(document)
+			logger.info(f"MongoDB 历史草稿落盘成功，生成快照指针 OID: {result.inserted_id}")
+			return str(result.inserted_id)
+		except Exception as e:
+			logger.error(f"MongoDB 持久化历史草稿遭遇致命错误: {e}")
+			raise
+	
+	def get_blog_revision_body(self, content_id):
+		"""从专属历史大文本集合中，通过快照指针捞回草稿内容"""
+		if not content_id:
+			return None
+		
+		try:
+			mongo_id = ObjectId(content_id)
+			content = self.blog_revisions.find_one({'_id': mongo_id})
+			
+			if content:
+				content['_id'] = str(content['_id'])
+				return content
+			else:
+				logger.warning(f"MongoDB 草稿集合中未找到指定的指针 ID: {content_id}")
+				return None
+		except Exception as e:
+			logger.error(f"MongoDB 读取历史草稿失败: {e}")
+			return None
+	
+	def delete_single_revision(self, content_id):
+		"""天网联动防线：当管理员在后台手工抹除某一条特定历史记录时，联动引爆 Mongo 单体草稿文本"""
+		if not content_id:
+			return False
+		try:
+			mongo_id = ObjectId(content_id)
+			result = self.blog_revisions.delete_one({'_id': mongo_id})
+			return result.deleted_count > 0
+		except Exception as e:
+			logger.error(f"MongoDB 单体快照级联引爆失败: {e}")
+			return False
 	
 	def _extract_text_from_body(self, body):
 		"""从BlogPage的body中提取纯文本用于全文搜索，支持中文分词"""

@@ -1,83 +1,80 @@
 #!/user/bin/env python3
 # -*- coding: utf-8 -*-
 
-
+# wagtailblog3/settings/third_party.py
 """
 第三方服务配置文件,
-包含 REST Framework、CORS 等第三方集成配置
+包含 REST Framework、CORS 、ai-backends等第三方集成配置
 """
-import os
-# ============================================
-# Wagtail AI Configuration (方法一：)
-# ============================================
-# WAGTAIL_AI = {
-# 	"PROVIDERS": {
-# 		"default": {
-# 			"provider": "deepseek",
-# 			"model": os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
-# 			"api_key": os.getenv("DEEPSEEK_API_KEY"),
-#
-# 			# ← 关键修复：增加超时时间
-# 			# "timeout": 120,  # 120 秒超时（默认可能只有 30 秒）
-#
-# 			# 可选：添加重试配置
-# 			# "max_retries": 3,  # 最多重试 3 次
-# 		}
-# 	},
-# 	'BACKENDS': {
-# 		'default': {
-# 			# ⬇️ 1. 切换到 LLMBackend
-# 			'CLASS': 'wagtail_ai.ai.llm.LLMBackend',
-# 			'CONFIG': {
-# 				# ⬇️ 2. MODEL_ID 必须匹配 YAML 文件中的 'model_id'
-# 				'MODEL_ID': 'deepseek-chat',
-#
-# 				# ⬇️ 3. TOKEN_LIMIT 必须明确定义，因为它是一个自定义模型
-# 				'TOKEN_LIMIT': int(os.getenv('AI_MAX_TOKENS', '2000')),
-# 			}
-# 		},
-# 		# (我们暂时移除了 'qwen'，专注于让 'default' 工作)
-# 	},
-#
-# 	# ⬇️ 4. 这一行仍然是必须的
-# 	"TEXT_COMPLETION_BACKEND": "default",
-# }
 
+import os
+import mimetypes
+
+
+# ==========================================================
+# 异构多模型网关凭证解析
+# ==========================================================
+DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY")
+DEEPSEEK_BASE_URL = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
+DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
+
+QWEN_API_KEY = os.environ.get("QWEN_API_KEY")
+QWEN_BASE_URL = os.environ.get("QWEN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+QWEN_MODEL = os.environ.get("QWEN_MODEL", "qwen-plus-latest")
+
+# 业务层通用超参数设定
+AI_MAX_TOKENS = int(os.environ.get("AI_MAX_TOKENS", 4096))
+AI_TEMPERATURE = float(os.environ.get("AI_TEMPERATURE", 0.7))
+
+# ==========================================================
+# Wagtail-AI v3.1.0 智能化调度总线
+# ==========================================================
 WAGTAIL_AI = {
-	# 1. 新版配置 (Agents / Providers) - 3.0 核心功能
-	"PROVIDERS": {
-		"default": {
-			"provider": "deepseek",
-			"model": os.environ.get("DEEPSEEK_MODEL", "deepseek-chat"),
-			"api_key": os.environ.get("DEEPSEEK_API_KEY"),
-		},
-		"qwen": {
-			"provider": "openai",
-			"model": os.environ.get("QWEN_MODEL", "qwen-plus"),
-			"api_key": os.environ.get("QWEN_API_KEY"),
-			"base_url": os.environ.get("QWEN_BASE_URL"),
-		}
-	},
-	
-	# 2. [新增] 旧版兼容配置 (Backends) - 修复 KeyError 报错
-	# 这里我们利用 ai_backends.py 让旧接口也能连上 DeepSeek
-	"BACKENDS": {
-		"default": {
-			# 指向您自定义的类
-			"CLASS": "wagtailblog3.ai_backends.OpenAICompatibleBackend",
-			"CONFIG": {
-				"MODEL_ID": os.environ.get("DEEPSEEK_MODEL", "deepseek-chat"),
-				# 旧版逻辑需要手动传入 BASE_URL
-				"BASE_URL": "https://api.deepseek.com/v1",
-				"TOKEN_LIMIT": 4096,
-				# 旧版类内部寻找 OPENAI_API_KEY，我们把 DeepSeek Key 传给它
-				"OPENAI_API_KEY": os.environ.get("DEEPSEEK_API_KEY"),
-			},
-		}
-	},
-	
-	"IMAGE_DESCRIPTION_PROVIDER": "default",
-	"AGENT_SETTINGS_MODEL": "wagtail_ai.models.AgentSettings",
+    # === 核心 1：V3.1.0 魔法面板 (Agent) 专属引擎 ===
+    "PROVIDERS": {
+        "default": {
+            "provider": "openai",
+            "model": DEEPSEEK_MODEL,
+            "api_key": DEEPSEEK_API_KEY,
+            "api_base": DEEPSEEK_BASE_URL,
+            # (移除 temperature 和 max_tokens，使用模型默认的极佳生成策略)
+        },
+        "qwen": {
+            "provider": "openai",
+            "model": QWEN_MODEL,
+            "api_key": QWEN_API_KEY,
+            "api_base": QWEN_BASE_URL,
+        }
+    },
+    
+    # === 核心 2：旧版草稿编辑器 (Draftail) 兼容引擎 ===
+    "BACKENDS": {
+        "default": {
+            "CLASS": "wagtailblog3.ai_backends.FlexibleOpenAIBackend",
+            "CONFIG": {
+                "MODEL_ID": DEEPSEEK_MODEL,
+                "API_BASE": DEEPSEEK_BASE_URL,
+                "OPENAI_API_KEY": DEEPSEEK_API_KEY,
+                "TOKEN_LIMIT": AI_MAX_TOKENS,
+                "TEMPERATURE": AI_TEMPERATURE,
+                "TIMEOUT_SECONDS": 60,
+            },
+        },
+        "qwen": {
+            "CLASS": "wagtailblog3.ai_backends.FlexibleOpenAIBackend",
+            "CONFIG": {
+                "MODEL_ID": QWEN_MODEL,
+                "API_BASE": QWEN_BASE_URL,
+                "OPENAI_API_KEY": QWEN_API_KEY,
+                "TOKEN_LIMIT": AI_MAX_TOKENS,
+                "TEMPERATURE": AI_TEMPERATURE,
+                "TIMEOUT_SECONDS": 60,
+            },
+        },
+    },
+    
+    # 默认无障碍视觉辅助复用主算力通道
+    "IMAGE_DESCRIPTION_PROVIDER": "default",
 }
 
 # ==========================================================
@@ -111,7 +108,6 @@ SWAGGER_SETTINGS = {
     }
 }
 
-import mimetypes
 
 # 强制让 Django 认识 .mjs 是合法的 JavaScript 文件
 mimetypes.add_type("application/javascript", ".mjs", True)

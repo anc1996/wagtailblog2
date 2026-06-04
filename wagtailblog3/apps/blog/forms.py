@@ -1,4 +1,6 @@
 # blog/forms.py
+
+
 from django import forms
 from .models import PageViewCount
 
@@ -7,6 +9,7 @@ class PageViewCountForm(forms.ModelForm):
 	"""页面访问统计编辑表单"""
 	
 	class Meta:
+		
 		model = PageViewCount
 		fields = ['count', 'unique_count']
 		widgets = {
@@ -24,3 +27,5 @@ class PageViewCountForm(forms.ModelForm):
 			raise forms.ValidationError("唯一访问量不能大于总访问量")
 		
 		return cleaned_data
+
+

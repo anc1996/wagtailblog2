@@ -1,8 +1,6 @@
 # blog/models.py
-import json
-import traceback, logging
+import logging,uuid,json
 
-import uuid
 from django.db.models.functions import Coalesce, Lower
 from django.utils import timezone
 from django.core.paginator import EmptyPage, PageNotAnInteger, Paginator
@@ -34,16 +32,19 @@ from wagtail.images.blocks import ImageChooserBlock
 from wagtail.documents.blocks import DocumentChooserBlock
 from wagtail.snippets.models import register_snippet
 from wagtail.blocks.stream_block import StreamValue
-from wagtail_ai.panels import AITitleFieldPanel, AIDescriptionFieldPanel
+from wagtail_ai.panels import AITitleFieldPanel, AIDescriptionFieldPanel, AIFieldPanel
 
 from wagtailmarkdown.blocks import MarkdownBlock
 from wagtailcodeblock.blocks import CodeBlock
 
-
 from blog.blocks import AudioBlock, VideoBlock, CustomTableBlock, MermaidBlock
+
 
 from wagtailblog3.mongodb import MongoDBStreamFieldAdapter
 from wagtailblog3.mongo import MongoManager
+
+
+
 
 logger = logging.getLogger(__name__)
 
@@ -327,6 +328,14 @@ class BlogIndexPage(Page):
 		verbose_name_plural = "博客索引页"
 
 
+
+
+
+# 💡 定义标签提示词常量（因为 tags 属于自定义业务，Agent中没有预设坑位）
+PROMPT_TITLE = "极客标题生成"
+PROMPT_INTRO = "SEO描述生成"
+
+
 class BlogPageForm(WagtailAdminPageForm):
 	def __init__(self, *args, **kwargs):
 		instance = kwargs.get('instance')
@@ -369,6 +378,7 @@ class BlogPageForm(WagtailAdminPageForm):
 		
 		# 缝合完毕，将饱满的 instance 交还给 Django 核心表单，开始绑定字段渲染前端
 		super().__init__(*args, **kwargs)
+		
 
 # 博客页面
 class BlogPage(Page):
@@ -380,7 +390,6 @@ class BlogPage(Page):
 	intro = RichTextField(
 		"简介",
 		features=[
-			'ai', # wagtail-ai的功能
 			'bold',  # 加粗
 			'italic',  # 斜体
 			'strikethrough',  # 删除线
@@ -390,7 +399,7 @@ class BlogPage(Page):
 			'code',  # 行内代码
 			'blockquote'  # 引用块
 		]
-	)  # 简介
+	)
 	
 	# 作者字段
 	authors = ParentalManyToManyField('blog.Author', blank=True)
@@ -420,7 +429,6 @@ class BlogPage(Page):
 			          'embed', 'code', 'superscript', 'subscript', 'strikethrough',
 			          'blockquote',
 			          'underline',  # <--- 下划线
-			          'ai' # wagtail-ai的功能
 			          ],
 			label="富文本"
 		)),
@@ -473,17 +481,18 @@ class BlogPage(Page):
 		index.FilterField('categories'),
 	]
 	
-	# 后台编辑面板
 	content_panels = [
-         # 1. 使用 AITitleFieldPanel 替换默认的 Page.content_panels 里的标题
-         AITitleFieldPanel('title'),
-	                 ] + [
+		# 1. 标题
+		AITitleFieldPanel('title'),
+		# 2. 组合信息
 		MultiFieldPanel([
 			FieldPanel('date'),
-			FieldPanel('tags'),
-			FieldPanel("authors", widget=forms.CheckboxSelectMultiple),  # 添加作者字段到面板中
+			AIFieldPanel("tags"),
+			FieldPanel("authors", widget=forms.CheckboxSelectMultiple),
 			FieldPanel('categories', widget=forms.CheckboxSelectMultiple),
 		], heading="博客信息"),
+		
+		# 3. 简介及其他字段
 		AIDescriptionFieldPanel('intro'),
 		FieldPanel('featured_image'),
 		FieldPanel('body'),
@@ -493,16 +502,16 @@ class BlogPage(Page):
 	promote_panels = [
 		MultiFieldPanel([
 			FieldPanel('slug'),
-			# 辅助生成 SEO 标题
-			AITitleFieldPanel('seo_title'),
-			# 辅助生成 SEO 描述
-			AIDescriptionFieldPanel('search_description'),
+			# SEO 标题和描述同样强绑定
+			AIFieldPanel('seo_title'),
+			AIFieldPanel('search_description'),
 		], heading="For Search Engines"),
 		
 		MultiFieldPanel([
 			FieldPanel('show_in_menus'),
 		], heading="Display options"),
 	]
+	
 	# FieldPanel： FieldPanel 用于在 Wagtail 后台编辑界面中显示和编辑单个字段。这个字段通常是直接定义在当前模型上的 Django 模型字段。
 	# InlinePanel： 用于在 Wagtail 后台编辑界面中管理与当前模型实例有关联的一组子级模型实例。它通常用于管理通过 ParentalKey 建立的父子关系。
 	
@@ -518,7 +527,6 @@ class BlogPage(Page):
 		if not body_data or not isinstance(body_data, list):
 			return []
 		
-
 		# 黑客防线：为所有缺乏 id 的 block 自动补齐 uuid，防止前端 React 崩溃
 		for block in body_data:
 			if isinstance(block, dict) and 'id' not in block:
@@ -723,7 +731,6 @@ class BlogPage(Page):
 		return BlogPage.objects.live().filter(categories__id__in=self.categories.values_list('id', flat=True),
 		                                      first_published_at__gt=self.first_published_at).distinct().order_by(
 			'first_published_at').first()
-
 	
 	def _render_markdown_in_body(self, body_data):
 		"""
@@ -764,8 +771,6 @@ class BlogPage(Page):
 			# 如果出错，返回原始数据，避免整个页面崩溃
 			return body_data
 	
-
-	
 	def serve(self, request):
 		"""
 		重写serve方法，在将数据传递给模板前，对MongoDB中的Markdown内容进行渲染。
@@ -789,7 +794,6 @@ class BlogPage(Page):
 		# 4. 调用父类的serve方法，使用我们准备好的body内容去渲染模板
 		return super().serve(request)
 	
-
 	def get_related_posts_by_tags(self, max_posts=5):
 		"""根据标签获取相关文章"""
 		

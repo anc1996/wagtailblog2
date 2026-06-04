@@ -5,6 +5,7 @@ import logging
 from django.templatetags.static import static
 from wagtail import hooks
 from django.utils.html import format_html
+from django.utils.safestring import mark_safe
 from django.db.models import Sum
 from wagtail.models import Page
 from django.shortcuts import render, get_object_or_404
@@ -20,7 +21,6 @@ from wagtail.admin.rich_text.editors.draftail import features as draftail_featur
 from wagtail.admin.rich_text.converters.html_to_contentstate import InlineStyleElementHandler
 
 from .models import PageViewCount
-
 from .forms import PageViewCountForm
 
 # 设置日志记录器
@@ -34,103 +34,87 @@ def global_admin_css():
 	在 Wagtail 后台所有页面加载 Font Awesome 5 的 CSS。
 	EasyMDE 编辑器依赖这个图标库来显示工具栏图标（如加粗、斜体、任务列表等）。
 	"""
-	# 这里我们使用一个可靠的 CDN 链接来加载 Font Awesome 5。
-	# 您也可以下载到本地并通过 static 标签加载，但 CDN 更简单快捷。
-	# 使用 all.min.css 版本确保所有图标都能被正确加载。
+	# 动态路径替换，用 format_html 是最安全、最标准的做法
 	return format_html('<link rel="stylesheet" href="{}">', static("css/all.min.css"))
 
 
-# 为后台编辑器加载 Mermaid.js，以便在预览时可以渲染 Mermaid 图表。---这个还没有利用实现
-@hooks.register("insert_global_admin_js")
-def global_admin_js_mermaid():
+@hooks.register('insert_global_admin_css')
+def fix_wagtail_ai_zindex():
 	"""
-	为后台编辑器加载 Mermaid.js，以便在预览时可以渲染 Mermaid 图表。
+	架构师前端补丁：
+	解决 Wagtail-AI 的星号魔法棒被 RichTextField 工具栏物理遮挡导致无法点击的问题。
 	"""
-	return format_html(
-		"""
-		<script src="{}"></script>
-		<script>
-			// 初始化 Mermaid 以便在后台预览中使用
-			mermaid.initialize({{ startOnLoad: true, theme: 'neutral' }});
-		</script>
-		""",
-		static("blog/js/mermaid.min.js")
+	# 纯静态 CSS，无动态变量，用 mark_safe 完美输出
+	return mark_safe(
+		"<style>\n"
+		".w-field--draftail_rich_text_area .wai-dropdown {\n"
+		"    z-index: 100 !important;\n"
+		"    top: -5px !important;\n"
+		"    right: 0px !important;\n"
+		"}\n"
+		"</style>"
 	)
 
 
 @hooks.register("insert_editor_css", order=100)
 def editor_css_easymde():
 	"""为 Wagtail 后台编辑页注入代码高亮和公式的离线 CSS"""
-	return format_html(
+	
+	# 1. 动态链接部分：继续使用 format_html 保障安全
+	links = format_html(
+		'<link rel="stylesheet" href="{}">\n<link rel="stylesheet" href="{}">',
+		static('blog/js/highlightjs/styles/github.min.css'),
+		static('blog/css/katex/katex.min.css')
+	)
+	
+	# 2. 纯样式部分：使用 mark_safe。
+	# 这样你以后写 CSS 就可以用正常的单大括号 {} 了，再也不用痛苦地写 {{ }}
+	styles = mark_safe(
 		"""
-		<link rel="stylesheet" href="{}">
-		<link rel="stylesheet" href="{}">
 		<style>
-			/* ⚠️ 【强制规范】在 format_html 中写 CSS 必须用双大括号 {{ 和 }} */
-
 			/* 修正后台暗黑模式对预览区的影响，确保白底黑字基础阅读正常 */
-			.editor-preview, .editor-preview-side {{
+			.editor-preview, .editor-preview-side {
 				color: #333 !important;
 				background-color: #fff !important;
-			}}
+			}
 
 			/* 强制干掉 Wagtail 的灰色，换成 Github Dark 的深空黑 */
-			.editor-preview pre, .editor-preview-side pre {{
+			.editor-preview pre, .editor-preview-side pre {
 				background-color: #0d1117 !important;
 				padding: 16px !important;
 				border-radius: 6px !important;
-			}}
+			}
 
 			/* 释放字体颜色的控制权给 Highlight.js */
-			.editor-preview pre code.hljs, .editor-preview-side pre code.hljs {{
+			.editor-preview pre code.hljs, .editor-preview-side pre code.hljs {
 				background-color: transparent !important;
 				color: #c9d1d9 !important;
 				text-shadow: none !important;
-			}}
+			}
 		</style>
-		""",
-		static('blog/js/highlightjs/styles/github-dark.min.css'),
-		static('blog/css/katex/katex.min.css')
+		"""
 	)
+	
+	# 拼接返回
+	return links + styles
 
 
 @hooks.register("insert_editor_js", order=100)
 def editor_js_easymde():
-    """为 Wagtail 后台编辑页注入 JS 引擎及自定义配置"""
-    return format_html(
-        """
-        <script src="{}"></script>
-        <script src="{}"></script>
-        <script src="{}"></script>
-        <script src="{}"></script>
-        """,
-        static('blog/js/highlightjs/highlight.min.js'),
-        static('blog/css/katex/katex.min.js'),
-        static('blog/js/katex/auto-render.min.js'),
-        static('blog/js/easymde_custom.js')
-    )
-
-# # 在编辑页面前从MongoDB加载内容
-# @hooks.register('before_edit_page')
-# def before_edit_page(request, page):
-# 	if hasattr(page, 'get_content_from_mongodb') and hasattr(page, 'body'):
-# 		try:
-# 			content = page.get_content_from_mongodb()
-#
-# 			if content and 'body' in content and isinstance(content['body'], list):
-# 				from wagtail.blocks.stream_block import StreamValue
-# 				from wagtailblog3.mongodb import MongoDBStreamFieldAdapter
-#
-# 				stream_block = page.body.stream_block
-#
-# 				try:
-# 					page.body = MongoDBStreamFieldAdapter.from_mongodb(content['body'], stream_block)
-# 				except Exception as e:
-# 					logger.error(f"从MongoDB创建StreamValue失败: {e}")
-# 					page.body = StreamValue(stream_block, content['body'], is_lazy=True)
-# 		except Exception as e:
-# 			import traceback
-# 			logger.error(f"在编辑页面前加载MongoDB内容时出错: {e}, {traceback.format_exc()}")
+	"""为 Wagtail 后台编辑页注入 JS 引擎及自定义配置"""
+	# 这里全是 <script src="...">，没有任何包含 JS 逻辑的大括号，用 format_html 完全正确
+	return format_html(
+		"""
+		<script src="{}"></script>
+		<script src="{}"></script>
+		<script src="{}"></script>
+		<script src="{}"></script>
+		""",
+		static('blog/js/highlightjs/highlight.min.js'),
+		static('blog/css/katex/katex.min.js'),
+		static('blog/js/katex/auto-render.min.js'),
+		static('blog/js/easymde_custom.js')
+	)
 
 
 # 添加JavaScript支持到编辑器
@@ -295,6 +279,7 @@ def register_page_views_report_menu_item():
 		icon_name="site",
 		order=700
 	)
+
 
 # 注册 `underline` (下划线) 功能.
 @hooks.register('register_rich_text_features')

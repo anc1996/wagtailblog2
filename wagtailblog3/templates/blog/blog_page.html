@@ -3,18 +3,66 @@
 {% block title %}{{ page.title }}{% endblock %}
 
 {% block extra_css %}
-     {{ block.super }}
+    {{ block.super }}
     <link rel="stylesheet" href="{% static 'blog/css/blog.css' %}">
-        <!-- 🆕 添加拖动布局CSS -->
     <link rel="stylesheet" href="{% static 'blog/css/blog-resize.css' %}">
     <link rel="stylesheet" href="{% static 'blog/css/lightbox/lightbox.css' %}">
     <link rel="stylesheet" href="{% static 'blog/css/jquery-ui/jquery-ui.css' %}">
-   <link rel="stylesheet" href="{% static 'blog/css/github-markdown.min.css' %}">
-{#    <link rel="stylesheet" href="{% static 'blog/css/github-markdown-dark.min.css' %}">#}
+
+    <link rel="stylesheet" href="{% static 'blog/css/github-markdown.min.css' %}">
     <link rel="stylesheet" href="{% static 'blog/css/markdown-theme.css' %}">
-{#    <link rel="stylesheet" href="{% static 'blog/css/rich-text-theme.css' %}">#}
+
     <link rel="stylesheet" href="{% static 'blog/css/katex/katex.min.css' %}">
 
+    <link rel="stylesheet" href="{% static 'blog/js/highlightjs/styles/github-dark.min.css' %}">
+
+<style>
+        /* === 第一招：重塑 pre 容器为弹性盒子（兼容两种区块） === */
+        .blog-layout-container .markdown-body pre,
+        .blog-layout-container [data-block-type="code_block"] pre {
+            background-color: #0d1117 !important; /* Github Dark 极客黑 */
+            padding: 0 !important;
+            margin-bottom: 16px !important;
+            border: none !important;
+            border-radius: 8px !important;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1) !important;
+            display: flex !important; /* 开启弹性布局放置行号 */
+            flex-direction: row !important;
+            position: relative !important;
+            overflow: hidden !important;
+        }
+
+        /* === 第二招：前端原生行号列样式（防复制设计） === */
+        .hljs-line-numbers {
+            padding: 16px 12px 16px 16px !important;
+            color: #6e7681 !important;
+            background-color: #0d1117 !important;
+            border-right: 1px solid #30363d !important;
+            font-family: Consolas, "Courier New", monospace !important;
+            font-size: 14px !important;
+            line-height: 1.5 !important;
+            text-align: right !important;
+            user-select: none !important; /* 🌟 灵魂属性：彻底禁止用户鼠标选中行号！ */
+            white-space: pre !important;
+        }
+
+        /* === 第三招：代码区域独立滚动 === */
+        .blog-layout-container .markdown-body pre > code,
+        .blog-layout-container [data-block-type="code_block"] pre > code {
+            background-color: transparent !important;
+            padding: 16px !important;
+            margin: 0 !important;
+            border-radius: 0 !important;
+            font-family: Consolas, "Courier New", monospace !important;
+            font-size: 14px !important;
+            line-height: 1.5 !important;
+            text-shadow: none !important;
+            display: block !important;
+            flex-grow: 1 !important;
+            min-width: 0 !important;
+            overflow-x: auto !important; /* 代码过长仅右侧滚动，左侧行号钉死 */
+        }
+    </style>
     <link rel="stylesheet" href="{% static 'blog/css/image_blocks.css' %}">
     <link rel="stylesheet" href="{% static 'blog/css/video_blocks.css' %}">
     <link rel="stylesheet" href="{% static 'blog/css/audio_blocks.css' %}">
@@ -22,7 +70,6 @@
     <link rel="stylesheet" href="{% static 'blog/css/table_blocks.css' %}">
     <link rel="stylesheet" href="{% static 'blog/css/mermaid_block.css' %}">
     <link rel="stylesheet" href="{% static 'comments/css/comments.css' %}">
-
 
     {# 禁用主题自带的 mCustomScrollbar #}
     {% block custom_scrollbar_assets_js %}{% endblock custom_scrollbar_assets_js %}
@@ -250,4 +297,7 @@
     <script src="{% static 'blog/js/video_blocks.js' %}" async></script>
     <script src="{% static 'blog/js/editor-enhancements.js' %}" async></script>
     <script src="{% static 'blog/js/mermaid_block.js' %}" async></script>
+
+    <script src="{% static 'blog/js/highlightjs/highlight.min.js' %}"></script>
+    <script src="{% static 'blog/js/highlighting.js' %}?v=4.1" defer></script>
 {% endblock %}

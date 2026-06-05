@@ -8,7 +8,16 @@ from wagtail.documents.models import Document, AbstractDocument
 from django.template.loader import render_to_string
 from wagtail import blocks
 
-from wagtail import blocks
+
+from wagtailcodeblock.blocks import CodeBlock
+
+# 🚀 架构师特制：纯净前端代码块（只改前台，不碰后台）
+class PureCodeBlock(CodeBlock):
+    class Meta:
+        # 强制指定前台输出的模板路径
+        template = 'blog/streams/code_block.html'
+        icon = 'code'
+        label = '代码块(纯净版)'
 
 
 class MermaidBlock(blocks.StructBlock):

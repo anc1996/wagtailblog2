@@ -37,8 +37,7 @@ from wagtail_ai.panels import AITitleFieldPanel, AIDescriptionFieldPanel, AIFiel
 from wagtailmarkdown.blocks import MarkdownBlock
 from wagtailcodeblock.blocks import CodeBlock
 
-from blog.blocks import AudioBlock, VideoBlock, CustomTableBlock, MermaidBlock
-
+from blog.blocks import AudioBlock, VideoBlock, CustomTableBlock, MermaidBlock, PureCodeBlock
 
 from wagtailblog3.mongodb import MongoDBStreamFieldAdapter
 from wagtailblog3.mongo import MongoManager
@@ -434,8 +433,8 @@ class BlogPage(Page):
 		)),
 		
 		# 代码块 - 使用wagtail-codeblock
-		("code_block", CodeBlock(label='Code', default_language='python')),
-		
+		# ("code_block", CodeBlock(label='Code', default_language='python')),
+		("code_block", PureCodeBlock(default_language='python')),
 		# Markdown块 - 使用wagtail-markdown (包含代码高亮和数学公式支持)
 		('markdown_block', MarkdownBlock(
 			icon='code',

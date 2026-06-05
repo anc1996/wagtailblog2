@@ -13,9 +13,9 @@
 # Wagtail Code Block主题
 WAGTAIL_CODE_BLOCK_THEME = 'okaidia'
 # 启用行号（默认就是True，这里显式写出来方便理解）
-WAGTAIL_CODE_BLOCK_LINE_NUMBERS = True
+WAGTAIL_CODE_BLOCK_LINE_NUMBERS = False
 # 启用“复制到剪贴板”按钮（默认也是True）
-WAGTAIL_CODE_BLOCK_COPY_TO_CLIPBOARD = True
+WAGTAIL_CODE_BLOCK_COPY_TO_CLIPBOARD = False
 # Wagtail Code Block配置
 WAGTAIL_CODE_BLOCK_LANGUAGES = (
     ('abap', 'ABAP'),

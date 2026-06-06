@@ -104,10 +104,12 @@
                         <i class="fa fa-calendar"></i>
                         <span>{{ page.date|date:"Y年m月d日" }}</span>
                     </div>
+                    {% with vc=page.get_view_count %}
                     <div class="blog-meta-item">
                         <i class="fa fa-eye"></i>
-                        <span>{{ page.get_view_count.total }} 次浏览</span>
+                        <span>今日 {{ vc.today }} 次 · 共 {{ vc.total }} 次浏览</span>
                     </div>
+                    {% endwith %}
                     {% with tags=page.tags.all %}
                         {% if tags %}
                             <div class="blog-meta-item">

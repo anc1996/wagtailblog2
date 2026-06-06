@@ -1,12 +1,13 @@
 from django.contrib import admin
 from .models import PageView, PageViewCount, ReactionType, Reaction
 
+
 @admin.register(PageView)
 class PageViewAdmin(admin.ModelAdmin):
-    list_display = ('page', 'user', 'ip_address', 'is_unique', 'viewed_at')
-    list_filter = ('is_unique', 'viewed_at')
-    search_fields = ('page__title', 'ip_address', 'user_agent')
-    date_hierarchy = 'viewed_at'
+    list_display = ('page', 'user', 'ip_address', 'date', 'last_viewed_at')
+    list_filter = ('date',)
+    search_fields = ('page__title', 'ip_address', 'user__username')
+    date_hierarchy = 'last_viewed_at'
     
     def has_add_permission(self, request):
         # 不允许手动添加，应通过中间件自动生成

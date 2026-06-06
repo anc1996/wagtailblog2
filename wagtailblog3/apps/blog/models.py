@@ -1,31 +1,30 @@
 # blog/models.py
 import logging,uuid,json
+from datetime import datetime
 
 from django.db.models.functions import Coalesce, Lower
 from django.utils import timezone
 from django.core.paginator import EmptyPage, PageNotAnInteger, Paginator
 from django.db import models
 from django import forms
-from django.db.models import Count, Sum, Subquery, OuterRef, F
-from markdown import markdown
+from django.db.models import Count, Subquery, OuterRef, F
 from django.conf import settings
-
 from django.utils.html import strip_tags  # 用于去除HTML标签
 from django.utils.safestring import mark_safe  # 用于标记HTML安全
 
-from datetime import datetime, date
+from markdown import markdown
+
 from modelcluster.fields import ParentalKey, ParentalManyToManyField
 from modelcluster.contrib.taggit import ClusterTaggableManager
 
 from taggit.models import TaggedItemBase, Tag
-from wagtail.admin.forms import WagtailAdminPageForm
 
+from wagtail.admin.forms import WagtailAdminPageForm
 from wagtail.embeds.blocks import EmbedBlock
-from wagtail.models import Page, Orderable, Revision
+from wagtail.models import Page, Orderable
 from wagtail.fields import StreamField, RichTextField
 from wagtail.admin.panels import FieldPanel, MultiFieldPanel, InlinePanel
 from wagtail.search import index
-
 from wagtail.images.models import Image, AbstractImage, AbstractRendition
 from wagtail.blocks import RichTextBlock, RawHTMLBlock
 from wagtail.images.blocks import ImageChooserBlock
@@ -35,14 +34,11 @@ from wagtail.blocks.stream_block import StreamValue
 from wagtail_ai.panels import AITitleFieldPanel, AIDescriptionFieldPanel, AIFieldPanel
 
 from wagtailmarkdown.blocks import MarkdownBlock
-from wagtailcodeblock.blocks import CodeBlock
 
+from blog.page_view_counter import PageViewCounter
 from blog.blocks import AudioBlock, VideoBlock, CustomTableBlock, MermaidBlock, PureCodeBlock
-
 from wagtailblog3.mongodb import MongoDBStreamFieldAdapter
 from wagtailblog3.mongo import MongoManager
-
-
 
 
 logger = logging.getLogger(__name__)
@@ -330,9 +326,6 @@ class BlogIndexPage(Page):
 	class Meta:
 		verbose_name = "博客索引页"
 		verbose_name_plural = "博客索引页"
-
-
-
 
 
 # 💡 定义标签提示词常量（因为 tags 属于自定义业务，Agent中没有预设坑位）
@@ -782,9 +775,10 @@ class BlogPage(Page):
 		return context
 	
 	def serve(self, request):
-		"""
-		重写serve方法，在将数据传递给模板前，对MongoDB中的Markdown内容进行渲染。
-		"""
+		# ✅ 记录访问，一行搞定
+		if self.pk:
+			PageViewCounter(self.pk).record(request)
+		
 		# 1. 从MongoDB获取最原始、最纯净的内容
 		mongo_content = self.get_content_from_mongodb()
 		
@@ -831,67 +825,13 @@ class BlogPage(Page):
 		
 		return related_posts
 	
-	# 在BlogPage类中添加这些方法
-	def get_view_count(self):
-		"""获取页面的访问量统计"""
-		
-		#  预览模式保护
-		if not self.pk:
-			return {
-				'today': 0,
-				'today_unique': 0,
-				'total': 0,
-				'total_unique': 0
-			}
-		
-		today = date.today()
-		
-		# 尝试从数据库获取今日数据
-		try:
-			view_count = PageViewCount.objects.get(page=self, date=today)
-			count = view_count.count
-			unique_count = view_count.unique_count
-		except PageViewCount.DoesNotExist:
-			# 从Redis检查是否有今日计数
-			try:
-				import redis
-				from django.conf import settings
-				
-				# 使用Redis连接
-				redis_client = redis.Redis(
-					host=getattr(settings, 'REDIS_HOST', 'localhost'),
-					port=getattr(settings, 'REDIS_PORT', 6379),
-					password=getattr(settings, 'REDIS_PASSWORD', None),
-					db=getattr(settings, 'REDIS_DB', 0)
-				)
-				
-				# 获取今日数据
-				count = int(redis_client.get(f"page_views:{self.id}") or 0)
-				unique_count = redis_client.scard(f"page_unique_views:{self.id}:{today.isoformat()}")
-			except Exception:
-				count = 0
-				unique_count = 0
-		
-		# 获取总计数（历史累计）
-		total_counts = PageViewCount.objects.filter(page=self).aggregate(
-			total=Sum('count'),
-			total_unique=Sum('unique_count')
-		)
-		
-		total_count = total_counts.get('total') or 0
-		total_unique_count = total_counts.get('total_unique') or 0
-		
-		# 添加Redis中可能未同步的计数
-		total_count += count
-		total_unique_count += unique_count
-		
-		return {
-			'today': count,
-			'today_unique': unique_count,
-			'total': total_count,
-			'total_unique': total_unique_count
-		}
 	
+	def get_view_count(self):
+		"""获取访问统计（委托给 PageViewCounter）"""
+		if not self.pk:
+			return {'today': 0, 'today_unique': 0, 'total': 0, 'total_unique': 0}
+		return PageViewCounter(self.pk).get()
+
 	def get_reactions(self):
 		"""获取页面的反应统计"""
 		
@@ -964,22 +904,20 @@ class BlogPageGalleryImage(Orderable):
 # 页面访问记录模型
 @register_snippet
 class PageView(models.Model):
-	page = models.ForeignKey('wagtailcore.Page', on_delete=models.CASCADE, related_name='page_views')
-	session_key = models.CharField(max_length=100, blank=True, null=True)
-	user = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
-	ip_address = models.GenericIPAddressField()
-	user_agent = models.CharField(max_length=255, blank=True)
-	viewed_at = models.DateTimeField(auto_now_add=True)
-	is_unique = models.BooleanField(default=False)
-	
-	class Meta:
-		verbose_name = "页面访问记录"
-		verbose_name_plural = "页面访问记录"
-		indexes = [
-			models.Index(fields=['page', 'viewed_at']),
-			models.Index(fields=['viewed_at']),
-		]
+    page           = models.ForeignKey('wagtailcore.Page', on_delete=models.CASCADE, related_name='page_views')
+    date           = models.DateField()                                          # 访问日期，用于按天查询
+    user           = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
+    ip_address     = models.GenericIPAddressField()
+    user_agent     = models.CharField(max_length=255, blank=True)
+    last_viewed_at = models.DateTimeField()                                      # 当天最后一次访问时间，可更新
 
+    class Meta:
+        verbose_name = "页面访问记录"
+        verbose_name_plural = "页面访问记录"
+        indexes = [
+            models.Index(fields=['page', 'date']),
+            models.Index(fields=['page', 'date', 'ip_address']),                 # 加速唯一性查询
+        ]
 
 # 访问统计聚合模型
 @register_snippet

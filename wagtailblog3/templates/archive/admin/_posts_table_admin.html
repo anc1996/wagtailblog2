@@ -39,7 +39,14 @@
                 </td>
                 <td>
                     {% for tag in post.tags.all %}
-                        <span class="status-tag">{{ tag.name }}</span>{% if not forloop.last %} {% endif %}
+                        {% if blog_tag_index_page %}
+                            <a href="{{ blog_tag_index_page.url }}?tag={{ tag.slug }}"
+                               target="_blank"
+                               class="status-tag"
+                               title="查看标签「{{ tag.name }}」下的所有文章">{{ tag.name }}</a>{% if not forloop.last %} {% endif %}
+                        {% else %}
+                            <span class="status-tag">{{ tag.name }}</span>{% if not forloop.last %} {% endif %}
+                        {% endif %}
                     {% empty %}
                         <span style="color: #999;">-</span>
                     {% endfor %}

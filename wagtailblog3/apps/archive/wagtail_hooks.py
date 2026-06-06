@@ -6,7 +6,7 @@ from django.shortcuts import render
 from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
 from django.utils.dateparse import parse_date
 from django.http import JsonResponse
-from blog.models import BlogPage
+from blog.models import BlogPage,BlogTagIndexPage
 from .views import get_archive_data
 
 
@@ -74,6 +74,7 @@ def register_archive_admin_urls():
 			'selected_start_date': '',
 			'selected_end_date': '',
 			'range_1_to_12': range(1, 13),
+			'blog_tag_index_page': BlogTagIndexPage.objects.live().first(),
 		}
 		
 		return render(request, 'archive/admin/dashboard.html', context)
@@ -163,6 +164,7 @@ def register_archive_admin_urls():
 						'is_paginated_list': True,
 						'selected_start_date': start_date_str,
 						'selected_end_date': end_date_str,
+						'blog_tag_index_page': BlogTagIndexPage.objects.live().first(),
 					},
 					request=request
 				)

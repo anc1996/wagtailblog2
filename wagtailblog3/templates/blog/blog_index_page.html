@@ -137,20 +137,21 @@
                                                 <i class="fa fa-calendar me-1"></i>{{ post.specific.date | date:"Y-m-d" }}
                                             </span>
 
-                                            {# 标签列表 #}
-                                            {% with tags=post.specific.tags.all %}
-                                                {% if tags %}
-                                                    <span class="tags me-2">
-                                                        <i class="fa fa-tags me-1"></i>
-                                                        {% for tag in tags %}
-                                                            {% if blog_tag_index_page %}
-                                                                <a href="{% pageurl blog_tag_index_page %}?tag={{ tag.slug }}" style="color: inherit;">{{ tag.name }}</a>{% if not forloop.last %}, {% endif %}
-                                                            {% else %}
-                                                                <span>{{ tag.name }}</span>{% if not forloop.last %}, {% endif %}
-                                                            {% endif %}
-                                                        {% endfor %}
-                                                    </span>
-                                                {% endif %}
+                                            {# 标签列表 —— 仅 BlogPage 才有 tags #}
+                                            {% with specific=post.specific %}
+                                            {% if specific.tags %}   {# BlogIndexPage 无此字段，自然跳过 #}
+                                                <span class="tags me-2">
+                                                    <i class="fa fa-tags me-1"></i>
+                                                    {% for tag in specific.tags.all %}
+                                                        {% if blog_tag_index_page %}
+                                                            <a href="{% pageurl blog_tag_index_page %}?tag={{ tag.slug }}"
+                                                               style="color: inherit;">{{ tag.name }}</a>{% if not forloop.last %}, {% endif %}
+                                                        {% else %}
+                                                            <span>{{ tag.name }}</span>{% if not forloop.last %}, {% endif %}
+                                                        {% endif %}
+                                                    {% endfor %}
+                                                </span>
+                                            {% endif %}
                                             {% endwith %}
 
                                             {# 访问统计 #}

@@ -98,6 +98,7 @@
                                 {% endfor %}
                             </span>
                         </div>
+
                     {% endif %}
                     <div class="blog-meta-item">
                         <i class="fa fa-calendar"></i>
@@ -107,6 +108,23 @@
                         <i class="fa fa-eye"></i>
                         <span>{{ page.get_view_count.total }} 次浏览</span>
                     </div>
+                    {% with tags=page.tags.all %}
+                        {% if tags %}
+                            <div class="blog-meta-item">
+                                <i class="fa fa-tags"></i>
+                                <span>
+                                    {% for tag in tags %}
+                                        {% if blog_tag_index_page %}
+                                            <a href="{% pageurl blog_tag_index_page %}?tag={{ tag.slug }}"
+                                               style="color: inherit; text-decoration: underline;">{{ tag.name }}</a>{% if not forloop.last %}, {% endif %}
+                                        {% else %}
+                                            {{ tag.name }}{% if not forloop.last %}, {% endif %}
+                                        {% endif %}
+                                    {% endfor %}
+                                </span>
+                            </div>
+                        {% endif %}
+                    {% endwith %}
                 </div>
             </div>
         </div>

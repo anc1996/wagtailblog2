@@ -320,6 +320,11 @@ class BlogIndexPage(Page):
 		context['sort_secondary'] = sort_secondary
 		context['page_obj'] = paginated_pages
 		
+
+		# ✅ 可选：传入页面类型映射，模板可按类型差异化渲染
+		# 也可以直接在模板用 post.specific_class.__name__ 判断
+		context['blog_tag_index_page'] = BlogTagIndexPage.objects.live().first()
+		
 		return context
 	
 	class Meta:
@@ -769,6 +774,12 @@ class BlogPage(Page):
 			logger.error(traceback.format_exc())
 			# 如果出错，返回原始数据，避免整个页面崩溃
 			return body_data
+	
+	def get_context(self, request, *args, **kwargs):
+		context = super().get_context(request, *args, **kwargs)
+		# 注入标签索引页，供模板生成标签跳转链接
+		context['blog_tag_index_page'] = BlogTagIndexPage.objects.live().first()
+		return context
 	
 	def serve(self, request):
 		"""

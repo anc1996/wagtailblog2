@@ -1,5 +1,5 @@
 # blog/models.py
-import logging,uuid,json
+import logging,uuid,json,re
 from datetime import datetime
 
 from django.db.models.functions import Coalesce, Lower
@@ -472,7 +472,9 @@ class BlogPage(Page):
 	
 	# 索引字段
 	search_fields = Page.search_fields + [
-		index.SearchField('intro'),
+		index.SearchField('title', boost=10),
+		index.SearchField('intro', boost=5),
+		index.SearchField('get_full_text_for_search', boost=2),
 		index.FilterField('date'),
 		index.FilterField('tags'),
 		index.FilterField('categories'),
@@ -797,6 +799,46 @@ class BlogPage(Page):
 		
 		# 4. 调用父类的serve方法，使用我们准备好的body内容去渲染模板
 		return super().serve(request)
+	
+	def get_full_text_for_search(self):
+		content = self.get_content_from_mongodb()
+		if not content or 'body' not in content:
+			return ""
+		body = content['body']
+		if not isinstance(body, list):
+			return ""
+		text_parts = []
+		for block in body:
+			if not isinstance(block, dict):
+				continue
+			block_type = block.get('type')
+			block_value = block.get('value')
+			if not block_value:
+				continue
+			if block_type == 'rich_text':
+				text_parts.append(strip_tags(str(block_value)))
+			elif block_type == 'markdown_block':
+				raw = block_value if isinstance(block_value, str) else str(block_value)
+				raw = re.sub(r'[#*`>\-_[\](){}|]', ' ', raw)
+				text_parts.append(raw)
+			elif block_type == 'code_block':
+				if isinstance(block_value, dict):
+					text_parts.append(str(block_value.get('code', '')))
+			elif block_type == 'mermaid_chart':
+				if isinstance(block_value, dict):
+					text_parts.append(str(block_value.get('code', '')))
+			elif block_type == 'table_block':
+				if isinstance(block_value, dict) and 'data' in block_value:
+					for row in block_value['data']:
+						if isinstance(row, list):
+							text_parts.append(' '.join(str(cell) for cell in row if cell))
+			elif block_type == 'raw_html':
+				text_parts.append(strip_tags(str(block_value)))
+			elif block_type == 'embed_block':
+				if isinstance(block_value, dict) and block_value.get('title'):
+					text_parts.append(str(block_value['title']))
+		return ' '.join(filter(None, text_parts))
+	
 	
 	def get_related_posts_by_tags(self, max_posts=5):
 		"""根据标签获取相关文章"""

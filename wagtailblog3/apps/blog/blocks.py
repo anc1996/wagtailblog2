@@ -1,6 +1,5 @@
 # blog/blocks.py
 
-from wagtail.documents.models import AbstractDocument
 from django.db import models
 from wagtailmedia.blocks import AudioChooserBlock, VideoChooserBlock
 from wagtail.contrib.table_block.blocks import TableBlock as WagtailTableBlock

@@ -1,286 +1,161 @@
-# search/core.py
+# apps/search/core.py
 from wagtail.models import Page
 from blog.models import BlogPage
 from wagtail.contrib.search_promotions.models import Query
-from django.db.models import Count, QuerySet
-import logging, traceback
-import time
+from django.db.models import Count
+import logging
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
 
-def perform_search(query_string, search_type='all', page_number=1, per_page=10,
-                   start_date=None, end_date=None, order_by=None):
-	"""
-	执行搜索并返回结果
-
-	参数:
-		query_string: 搜索关键词
-		search_type: 搜索类型 (all, blog, pages)
-		page_number: 页码
-		per_page: 每页结果数
-		start_date: 开始日期 (格式: YYYY-MM-DD)
-		end_date: 结束日期 (格式: YYYY-MM-DD)
-		order_by: 排序方式 ('date', '-date', 'relevance')
-
-	返回:
-		搜索结果对象 (QuerySet)
-	"""
-	
-	# 记录执行开始时间
-	start_time = time.time()
-	
-	# 初始化空结果
-	search_results = Page.objects.none()
-	
-	if query_string:
-		# 记录搜索查询（用于搜索推广功能）
-		query = Query.get(query_string)
-		query.add_hit()
-		
+def _parse_date(date_val):
+	"""安全解析日期格式"""
+	if date_val and isinstance(date_val, str):
 		try:
-			# 根据搜索类型选择不同的查询
-			if search_type == "blog":
-				# 只搜索博客文章
-				search_results = BlogPage.objects.live().public().search(query_string)
-				logger.debug(f"博客搜索初始结果数: {search_results.count()}")
-			elif search_type == "pages":
-				# 只搜索普通页面（排除博客）
-				search_results = Page.objects.live().public().exclude(
-					id__in=BlogPage.objects.values_list('id', flat=True)
-				).search(query_string)
-				logger.debug(f"页面搜索初始结果数: {search_results.count()}")
-			else:
-				# 搜索所有内容
-				search_results = Page.objects.live().public().search(query_string)
-				logger.debug(f"全部搜索初始结果数: {search_results.count()}")
-			
-			# 确保结果是QuerySet或列表，便于后续处理
-			if not isinstance(search_results, (QuerySet, list)):
-				logger.warning(f"搜索结果类型异常: {type(search_results)}")
-				ids = []
-				for item in search_results:
-					if hasattr(item, 'id'):
-						ids.append(item.id)
-				search_results = Page.objects.filter(id__in=ids)
-			
-			# 应用日期范围过滤 - 分离处理BlogPage与普通Page
-			if start_date or end_date:
-				logger.debug(f"应用日期过滤: 开始={start_date}, 结束={end_date}")
-				
-				# 转换日期字符串为日期对象(如果是字符串)
-				if start_date and isinstance(start_date, str):
-					try:
-						start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
-					except ValueError:
-						logger.error(f"开始日期格式错误: {start_date}")
-						start_date = None
-				
-				if end_date and isinstance(end_date, str):
-					try:
-						end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
-					except ValueError:
-						logger.error(f"结束日期格式错误: {end_date}")
-						end_date = None
-				
-				# 分离博客页面和非博客页面
-				if isinstance(search_results, QuerySet):
-					# 获取所有结果的ID
-					result_ids = list(search_results.values_list('id', flat=True))
-					
-					# 博客页面过滤
-					blog_query = BlogPage.objects.filter(id__in=result_ids)
-					if start_date:
-						blog_query = blog_query.filter(date__gte=start_date)
-					if end_date:
-						blog_query = blog_query.filter(date__lte=end_date)
-					
-					filtered_blog_ids = list(blog_query.values_list('id', flat=True))
-					
-					# 非博客页面保持不变
-					non_blog_ids = list(Page.objects.filter(id__in=result_ids)
-					                    .exclude(id__in=BlogPage.objects.values_list('id', flat=True))
-					                    .values_list('id', flat=True))
-					
-					# 合并IDs
-					final_ids = filtered_blog_ids + non_blog_ids
-					
-					# 重建结果集
-					search_results = Page.objects.filter(id__in=final_ids)
-					logger.debug(f"日期过滤后结果数: {search_results.count()}")
-			
-			# 应用排序逻辑
-			if order_by:
-				logger.debug(f"应用排序: {order_by}")
-				
-				if order_by == '-date':
-					# 分离博客页面和非博客页面
-					if isinstance(search_results, QuerySet):
-						# 获取所有结果的ID
-						result_ids = list(search_results.values_list('id', flat=True))
-						
-						# 按date降序排列博客页面
-						blog_results = list(BlogPage.objects.filter(id__in=result_ids)
-						                    .order_by('-date')
-						                    .values_list('id', flat=True))
-						
-						# 按first_published_at降序排列非博客页面
-						non_blog_results = list(Page.objects.filter(id__in=result_ids)
-						                        .exclude(id__in=BlogPage.objects.values_list('id', flat=True))
-						                        .order_by('-first_published_at')
-						                        .values_list('id', flat=True))
-						
-						# 合并排序列表 (保持博客优先)
-						ordered_ids = blog_results + non_blog_results
-						
-						# 使用Case-When保持顺序
-						from django.db.models import Case, When, IntegerField
-						preserved_order = Case(
-							*[When(id=pk, then=pos) for pos, pk in enumerate(ordered_ids)],
-							output_field=IntegerField()
-						)
-						search_results = Page.objects.filter(id__in=ordered_ids).order_by(preserved_order)
-				
-				elif order_by == 'date':
-					# 与上面类似，但使用升序
-					if isinstance(search_results, QuerySet):
-						result_ids = list(search_results.values_list('id', flat=True))
-						
-						blog_results = list(BlogPage.objects.filter(id__in=result_ids)
-						                    .order_by('date')
-						                    .values_list('id', flat=True))
-						
-						non_blog_results = list(Page.objects.filter(id__in=result_ids)
-						                        .exclude(id__in=BlogPage.objects.values_list('id', flat=True))
-						                        .order_by('first_published_at')
-						                        .values_list('id', flat=True))
-						
-						ordered_ids = blog_results + non_blog_results
-						
-						from django.db.models import Case, When, IntegerField
-						preserved_order = Case(
-							*[When(id=pk, then=pos) for pos, pk in enumerate(ordered_ids)],
-							output_field=IntegerField()
-						)
-						search_results = Page.objects.filter(id__in=ordered_ids).order_by(preserved_order)
+			return datetime.strptime(date_val, '%Y-%m-%d').date()
+		except ValueError:
+			return None # 或返回 date_val 本身
+	return date_val
+
+
+def perform_search(query_string, search_type='all', start_date=None, end_date=None, order_by=None):
+	"""
+    【重构核心】基于 Elasticsearch 8 原生分词与下推路由的单轨搜索引擎
+    四大核心前端参数 (query, type, start_date/end_date, order_by) 一体化编译。
+    """
+	parsed_start = _parse_date(start_date)
+	parsed_end = _parse_date(end_date)
+	
+	# 1. 编译 search_type 隔离带
+	if search_type == 'blog':
+		# 博客单轨：仅查询 BlogPage 节点
+		qs = BlogPage.objects.live().public()
 		
-		except Exception as e:
-			logger.error(f"搜索出错: {e}")
-			logger.error(traceback.format_exc())
-			# 发生错误时返回空结果
-			search_results = Page.objects.none()
+		# 博客日期过滤：锁定专属业务 FilterField -> date
+		if parsed_start:
+			qs = qs.filter(date__gte=parsed_start)
+		if parsed_end:
+			qs = qs.filter(date__lte=parsed_end)
+		
+		# 博客时间轴排序
+		if order_by == 'date':
+			qs = qs.order_by('date')
+		elif order_by == '-date':
+			qs = qs.order_by('-date')
 	
-	# 记录执行耗时
-	execution_time = time.time() - start_time
-	logger.info(f"搜索查询 '{query_string}' 耗时: {execution_time:.3f}秒 " +
-	            f"(过滤器: type={search_type}, start_date={start_date}, " +
-	            f"end_date={end_date}, order_by={order_by})")
+	elif search_type == 'pages':
+		# 页面单轨：剔除所有 BlogPage 的 ID，只留下普通页面
+		blog_ids = BlogPage.objects.values_list('id', flat=True)
+		qs = Page.objects.live().public().exclude(id__in=blog_ids)
+		
+		# 普通页面日期过滤：锁定 Wagtail 原生自带的最后发布时间 -> last_published_at
+		if parsed_start:
+			qs = qs.filter(last_published_at__gte=parsed_start)
+		if parsed_end:
+			qs = qs.filter(last_published_at__lte=parsed_end)
+		
+		# 普通页面时间轴排序
+		if order_by == 'date':
+			qs = qs.order_by('last_published_at')
+		elif order_by == '-date':
+			qs = qs.order_by('-last_published_at')
 	
-	return search_results
+	else:
+		# 全站混合检索单轨 (all)
+		qs = Page.objects.live().public()
+		
+		# 混合检索全局日期过滤：统一折叠到基类起步时间 -> first_published_at
+		if parsed_start:
+			qs = qs.filter(first_published_at__gte=parsed_start)
+		if parsed_end:
+			qs = qs.filter(first_published_at__lte=parsed_end)
+		
+		# 全站时间轴排序
+		if order_by == 'date':
+			qs = qs.order_by('first_published_at')
+		elif order_by == '-date':
+			qs = qs.order_by('-first_published_at')
+	
+	# 2. 触发 Elasticsearch 8 引擎终极检索
+	if query_string:
+		# 💡 架构师核心修复：检测用户是否启用了显式的时间轴排序（date 或 -date）
+		# 如果启用了自定义排序，则将 order_by_relevance 设为 False，强迫 ES 尊重 QuerySet 的 order_by() 规则
+		use_relevance = order_by not in ['date', '-date']
+		
+		# 核心绝杀：传入 order_by_relevance 参数，打通 ES 的真实排序通道
+		search_results = qs.search(query_string, order_by_relevance=use_relevance)
+		
+		# 记录搜索词点击日志（Wagtail 内置统计，用于下拉搜索建议，保持原状）
+		query_obj = Query.get(query_string)
+		query_obj.add_hit()
+		
+		return search_results
+	
+	# 如果用户没有输入关键词，退回普通的 Django 结果集包装，由原生 QuerySet 承载
+	return qs
 
 
 def format_search_results_for_api(search_results):
 	"""
-	将搜索结果格式化为API响应格式
-
-	参数:
-		search_results: 搜索结果对象
-
-	返回:
-		API格式的结果列表
-	"""
+    将搜索结果页序列化为标准干净的 JSON。
+    由于 ES8 返回的对象序列可以直接通过 .specific 拿到具体模型，这里逻辑完全自洽，无需改动。
+    """
 	results_data = []
-	
-	# 确保search_results是可迭代的
-	if search_results is None:
+	if not search_results:
 		return results_data
 	
 	try:
-		for result in search_results:
-			# 创建基本信息字典
+		for page in search_results:
+			# 动态向上转型，拿到子类（如 HomePage 或 BlogPage）的特有属性
+			specific_page = page.specific if hasattr(page, 'specific') else page
+			
+			# 基础公共参数组装
 			data = {
-				'id': result.id,
-				'title': result.title,
-				'url': result.url,
-				'type': result._meta.model_name,
+				'id': page.id,
+				'title': page.title,
+				'url': page.get_url(),
+				'search_description': getattr(page, 'search_description', '') or '',
+				'content_type': page.content_type.model,
+				'last_published_at': page.last_published_at.strftime(
+					'%Y-%m-%d %H:%M') if page.last_published_at else '',
 			}
 			
-			# 处理特定模型的字段
-			specific_page = result.specific
-			
-			# 特别处理BlogPage类型
-			if hasattr(specific_page, 'date'):
-				data['date'] = specific_page.date.isoformat() if specific_page.date else None
-			
-			# 添加简介信息
-			if hasattr(specific_page, 'intro'):
-				data['intro'] = specific_page.intro
-			
-			# 添加分类信息（如果有）
-			if hasattr(specific_page, 'categories') and hasattr(specific_page.categories, 'all'):
-				categories = specific_page.categories.all()
-				if categories:
-					data['categories'] = [
-						{'id': cat.id, 'name': cat.name, 'slug': cat.slug}
-						for cat in categories
-					]
-			
-			# 添加标签信息（如果有）
-			if hasattr(specific_page, 'tags') and hasattr(specific_page.tags, 'all'):
-				tags = specific_page.tags.all()
-				if tags:
-					data['tags'] = [tag.name for tag in tags]
-			
-			# 添加特色图片信息（如果有）
-			if hasattr(specific_page, 'featured_image') and specific_page.featured_image:
-				data['featured_image'] = {
-					'id': specific_page.featured_image.id,
-					'title': specific_page.featured_image.title,
-					'url': specific_page.featured_image.file.url if hasattr(specific_page.featured_image,
-					                                                        'file') else None
-				}
-			
-			# 添加作者信息（如果有）
-			if hasattr(specific_page, 'authors') and hasattr(specific_page.authors, 'all'):
-				authors = specific_page.authors.all()
-				if authors:
-					data['authors'] = [
-						{'id': author.id, 'name': author.name}
-						for author in authors
-					]
+			# 博客专属数据填充
+			if isinstance(specific_page, BlogPage):
+				data['intro'] = specific_page.intro or ''
+				data['date'] = specific_page.date.strftime('%Y-%m-%d') if specific_page.date else ''
+				
+				if hasattr(specific_page, 'tags'):
+					data['tags'] = [tag.name for tag in specific_page.tags.all()]
+				if hasattr(specific_page, 'categories'):
+					data['categories'] = [cat.name for cat in specific_page.categories.all()]
+				if hasattr(specific_page, 'authors'):
+					data['authors'] = [{'id': a.id, 'name': a.name} for a in specific_page.authors.all()]
+				if hasattr(specific_page, 'featured_image') and specific_page.featured_image:
+					data['featured_image'] = {
+						'id': specific_page.featured_image.id,
+						'title': specific_page.featured_image.title,
+						'url': specific_page.featured_image.file.url if hasattr(specific_page.featured_image,
+						                                                        'file') else None
+					}
 			
 			results_data.append(data)
 	except Exception as e:
-		logger.error(f"格式化搜索结果时出错: {e}")
-		logger.error(traceback.format_exc())
-	
+		logger.error(f"格式化搜索结果时发生非预期异常: {e}")
 	return results_data
 
 
 def get_search_suggestions(query_string, limit=5):
-	"""
-	获取搜索建议列表
-
-	参数:
-		query_string: 搜索关键词前缀
-		limit: 最大返回数量
-
-	返回:
-		搜索建议列表
-	"""
+	"""搜索建议提示，直接基于搜索记录模型进行 icontains 统计，保持不动"""
 	if not query_string or len(query_string) < 2:
 		return []
-	
-	# 获取包含查询字符串的搜索记录，按点击量排序
 	try:
-		from wagtail.contrib.search_promotions.models import Query
-		# 使用 daily_hits 聚合得到总点击量
 		suggestions = Query.objects.filter(
 			query_string__icontains=query_string
 		).annotate(
-			total_hits=Count('daily_hits')
-		).order_by('-total_hits')[:limit]
+			total_hits_count=Count('daily_hits')
+		).order_by('-total_hits_count')[:limit]
 		
 		# 构建建议列表
 		results = [

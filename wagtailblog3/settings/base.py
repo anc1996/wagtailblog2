@@ -244,13 +244,7 @@ DATA_UPLOAD_MAX_NUMBER_FIELDS = 10_000
 # Wagtail 设置
 WAGTAIL_SITE_NAME = "wagtailblog3"
 
-# 搜索
-# https://docs.wagtail.org/en/stable/topics/search/backends.html
-WAGTAILSEARCH_BACKENDS = {
-    'default': {
-        'BACKEND': 'wagtailblog3.search.CustomSearchBackend',
-    }
-}
+
 
 # 在 Wagtail 管理后端中引用完整 URL 时使用的基本 URL -
 # 例如，在通知电子邮件中。 不要包含 '/admin' 或尾部斜杠

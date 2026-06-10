@@ -342,6 +342,33 @@ def get_celery_config(time_zone, redis_host, redis_port, redis_password):
 	}
 
 
+# 搜索
+# https://docs.wagtail.org/en/stable/topics/search/backends.html
+WAGTAILSEARCH_BACKENDS = {
+    'default': {
+        'BACKEND': 'wagtail.search.backends.elasticsearch8',
+        'URLS': ['http://192.168.20.2:9200'],
+        'INDEX_PREFIX': 'wagtailblog',
+        'TIMEOUT': 10,
+        'INDEX_SETTINGS': {
+            'settings': {
+                'analysis': {
+                    'analyzer': {
+                        'default': {
+                            'type': 'custom',
+                            'tokenizer': 'ik_max_word'
+                        },
+                        'default_search': {
+                            'type': 'custom',
+                            'tokenizer': 'ik_smart'
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 # ==========================================================
 # 数据库连接信息打印函数
 # ==========================================================

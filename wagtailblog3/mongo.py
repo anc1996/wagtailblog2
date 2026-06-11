@@ -1,5 +1,7 @@
 # wagtailblog3/mongo.py
 # 彻底移除 jieba 分词与 $text 搜索，仅保留纯净的 KV 存储与 Wagtail 原生网关对接
+import hashlib
+
 import pymongo
 import json, logging
 from django.conf import settings
@@ -140,6 +142,18 @@ class MongoManager:
 				logger.error(f"MongoDB二次尝试保存内容错误: {e2}")
 				raise
 	
+	def _generate_body_hash(self, prepared_body):
+		"""
+		【新增】辅助方法：计算标准化正文的 MD5 Hash 值
+		用于精准比对 MongoDB 中的大文本是否发生实质性修改
+		"""
+		try:
+			# sort_keys=True 保证字典无序性带来的 Hash 差异被抹平
+			hash_str = json.dumps(prepared_body, sort_keys=True)
+			return hashlib.md5(hash_str.encode('utf-8')).hexdigest()
+		except Exception as e:
+			logger.error(f"Hash 计算失败: {e}")
+			return None
 	
 	# =============================================================================
 	# 异构草稿/历史快照专属持久化网关（无 page_id 唯一索引限制）
@@ -148,6 +162,35 @@ class MongoManager:
 		"""将草稿/历史版本的 StreamField 原始数据，存入专属的历史大文本集合中"""
 		# 预处理数据，确保所有特殊类型数据都是 MongoDB 可序列化的
 		prepared_body = self._prepare_for_mongo(body_data)
+		
+		# =====================================================================
+		# 🚀 核心升级：底层防线 - MongoDB 级别的草稿去重拦截
+		# =====================================================================
+		try:
+			current_hash = self._generate_body_hash(prepared_body)
+			
+			if current_hash:
+				# 倒序查找该 page_id 在 MongoDB 中的最后一次草稿快照
+				latest_draft = self.blog_revisions.find_one(
+					{'page_id': page_id},
+					sort=[('created_at', pymongo.DESCENDING)]
+				)
+				
+				if latest_draft and 'body' in latest_draft:
+					latest_hash = self._generate_body_hash(latest_draft['body'])
+					
+					# 【拦截生效】：如果本次正文跟上一次在 MongoDB 里的正文 Hash 完全一致
+					if current_hash == latest_hash:
+						reused_oid = str(latest_draft['_id'])
+						logger.info(
+							f"🛡️ MongoDB 存储引擎拦截: Page [{page_id}] 正文未变，拒绝冗余写入，复用历史指针 OID [{reused_oid}]")
+						# 欺骗上层视图，假装存成功了，把旧的 OID 还给它
+						return reused_oid
+		except Exception as e:
+			logger.warning(f"草稿去重 Hash 比对异常，降级为常规插入: {e}")
+		# =====================================================================
+		
+		# 如果没有拦截（全新内容，或者 Hash 发生改变），则正常插入 MongoDB
 		document = {
 			'page_id': page_id,
 			'body': prepared_body,
@@ -192,22 +235,39 @@ class MongoManager:
 			logger.error(f"MongoDB删除单条快照错误: {e}")
 			return False
 	
+	# =============================================================================
+	# ⚠️ 运维/灾备专属工具方法 (非业务常规逻辑)
+	# =============================================================================
 	def save_page_revision(self, pointer_id, page_id, body_data):
-		"""保存单条草稿历史快照到 MongoDB"""
+		"""
+		【警告：这不是 Wagtail 正常的保存/发布流程调用的方法！】
+
+		常规的保存草稿逻辑走的是 `save_blog_revision_body`（MongoDB 自动生成新 OID）。
+		这个方法的作用是：被动接收一个已经存在的 `pointer_id`，并强制写入 MongoDB。
+
+		主要适用场景（运维与灾备）：
+		1. 数据恢复 (Data Restoration)：当 MongoDB 数据丢失，需要从 MySQL 备份的
+		   wagtailcore_revision 表中提取出历史 OID，并重新把内容灌回 MongoDB 时。
+		2. 数据迁移 (Migration)：跨集群同步时，需要保持两侧草稿 ID 绝对一致。
+		3. 脏数据修复脚本 (Management Commands)：用于编写后台脚本修复断链的草稿。
+		"""
 		# 🚨 修复点：PyMongo 强制要求使用 is None
 		if self.blog_revisions is None:
 			return False
 		
 		try:
+			# 使用强行指定的 pointer_id 作为 _id 进行插入
 			self.blog_revisions.insert_one({
 				'_id': pointer_id,
 				'page_id': page_id,
 				'body': body_data,
-				'created_at': timezone.now().isoformat()
+				'created_at': timezone.now().isoformat(),
+				'is_restored': True  # 可选：打上一个恢复标记，方便日后排查
 			})
+			logger.info(f"🔧 运维操作：成功强制写入/恢复历史快照，指定 OID [{pointer_id}]")
 			return True
 		except Exception as e:
-			logger.error(f"MongoDB保存历史快照失败: {e}")
+			logger.error(f"🔧 运维操作：强制保存历史快照失败，指定 OID [{pointer_id}]: {e}")
 			return False
 	
 	def get_blog_content(self, content_id):

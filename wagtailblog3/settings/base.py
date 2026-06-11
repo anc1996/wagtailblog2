@@ -186,7 +186,6 @@ load_dotenv()
 
 
 
-
 # 1. 基础 Django 配置
 LANGUAGE_CODE = "zh-hans"  # 默认语言设置为简体中文
 TIME_ZONE = "Asia/Shanghai"  # 时区设置为上海
@@ -231,7 +230,6 @@ MEDIA_URL = "/media/" # 媒体文件的 URL 前缀
 
 
 
-
 # Wagtail 自定义模型配置，admin对后台内容进行编辑
 WAGTAILDOCS_DOCUMENT_MODEL = 'blog.BlogDocument' # 自定义文档模型
 
@@ -264,6 +262,9 @@ MESSAGE_TAGS = {
     messages.WARNING: 'warning',
     messages.ERROR: 'danger',
 }
+
+# 将自动保存间隔设置为 0，彻底关闭前端的自动存草稿行为
+WAGTAIL_AUTOSAVE_INTERVAL = 0
 
 
 # ===============================================================

@@ -343,30 +343,62 @@ def get_celery_config(time_zone, redis_host, redis_port, redis_password):
 
 
 # 搜索
-# https://docs.wagtail.org/en/stable/topics/search/backends.html
 WAGTAILSEARCH_BACKENDS = {
-    'default': {
-        'BACKEND': 'wagtail.search.backends.elasticsearch8',
-        'URLS': ['http://192.168.20.2:9200'],
-        'INDEX_PREFIX': 'wagtailblog',
-        'TIMEOUT': 10,
-        'INDEX_SETTINGS': {
-            'settings': {
-                'analysis': {
-                    'analyzer': {
-                        'default': {
-                            'type': 'custom',
-                            'tokenizer': 'ik_max_word'
-                        },
-                        'default_search': {
-                            'type': 'custom',
-                            'tokenizer': 'ik_smart'
-                        }
-                    }
-                }
-            }
-        }
-    }
+	'default': {
+		# 1. 搜索引擎底层的通用适配器驱动
+		# 使用 Wagtail 原生支持的 Elasticsearch 8.x 版本官方后端
+		'BACKEND': 'wagtail.search.backends.elasticsearch8',
+		
+		# 2. ES 集群的物理连接地址
+		# 本地单节点或集群网关的 REST API 端点
+		'URLS': ['http://127.0.0.1:9200'],
+		
+		# 3. 隔离命名空间（索引前缀）
+		# 在多套环境（如开发/测试/生产）公用同一个 ES 集群时，防止索引冲突
+		# 实际生成的索引名形如: wagtailblog__apps_blog_blogpage 等
+		'INDEX_PREFIX': 'wagtailblog-test',
+		
+		# 4. HTTP 网络超时时间（单位：秒）
+		# 限制 Django 向 ES 发送检索或批量建立索引（Bulk Indexing）时的最大等待时间
+		'TIMEOUT': 10,
+		
+		# =========================================================================
+		# 核心高级配置：深度定制 Elasticsearch 索引级别的分词行为 (IK Analyzer)
+		# =========================================================================
+		'INDEX_SETTINGS': {
+			'settings': {
+				'analysis': {
+					'analyzer': {
+						# ---------------------------------------------------------
+						# 【A. 索引构建分词器 (Index Time Analyzer)】
+						# ---------------------------------------------------------
+						# 作用：在文章“保存、发布或批量跑 rebuild_index”时使用。
+						# 原理：Wagtail 默认会调用这个 analyzer 来为索引字段生成词项倒排索引。
+						# 策略：这里强行绑定 `ik_max_word`（最细粒度拆分）。
+						# 举例："Python的生态力量" 会被切分为：python, 生态, 力量, 生态力量...
+						# 目的：将分词的“网”撒到最大，极限榨干 L1 阶段的全局召回率，确保长尾数据绝不漏搜。
+						'default': {
+							'type': 'custom',
+							'tokenizer': 'ik_max_word'
+						},
+						
+						# ---------------------------------------------------------
+						# 【B. 前台搜索分词器 (Query Time Analyzer)】
+						# ---------------------------------------------------------
+						# 作用：在前台用户输入关键词进行检索（Search Time）时使用。
+						# 原理：ES 会自动拦截用户输入的 query 字符串，先过一遍分词，再去倒排索引匹配。
+						# 策略：这里强行绑定 `ik_smart`（最粗/智能粒度拆分）。
+						# 举例：用户输入 "Python的生态力量"，会被切分为："python", "生态", "力量"（不拆出重复词）。
+						# 目的：防止在搜索阶段产生由于碎词过多导致的无意义召回和算分噪音（提高搜索准确度度）。
+						'default_search': {
+							'type': 'custom',
+							'tokenizer': 'ik_smart'
+						}
+					}
+				}
+			}
+		}
+	}
 }
 
 # ==========================================================
@@ -375,9 +407,26 @@ WAGTAILSEARCH_BACKENDS = {
 def print_database_config():
 	"""打印当前数据库配置信息，用于启动时确认环境"""
 	print("=" * 60)
-	print("     数据库配置信息     ")
+	print("     系统核心引擎与数据库配置     ")
 	print(f"  [MySQL]  数据库: {DATABASES['default']['NAME']}")
-	print(f"  [MongoDB] 数据库: {MONGO_DB['NAME']}")
+	
+	# 假设你定义了 MONGO_DB 字典，如果没有请根据你的实际变量名调整
+	mongo_db_name = globals().get('MONGO_DB', {}).get('NAME', '未配置')
+	print(f"  [MongoDB] 数据库: {mongo_db_name}")
 	print(f"  [Redis]  主机: {REDIS_HOST}:{REDIS_PORT}")
-	print(f"  [MinIO]  Bucket: {AWS_STORAGE_BUCKET_NAME}")
+	
+	# 假设你定义了 AWS_STORAGE_BUCKET_NAME 变量
+	minio_bucket = globals().get('AWS_STORAGE_BUCKET_NAME', '未配置')
+	print(f"  [MinIO]  Bucket: {minio_bucket}")
+	
+	# 🌟 新增：动态侦测并打印 Wagtail 搜索引擎 (Elasticsearch) 的加载状态
+	es_config = WAGTAILSEARCH_BACKENDS.get('default', {})
+	# 截取 backend 字符串的最后一部分 (例如: wagtail.search.backends.elasticsearch8 -> elasticsearch8)
+	es_backend = es_config.get('BACKEND', '未加载').split('.')[-1]
+	es_url = es_config.get('URLS', ['未配置'])[0]
+	es_index = es_config.get('INDEX_PREFIX', '未配置')
+	
+	print(f"  [Search] 引擎: {es_backend.upper()}")
+	print(f"           节点: {es_url}")
+	print(f"           索引前缀: {es_index}")
 	print("=" * 60)

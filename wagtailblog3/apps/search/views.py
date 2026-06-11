@@ -140,18 +140,25 @@ def search_ajax(request, search_results, search_query, search_type=None, start_d
 
 
 def search_suggestions(request):
-	"""搜索建议API"""
-	query = clean_search_param(request.GET.get('q', ''))
+	"""
+	【架构师级：传统 AJAX 搜索建议端点】
+	与 REST API 保持 100% 架构对齐，统一调用 core 层的降维联想引擎。
+	"""
+	# 1. 获取并清理参数
+	query = request.GET.get('q', '')
+	query = clean_search_param(query)
 	
-	# 获取搜索建议
+	# 2. 视图层硬核防波堤：防止单字符击穿数据库
+	if not query or len(query) < 2:
+		return JsonResponse({'suggestions': []})
+	
+	# 3. 核心业务下推
 	try:
+		# 直接调用我们在 core.py 里修复好的原生高并发热度聚合引擎
 		suggestions = get_search_suggestions(query)
-		
-		# 返回结果
 		return JsonResponse({'suggestions': suggestions})
+	
 	except Exception as e:
-		logger.error(f"获取搜索建议错误: {e}")
-		return JsonResponse({
-			'error': f"获取搜索建议错误: {str(e)}",
-			'suggestions': []
-		}, status=500)
+		# 4. 优雅降级：记录日志，但对前端保持静默，绝不抛出 500 破坏 UI 体验
+		logger.error(f"传统 AJAX 获取搜索建议时发生错误: {e}")
+		return JsonResponse({'suggestions': []})

@@ -1,4 +1,4 @@
-{% load wagtailadmin_tags %}
+{% load wagtailadmin_tags wagtailcore_tags %}
 
 <table class="listing">
     <thead>
@@ -7,6 +7,7 @@
                 <a href="#" class="icon icon-arrow-down-after">标题</a>
             </th>
             <th>发布日期</th>
+            <th>状态</th>
             <th>作者</th>
             <th>分类</th>
             <th>标签</th>
@@ -23,6 +24,24 @@
                     </div>
                 </td>
                 <td>{{ post.date|date:"Y-m-d" }}</td>
+                <td>
+                    {% if post.live and post.has_unpublished_changes %}
+                        {# 线上有版本，点击直接在独立新标签页打开前台公开页面 #}
+                        <a href="{% pageurl post %}" target="_blank" style="text-decoration: none; display: inline-block;">
+                            <span class="status-tag" style="cursor: pointer;" title="点击查看前台公开页面（后台另有未发布新草稿）">已发布 + 草稿</span>
+                        </a>
+                    {% elif post.live %}
+                        {# 纯已发布状态，点击直接在新标签页打开前台公开页面 #}
+                        <a href="{% pageurl post %}" target="_blank" style="text-decoration: none; display: inline-block;">
+                            <span class="status-tag primary" style="cursor: pointer;" title="点击在前台查看此文章">已发布</span>
+                        </a>
+                    {% else %}
+                        {# 🌟 核心防弹处理：纯草稿文章前台无有效URL，此处强行注入Wagtail原生的后台安全预览视图，同样能完美看到前台呈现效果，且绝对不会引发 404 崩溃 #}
+                        <a href="{% url 'wagtailadmin_pages:view_draft' post.id %}" target="_blank" style="text-decoration: none; display: inline-block;">
+                            <span class="status-tag" style="cursor: pointer; background-color: #e2e8f0; color: #4a5568;" title="点击安全预览草稿的前台渲染效果">草稿</span>
+                        </a>
+                    {% endif %}
+                </td>
                 <td>
                     {% for author in post.authors.all %}
                         {{ author.name }}{% if not forloop.last %}, {% endif %}

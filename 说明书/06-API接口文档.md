@@ -1,202 +1,237 @@
-# **博客系统 - API接口文档**
+# **博客系统 - API 接口文档 (API Reference)**
 
-**版本: 1.0**
-
-**日期: 2025-06-16**
-
----
+**版本: 2.0 (架构重构版)** **日期: 2025-06-13** ---
 
 ## **1. 引言 (Introduction)**
 
-### **1.1 概述**
-本API文档为开发者提供了与“Wagtail博客系统”进行程序化交互所需的所有信息。本系统API主要分为两部分：
-1.  **Wagtail核心API (v2)**: 由Wagtail框架提供的一套功能强大的、用于访问内容（如页面、图片、文档）的只读API。
-2.  **自定义API**: 为满足特定业务需求而开发的API，例如高级搜索功能。
+### **1.1 目的 (Purpose)**
 
-### **1.2 基础URL (Base URL)**
-所有API的端点（endpoint）都相对于你的域名。本文档中将使用以下基础URL作为示例：
-`https://your_domain.com/api/v2/`
+本 API 接口文档旨在定义“WagtailBlog3 博客系统”经历底层异构解耦后，对外暴露的所有 RESTful 及 AJAX 异步接口。由于系统重构了检索与渲染链路，由传统的纯服务端渲染（SSR）全面演进为 **SSR + AJAX 惰性截流加载** 架构，本说明书重点规范了前端如何与后端的 ES8 / MySQL 双轨引擎进行高性能的数据交互。
 
-### **1.3 API自动文档 (Swagger UI)**
-为了方便开发者进行交互式探索和测试，本系统通过`drf-yasg`集成了Swagger UI。强烈建议访问以下地址以获取实时、可交互的API文档：
-* **Swagger UI**: `https://your_domain.com/swagger/`
-* **ReDoc**: `https://your_domain.com/redoc/`
+### **1.2 接口基础约定 (Base Conventions)**
 
----
+* **协议**: 生产环境强制使用 `HTTPS`。
+* **数据格式**: 所有异步请求的 `Content-Type` 及 `Accept` 均默认为 `application/json`。
+* **身份认证 (Auth)**:
+* 检索类接口（AJAX Search, Suggestions）为公开只读接口，无需认证。
+* 互动类接口（Comments, Reactions）采用 Django 原生 Session + CSRF Token 防护机制，或针对外部接入端点使用 JWT（JSON Web Token）认证。
 
-## **2. 认证 (Authentication)**
 
-对于需要认证的接口，本API采用 **JWT (JSON Web Token)** 进行无状态身份验证。
+* **基础路径**: 示例相对路径均以站点根域名为基准。
 
-### **2.1 获取访问令牌 (Access Token)**
-你需要使用已注册用户的凭据向令牌端点发送一个POST请求，以获取访问令牌 (`access`) 和刷新令牌 (`refresh`)。
+## **2. 全局响应规范 (Global Response Format)**
 
-* **Endpoint**: `POST /api/token/`
-* **Request Body**: `application/json`
-    ```json
+系统针对 AJAX 异步请求制定了统一的响应封装结构与 HTTP 状态码规范。
+
+### **2.1 成功响应**
+
+HTTP 状态码为 `200 OK`，正文返回 JSON：
+
+```json
+{
+  "query": "检索词",
+  "results": [ /* 数据列表 */ ],
+  "total_count": 102,
+  "current_page": 1
+}
+
+```
+
+### **2.2 错误响应**
+
+发生内部降级或熔断时，HTTP 状态码通常返回 `400` 或 `500`，正文必定包含 `error` 字段：
+
+```json
+{
+  "error": "搜索处理错误: Elasticsearch 连接超时",
+  "query": "检索词",
+  "results": []
+}
+
+```
+
+## **3. 核心异步检索接口 (Core AJAX Search APIs)**
+
+该模块接口是本次系统重构的“吞吐量担当”。接口底层直接挂载了 `LazyChainedResultList` 惰性分页生成器与 O(1) MongoDB 批处理注射机制，彻底斩断了深度分页击穿和 OOM 风险。
+
+### **3.1 惰性分页检索接口 (`Search AJAX API`)**
+
+* **接口路径**: `/search/`
+* **请求方法**: `GET`
+* **前置依赖**: 必须在请求头中携带 `X-Requested-With: XMLHttpRequest` 以触发后端的 AJAX 路由分发。
+* **功能描述**: 用于前台搜索结果页的“无限滚动加载”或“动态无刷新翻页”。根据是否携带搜索词，后端会自动将请求路由给 Elasticsearch 8 或 MySQL Coalesce 聚合引擎。
+
+**请求参数 (Query Parameters)**:
+
+| 参数名       | 类型     | 必填 | 描述                      | 架构层备注                          |
+| ------------ | -------- | ---- | ------------------------- | ----------------------------------- |
+| `query`      | `string` | 否   | 搜索关键词                | 为空时强制降级走 MySQL 原生时间排序 |
+| `page`       | `int`    | 否   | 请求的页码，默认 1        | 激活后端的 Generator 惰性切片       |
+| `type`       | `string` | 否   | 搜索类型，默认 `all`      | 可选 `all`, `blog`, `pages`         |
+| `start_date` | `string` | 否   | 过滤起始日期 (YYYY-MM-DD) |                                     |
+| `end_date`   | `string` | 否   | 过滤结束日期 (YYYY-MM-DD) |                                     |
+| `order_by`   | `string` | 否   | 排序字段                  | 例如 `date_desc`, `title_asc`       |
+
+**请求头示例 (Headers)**:
+
+```http
+GET /search/?query=异构解耦&page=2 HTTP/1.1
+Host: yourdomain.com
+X-Requested-With: XMLHttpRequest
+
+```
+
+**响应数据 (Response - 200 OK)**:
+
+```json
+{
+  "query": "异构解耦",
+  "results": [
     {
-        "username": "your_username",
-        "password": "your_password"
+      "id": 12,
+      "title": "深度重构：异构解耦单体极致性能演进",
+      "url": "/blog/heterogeneous-architecture/",
+      "date": "2025-06-13",
+      "preview_text": "探讨 Wagtail 底层序列化拦截与 O(1) 无感注射..." // O(1)注射机制从 MongoDB Hash Map 中提取的纯文本摘要
     }
-    ```
-* **Success Response (200 OK)**:
-    ```json
-    {
-        "refresh": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-        "access": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-    }
-    ```
+  ],
+  "has_next": true,
+  "has_previous": true,
+  "total_count": 45,
+  "current_page": 2,
+  "total_pages": 3,
+  "search_type": "all",
+  "start_date": "",
+  "end_date": "",
+  "order_by": "date_desc"
+}
 
-### **2.2 使用访问令牌**
-在随后的所有需要认证的API请求中，你必须在HTTP请求头中包含 `Authorization` 字段。
+```
 
-* **Header**: `Authorization: Bearer <your_access_token>`
+### **3.2 搜索词补全建议接口 (`Search Suggestions API`)**
 
-### **2.3 刷新访问令牌**
-访问令牌 (`access`) 的有效期较短。当它过期后，你可以使用刷新令牌 (`refresh`) 来获取一个新的访问令牌，而无需用户重新输入密码。
+* **接口路径**: `/search/suggestions/` （示例路由）
+* **请求方法**: `GET`
+* **功能描述**: 用户在搜索框实时输入时，通过该接口获取实时的分词前缀匹配建议。极度轻量，命中 Redis L1 缓存或 ES8 的 Edge N-gram 索引。
 
-* **Endpoint**: `POST /api/token/refresh/`
-* **Request Body**: `application/json`
-    ```json
-    {
-        "refresh": "<your_refresh_token>"
-    }
-    ```
-* **Success Response (200 OK)**:
-    ```json
-    {
-        "access": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-    }
-    ```
+**请求参数 (Query Parameters)**:
 
----
+| 参数名 | 类型     | 必填 | 描述               |
+| ------ | -------- | ---- | ------------------ |
+| `q`    | `string` | 是   | 用户的当前输入片段 |
 
-## **3. 自定义API端点**
+**响应数据 (Response - 200 OK)**:
 
-### **3.1 站内搜索 (Search)**
-此端点提供了由后端搜索引擎（MongoDB/Elasticsearch）驱动的高级全文搜索功能。
+```json
+{
+  "suggestions": [
+    "异构解耦架构",
+    "异构数据库同步",
+    "异构存储防雪崩"
+  ]
+}
 
-* **Endpoint**: `GET /api/v2/search/`
-* **描述**: 根据查询词在博客文章中执行全文搜索。
-* **认证**: 无需认证。
-* **查询参数 (Query Parameters)**:
-    | 参数名 | 类型 | 必需 | 描述 |
-    | :--- | :--- | :--- | :--- |
-    | `q` | `string` | 是 | 要搜索的关键词。 |
-    | `page` | `integer`| 否 | 请求的页码，默认为`1`。 |
-* **Success Response (200 OK)**:
-    ```json
-    {
-        "count": 25, // 结果总数
-        "next": "https://your_domain.com/api/v2/search/?page=2&q=wagtail", // 下一页链接
-        "previous": null, // 上一页链接
-        "results": [ // 当前页的结果列表
-            {
-                "id": 15,
-                "meta": {
-                    "type": "blog.BlogPage",
-                    "detail_url": "https://your_domain.com/api/v2/pages/15/",
-                    "html_url": "https://your_domain.com/blog/my-first-post/",
-                    "slug": "my-first-post",
-                    "first_published_at": "2025-06-10T10:00:00Z"
-                },
-                "title": "我的第一篇Wagtail博客",
-                "date": "2025-06-10",
-                "authors": [
-                    {
-                        "id": 1,
-                        "name": "张三"
-                    }
-                ],
-                "highlight": "这是一篇关于如何使用 **Wagtail** 和Django技术栈来快速搭建..." // 搜索结果高亮片段 (如果有)
-            },
-            // ... more results
-        ]
-    }
-    ```
-* **示例 (cURL)**:
-    ```bash
-    curl -X GET "https://your_domain.com/api/v2/search/?q=wagtail&page=1"
-    ```
+```
 
----
+## **4. 用户互动接口 (User Interaction APIs)**
 
-## **4. Wagtail核心API端点**
+此类接口维持了博客系统与读者的动态连接，所有 POST 操作必须严格校验 CSRF Token 以及进行高频防刷锁定。
 
-以下是Wagtail提供的标准内容API，它们功能强大，支持丰富的过滤和查询选项。
+### **4.1 提交文章反应 (Submit Reaction)**
 
-### **4.1 页面列表 (Listing Pages)**
-* **Endpoint**: `GET /api/v2/pages/`
-* **描述**: 获取系统中所有发布状态的页面列表。
-* **认证**: 无需认证。
-* **常用查询参数**:
-    | 参数名 | 示例 | 描述 |
-    | :--- | :--- | :--- |
-    | `type` | `blog.BlogPage` | 按页面模型类型过滤。 |
-    | `fields`| `title,date,authors` | 指定响应中包含的字段，`*`表示所有。 |
-    | `limit` | `10` | 每页返回的结果数量，默认为20。 |
-    | `offset`| `20` | 起始偏移量，用于分页。 |
-    | `order` | `-date` | 按字段排序，`-`表示降序。 |
-    | `search`| `django` | 在Wagtail内置搜索后端中执行简单搜索。 |
-    | `child_of`| `5` | 获取ID为5的页面的所有直接子页面。 |
-    | `descendant_of` | `5` | 获取ID为5的页面的所有后代页面。 |
-* **示例 (cURL)**: 获取最新的5篇博客文章，只返回标题和发布日期。
-    ```bash
-    curl -X GET "https://your_domain.com/api/v2/pages/?type=blog.BlogPage&fields=title,date&order=-date&limit=5"
-    ```
+* **接口路径**: `/api/reactions/submit/` （示例路由）
+* **请求方法**: `POST`
+* **功能描述**: 读者点击文章底部的“点赞”、“收藏”等反应按钮时触发。
 
-### **4.2 页面详情 (Page Detail)**
-* **Endpoint**: `GET /api/v2/pages/<id>/`
-* **描述**: 获取单个页面的详细信息。
-* **认证**: 无需认证。
-* **Success Response (200 OK)**:
-    响应体是一个JSON对象，包含了该页面的所有字段（包括`body` StreamField的JSON结构）和元数据。
-    ```json
-    {
-        "id": 15,
-        "meta": {
-            "type": "blog.BlogPage",
-            "detail_url": "https://your_domain.com/api/v2/pages/15/",
-            "html_url": "https://your_domain.com/blog/my-first-post/",
-            // ... more meta fields
-        },
-        "title": "我的第一篇Wagtail博客",
-        "date": "2025-06-10",
-        "body": [
-            {
-                "type": "rich_text",
-                "value": "<p>这是段落内容。</p>",
-                "id": "uuid-goes-here"
-            },
-            {
-                "type": "code",
-                "value": {
-                    "language": "python",
-                    "code": "print('Hello, World!')"
-                },
-                "id": "another-uuid-here"
-            }
-        ],
-        "authors": [
-            // ... author objects
-        ]
-    }
-    ```
-* **示例 (cURL)**:
-    ```bash
-    curl -X GET "https://your_domain.com/api/v2/pages/15/"
-    ```
+**请求头 (Headers)**:
 
----
+```http
+Content-Type: application/json
+X-CSRFToken: <前端获取的 CSRF Token>
 
-## **5. 通用响应与错误码**
+```
 
-* **`200 OK`**: 请求成功。
-* **`201 Created`**: 资源创建成功 (用于POST请求)。
-* **`204 No Content`**: 请求成功，但无内容返回 (用于DELETE请求)。
-* **`400 Bad Request`**: 请求无效，例如参数错误或请求体格式不正确。响应体中通常会包含错误详情。
-* **`401 Unauthorized`**: 未经授权。请求头中缺少有效的`Authorization`信息。
-* **`403 Forbidden`**: 已认证，但无权访问该资源。
-* **`404 Not Found`**: 请求的资源不存在。
-* **`500 Internal Server Error`**: 服务器内部发生错误。
+**请求体 (Request Body)**:
 
+```json
+{
+  "page_id": 12,
+  "reaction_type_id": 1
+}
+
+```
+
+**响应数据 (Response)**:
+系统会依靠底层的 `UNIQUE KEY (page_id, session_key, ip_address)` 数据库复合锁拦截雪崩刷单。
+
+* **200 OK** (成功):
+
+```json
+{
+  "status": "success",
+  "message": "反应记录成功",
+  "current_count": 42
+}
+
+```
+
+
+* **403 Forbidden** (防刷拦截):
+
+```json
+{
+  "status": "error",
+  "message": "您已经对此文章表达过该态度"
+}
+
+```
+
+
+
+### **4.2 异步提交评论 (Submit Comment)**
+
+* **接口路径**: `/api/comments/add/` （示例路由）
+* **请求方法**: `POST`
+* **功能描述**: 提交文章评论，直接存入 MySQL 骨架数据库。包含邮件通知机制（由 Celery 异步队列在后台派发）。
+
+**请求体 (Request Body - Form Data / JSON)**:
+
+```json
+{
+  "page_id": 12,
+  "parent_id": null, 
+  "author_name": "架构爱好者",
+  "author_email": "fan@example.com",
+  "text": "这个 O(1) 注射设计太精妙了，彻底消灭了 N+1 慢查询！"
+}
+
+```
+
+**响应数据 (Response - 201 Created)**:
+
+```json
+{
+  "status": "success",
+  "message": "评论提交成功，正在等待管理员审核。",
+  "comment": {
+    "id": 105,
+    "author_name": "架构爱好者",
+    "date": "刚刚"
+  }
+}
+
+```
+
+## **5. Wagtail Headless API (可选集成)**
+
+虽然我们的系统前端模板主要基于 Django 服务端渲染构建，但在后续若需接入小程序或分离式前端（如 Vue/React 独立站），系统原生支持开放 Wagtail 的 Headless API (v2)。
+
+* **端点**: `/api/v2/pages/`
+* **功能**: 全量输出页面的结构化数据。
+* **架构注意**: 必须在 Wagtail API 序列化器中进行异构拦截。由于 `body` 在 MySQL 中为空（`[]`），必须在 API 输出层触发 `get_content_from_mongodb()`，经由 `MongoDBStreamFieldAdapter` 重组为 JSON 后，再通过 API 返回给小程序端。
+
+## **6. API 性能与安全约束 (Performance & Security Policies)**
+
+1. **防穿透查询限流 (Rate Limiting)**: 针对 `/search_ajax/` 和 `/search/suggestions/`，Nginx 层必须配置 `limit_req` 模块，限制单一 IP 频率不超过 `10r/s`，防止恶意爬虫耗尽 ES8 或 MongoDB 的连接池。
+2. **惰性拦截 (Lazy Blocking)**: 在 `/search_ajax/` 接口中，若传入的 `page` 参数远超实际分页深度（如 `page=9999`，尝试执行深度分页攻击），内部的 `LazyChainedResultList` 生成器将直接抛出 `EmptyPage` 异常，接口必须拦截并降级返回空数组 `results: []`，**坚决杜绝因深度遍历导致内存溢出 (OOM)**。
+3. **严格的跨域策略 (CORS)**: 若互动类接口需要对外提供服务，必须通过 `django-cors-headers` 模块配置严格的白名单。对于同源请求，依然必须携带 `X-CSRFToken` 凭证。

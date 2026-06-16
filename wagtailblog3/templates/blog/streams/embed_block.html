@@ -1,4 +1,33 @@
-<!-- templates/blog/streams/embed_block.html -->
-<div class="embed-wrapper">
-    {{ value }}
+{% load wagtailembeds_tags %}
+
+<div class="geek-embed-container my-5 shadow-sm" data-provider="{{ value.provider_name|default:'media'|lower }}">
+
+    {# 1. 智能音频嗅探：只要HTML包含后端的音频类，或原生的 Spotify/SoundCloud #}
+    {% if 'audio-embed-wrapper' in value.html or 'spotify.com' in value.html or 'soundcloud.com' in value.html or 'music.163.com' in value.html %}
+        <div class="geek-custom-embed audio-mode">
+            {{ value.html|safe }}
+        </div>
+
+    {# 2. 智能视频嗅探：只要HTML包含后端的视频类，或者是国内三大站 #}
+    {% elif 'video-embed-wrapper' in value.html or 'bilibili.com' in value.html or 'qq.com' in value.html or 'youku.com' in value.html %}
+        <div class="geek-custom-embed video-mode">
+            {{ value.html|safe }}
+        </div>
+
+    {# 3. 兜底原生视频 (YouTube, Vimeo)：强制拉伸到 16:9 #}
+    {% else %}
+        <div class="geek-native-video-wrapper">
+            {{ value.html|safe }}
+        </div>
+    {% endif %}
+
+    {# 底部元数据栏 #}
+    {% if value.title %}
+        <div class="geek-embed-meta d-flex justify-content-between align-items-center px-3 py-2">
+            <span class="embed-title text-truncate text-muted">
+                <i class="fa-solid fa-link me-2"></i>{{ value.title }}
+            </span>
+            <span class="badge badge-geek-dark text-uppercase small">{{ value.provider_name|default:'Media' }}</span>
+        </div>
+    {% endif %}
 </div>

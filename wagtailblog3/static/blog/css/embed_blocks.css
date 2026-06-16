@@ -1,45 +1,136 @@
-/* static/blog/css/embed_blocks.css */
+/* ==========================================================================
+   Wagtail高级流媒体矩阵（极客自适应 V4 终极版）
+   文件路径：wagtailblog3/static/blog/css/embed_blocks.css
+   ========================================================================== */
 
-/*
- * 1. 顶级容器样式 (用于居中)
- * 同时作用于 'embed_block' (YouTube) 和 'iframe_embed' (Bilibili)
- */
+/* 1. 强行解除 Wagtail 原生 StreamField 块的收缩限制，无视一切外部 Flex/Grid 干扰 */
 .content-block-wrapper[data-block-type="embed_block"],
 .content-block-wrapper[data-block-type="iframe_embed"] {
-    display: flex;
-    justify-content: center; /* 水平居中 */
-    margin: 2.5rem 0;        /* 上下边距 */
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    flex: 1 1 100% !important; /* 核心：在任何 flex 遗留环境里，强制撑满 100% */
+    margin: 3rem 0 !important;
 }
 
-/*
- * 2. 响应式宽高比容器 (核心)
- * 控制尺寸和外观
- */
-.embed-wrapper {
-    position: relative;
-    padding-bottom: 56.25%; /* 16:9 宽高比 */
-    height: 0;
-    overflow: hidden;
-
-    /* 尺寸控制 */
-    width: 100%;
-    max-width: 720px; /* 在宽屏上舒适的最大宽度 */
-
-    /* 外观美化 */
-    background: #000; /* 加载时的黑色背景 */
+/* 2. 极客暗黑容器主装甲 */
+.geek-embed-container {
+    display: block !important;
+    width: 100% !important;
     border-radius: 12px;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
+    overflow: hidden;
+    background-color: #121214;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.4s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.4s ease;
 }
 
-/*
- * 3. iframe 自身样式
- * 让 iframe 填满我们创建的容器
- */
-.embed-wrapper iframe {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100% !important;  /* 使用 !important 强制覆盖 iframe 自带的 width 属性 */
-    height: 100% !important; /* 使用 !important 强制覆盖 iframe 自带的 height 属性 */
-    border: 0;
+.geek-embed-container:hover {
+    transform: translateY(-5px);
+    border-color: rgba(0, 210, 255, 0.25);
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.35) !important;
+}
+
+.geek-custom-embed {
+    display: block !important;
+    width: 100% !important;
+}
+
+/* 3. 锁定 16:9 物理防线，绝不妥协（强行撑开 0px 高度坍塌） */
+.geek-native-video-wrapper,
+.geek-custom-embed .video-embed-wrapper.responsive-16by9 {
+    position: relative !important;
+    display: block !important;
+    width: 100% !important;
+    padding-bottom: 56.25% !important; /* 强制高度为宽度的 56.25% (16:9) */
+    height: 0 !important;
+    overflow: hidden !important;
+    background-color: #000000;
+}
+
+/* 4. 强酸覆盖！直接溶解掉 YouTube/B站 带来的死宽高 (width="200" height="113") */
+.geek-native-video-wrapper iframe,
+.geek-native-video-wrapper object,
+.geek-native-video-wrapper embed,
+.geek-custom-embed .video-embed-wrapper.responsive-16by9 iframe {
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    border: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+/* 5. 智能音频盒自适应适配 (彻底废弃对 provider_name 的依赖) */
+.geek-custom-embed.audio-mode {
+    width: 100% !important;
+    padding: 0 !important;
+    background: linear-gradient(180deg, #1a1a1e, #121214);
+}
+
+.geek-custom-embed.audio-mode .audio-embed-wrapper {
+    margin: 0 !important;
+    width: 100% !important;
+    border: 0 !important;
+}
+
+/* 解除音频 iframe 的强行拉伸，恢复自然高度 (网易云66px, Spotify 152px) */
+.geek-custom-embed.audio-mode iframe {
+    position: relative !important;
+    width: 100% !important;
+    /* 取消 height: 100%，让 iframe 自带的 height 属性生效 */
+    height: auto !important;
+    min-height: 66px;
+    border: 0 !important;
+    display: block !important;
+}
+
+/* 6. 底部极客元数据控制台（Metadata Bar） */
+.geek-embed-meta {
+    background-color: rgba(0, 0, 0, 0.25);
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    padding: 0.6rem 1.2rem !important;
+}
+
+.geek-embed-meta .embed-title {
+    font-size: 0.78rem;
+    font-family: 'Fira Code', 'Cascadia Code', Consolas, Monaco, monospace;
+    color: #8a8a93 !important;
+    letter-spacing: 0.3px;
+}
+
+.geek-embed-meta .embed-title i {
+    color: rgba(255, 255, 255, 0.3);
+    transition: color 0.3s ease;
+}
+
+.geek-embed-container:hover .geek-embed-meta .embed-title i {
+    color: #00d2ff;
+}
+
+.geek-embed-meta .badge-geek-dark {
+    background-color: rgba(255, 255, 255, 0.06);
+    color: #00d2ff;
+    font-family: 'Fira Code', monospace;
+    font-size: 0.68rem;
+    font-weight: 500;
+    letter-spacing: 1px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    border: 1px solid rgba(0, 210, 255, 0.15);
+}
+
+/* 7. 手机端响应式微调 */
+@media (max-width: 768px) {
+    .content-block-wrapper[data-block-type="embed_block"],
+    .content-block-wrapper[data-block-type="iframe_embed"] {
+        margin: 2rem 0 !important;
+    }
+    .geek-embed-meta {
+        padding: 0.5rem 0.8rem !important;
+    }
+    .geek-embed-meta .embed-title {
+        font-size: 0.72rem;
+    }
 }

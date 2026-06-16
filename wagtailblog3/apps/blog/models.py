@@ -468,7 +468,10 @@ class BlogPage(Page):
 		# 嵌入块 - 用于嵌入外部内容
 		('embed_block', EmbedBlock(
 			label="嵌入媒体",
-			help_text="从YouTube、Vimeo等插入内容"
+			# 更新为全矩阵支持提示
+			help_text="直接粘贴 B站、YouTube、优酷、腾讯、网易云、QQ音乐等单页链接",
+			# 👇 罪魁祸首就是漏了下面这一行！强制它绑定你的前端模板！
+			template='blog/streams/embed_block.html'
 		)),
 		
 		# 表格块

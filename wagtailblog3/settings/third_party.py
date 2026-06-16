@@ -111,3 +111,16 @@ SWAGGER_SETTINGS = {
 
 # 强制让 Django 认识 .mjs 是合法的 JavaScript 文件
 mimetypes.add_type("application/javascript", ".mjs", True)
+
+WAGTAILEMBEDS_FINDERS = [
+    {'class': 'wagtailblog3.apps.blog.embeds.BilibiliFinder'},
+    {'class': 'wagtailblog3.apps.blog.embeds.TencentVideoFinder'},
+    {'class': 'wagtailblog3.apps.blog.embeds.YoukuFinder'},
+    {'class': 'wagtailblog3.apps.blog.embeds.NetEaseMusicFinder'},
+    {'class': 'wagtailblog3.apps.blog.embeds.QQMusicFinder'},
+    {'class': 'wagtailblog3.apps.blog.embeds.KugouMusicFinder'},
+    {'class': 'wagtailblog3.apps.blog.embeds.MiguMusicFinder'},
+    
+    # 原生 OEmbed 兜底一定要放在最后一行
+    {'class': 'wagtail.embeds.finders.oembed'},
+]

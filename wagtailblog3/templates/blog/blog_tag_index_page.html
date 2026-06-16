@@ -86,32 +86,64 @@
                     {% endfor %}
                 </ul>
 
-                {# 文章列表的分页导航 #}
+                {# ======================================================== #}
+                {# 【UI/UX 升级】 模式 A：文章列表的自定义现代分页导航 #}
+                {# ======================================================== #}
                 {% if paged_items.has_other_pages %}
-                <nav aria-label="Page navigation">
-                    <ul class="pagination">
-                        {% if paged_items.has_previous %}
-                            <li class="page-item"><a class="page-link" href="{% pageurl page %}?tag={{ current_tag.slug }}{% if search_query %}&q={{ search_query|urlencode }}{% endif %}{% if start_date %}&start_date={{ start_date }}{% endif %}{% if end_date %}&end_date={{ end_date }}{% endif %}&page={{ paged_items.previous_page_number }}">上一页</a></li>
-                        {% else %}
-                            <li class="page-item disabled"><span class="page-link">上一页</span></li>
+                <div class="custom-pagination text-center" style="margin-top: 40px; margin-bottom: 40px; padding-top:20px; border-top: 1px solid #eee; display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 10px 15px;">
+
+                    {# 1. 上一页逻辑 (完美携带检索参数) #}
+                    {% if paged_items.has_previous %}
+                        <a href="{% pageurl page %}?tag={{ current_tag.slug }}{% if search_query %}&q={{ search_query|urlencode }}{% endif %}{% if start_date %}&start_date={{ start_date }}{% endif %}{% if end_date %}&end_date={{ end_date }}{% endif %}&page={{ paged_items.previous_page_number }}" class="theme-btn btn-style-two">
+                            <span class="fa fa-angle-left" style="margin-right: 5px;"></span> 上一页
+                        </a>
+                    {% else %}
+                        <button class="theme-btn btn-style-two" disabled style="cursor: not-allowed; opacity: 0.6;">
+                            <span class="fa fa-angle-left" style="margin-right: 5px;"></span> 上一页
+                        </button>
+                    {% endif %}
+
+                    {# 2. 分页信息显示 #}
+                    <span class="pagination-info-text" style="font-size: 16px; color: #555; white-space: nowrap; line-height: 40px;">
+                        第 {{ paged_items.number }} 页，共 {{ paged_items.paginator.num_pages }} 页
+                    </span>
+
+                    {# 3. 下一页逻辑 (完美携带检索参数) #}
+                    {% if paged_items.has_next %}
+                        <a href="{% pageurl page %}?tag={{ current_tag.slug }}{% if search_query %}&q={{ search_query|urlencode }}{% endif %}{% if start_date %}&start_date={{ start_date }}{% endif %}{% if end_date %}&end_date={{ end_date }}{% endif %}&page={{ paged_items.next_page_number }}" class="theme-btn btn-style-two">
+                            下一页 <span class="fa fa-angle-right" style="margin-left: 5px;"></span>
+                        </a>
+                    {% else %}
+                        <button class="theme-btn btn-style-two" disabled style="cursor: not-allowed; opacity: 0.6;">
+                            下一页 <span class="fa fa-angle-right" style="margin-left: 5px;"></span>
+                        </button>
+                    {% endif %}
+
+                    {# 4. 页码跳转表单 #}
+                    <form method="get" action="{% pageurl page %}" class="pagination-jump-form" style="display: inline-flex; align-items: center; white-space: nowrap;">
+
+                        {# 核心：隐藏字段保留后端参数，防止跳转后条件丢失 #}
+                        <input type="hidden" name="tag" value="{{ current_tag.slug }}">
+                        {% if search_query %}
+                            <input type="hidden" name="q" value="{{ search_query }}">
+                        {% endif %}
+                        {% if start_date %}
+                            <input type="hidden" name="start_date" value="{{ start_date }}">
+                        {% endif %}
+                        {% if end_date %}
+                            <input type="hidden" name="end_date" value="{{ end_date }}">
                         {% endif %}
 
-                        {% for num in paged_items.paginator.page_range %}
-                            {% if paged_items.number == num %}
-                                <li class="page-item active"><span class="page-link">{{ num }}</span></li>
-                            {% else %}
-                                <li class="page-item"><a class="page-link" href="{% pageurl page %}?tag={{ current_tag.slug }}{% if search_query %}&q={{ search_query|urlencode }}{% endif %}{% if start_date %}&start_date={{ start_date }}{% endif %}{% if end_date %}&end_date={{ end_date }}{% endif %}&page={{ num }}">{{ num }}</a></li>
-                            {% endif %}
-                        {% endfor %}
-
-                        {% if paged_items.has_next %}
-                            <li class="page-item"><a class="page-link" href="{% pageurl page %}?tag={{ current_tag.slug }}{% if search_query %}&q={{ search_query|urlencode }}{% endif %}{% if start_date %}&start_date={{ start_date }}{% endif %}{% if end_date %}&end_date={{ end_date }}{% endif %}&page={{ paged_items.next_page_number }}">下一页</a></li>
-                        {% else %}
-                            <li class="page-item disabled"><span class="page-link">下一页</span></li>
-                        {% endif %}
-                    </ul>
-                </nav>
+                        <div class="form-group" style="display: inline-flex; align-items: center; margin-left: 5px;">
+                            <label for="jumptopage_a" style="margin-right: 8px; font-weight: normal; color: #333; white-space: nowrap; line-height: 40px;">跳转到:</label>
+                            <input type="number" name="page" id="jumptopage_a" min="1" max="{{ paged_items.paginator.num_pages }}" placeholder="页" style="width: 60px; height: 40px; padding: 0 8px; border: 1px solid #ddd; border-radius: 3px; text-align: center; line-height: normal;" required>
+                        </div>
+                        <button type="submit" class="theme-btn btn-style-two" style="height: 40px; line-height: 20px; padding: 10px 15px; margin-left: 5px;">跳转</button>
+                    </form>
+                </div>
                 {% endif %}
+                {# ========================== 模式 A 分页结束 ========================== #}
+
             {% else %}
                 <p>No articles found {% if search_query %}匹配您的搜索 "{{ search_query }}" {% endif %} 使用此标签.</p>
             {% endif %}
@@ -125,7 +157,6 @@
 
     {% elif mode == "tag_list" %}
         {# --- 模式 B: 标签列表 --- #}
-        {# 保持原有代码不变 #}
         <h2>所有标签</h2>
 
         {# 标签名称搜索表单 #}
@@ -143,48 +174,71 @@
             <ul class="list-inline">
                 {% for item in paged_items.object_list %} {# paged_items 包含标签 #}
                     <li class="list-inline-item mb-2">
-                        <a href="{% pageurl page %}?tag={{ item.tag.slug }}" class="btn btn-info btn-sm">
-                            {{ item.tag.name }} <span class="badge bg-light text-dark">{{ item.count }}</span>
+                        <a href="{% pageurl page %}?tag={{ item.slug }}" class="btn btn-info btn-sm">
+                            {{ item.name }} <span class="badge bg-light text-dark">{{ item.count }}</span>
                         </a>
                     </li>
                 {% endfor %}
             </ul>
 
-            {# 标签列表的分页导航 #}
+            {# ======================================================== #}
+            {# 【UI/UX 升级】 模式 B：标签列表的自定义现代分页导航 #}
+            {# ======================================================== #}
             {% if paged_items.has_other_pages %}
-            <nav aria-label="Page navigation">
-                <ul class="pagination">
-                    {% if paged_items.has_previous %}
-                        <li class="page-item"><a class="page-link" href="{% pageurl page %}?{% if search_query %}q={{ search_query|urlencode }}&{% endif %}page={{ paged_items.previous_page_number }}">Previous</a></li>
-                    {% else %}
-                        <li class="page-item disabled"><span class="page-link">上一页</span></li>
+            <div class="custom-pagination text-center" style="margin-top: 40px; margin-bottom: 40px; padding-top:20px; border-top: 1px solid #eee; display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 10px 15px;">
+
+                {# 1. 上一页逻辑 (保留 search_query) #}
+                {% if paged_items.has_previous %}
+                    <a href="{% pageurl page %}?{% if search_query %}q={{ search_query|urlencode }}&{% endif %}page={{ paged_items.previous_page_number }}" class="theme-btn btn-style-two">
+                        <span class="fa fa-angle-left" style="margin-right: 5px;"></span> 上一页
+                    </a>
+                {% else %}
+                    <button class="theme-btn btn-style-two" disabled style="cursor: not-allowed; opacity: 0.6;">
+                        <span class="fa fa-angle-left" style="margin-right: 5px;"></span> 上一页
+                    </button>
+                {% endif %}
+
+                {# 2. 分页信息显示 #}
+                <span class="pagination-info-text" style="font-size: 16px; color: #555; white-space: nowrap; line-height: 40px;">
+                    第 {{ paged_items.number }} 页，共 {{ paged_items.paginator.num_pages }} 页
+                </span>
+
+                {# 3. 下一页逻辑 (保留 search_query) #}
+                {% if paged_items.has_next %}
+                    <a href="{% pageurl page %}?{% if search_query %}q={{ search_query|urlencode }}&{% endif %}page={{ paged_items.next_page_number }}" class="theme-btn btn-style-two">
+                        下一页 <span class="fa fa-angle-right" style="margin-left: 5px;"></span>
+                    </a>
+                {% else %}
+                    <button class="theme-btn btn-style-two" disabled style="cursor: not-allowed; opacity: 0.6;">
+                        下一页 <span class="fa fa-angle-right" style="margin-left: 5px;"></span>
+                    </button>
+                {% endif %}
+
+                {# 4. 页码跳转表单 #}
+                <form method="get" action="{% pageurl page %}" class="pagination-jump-form" style="display: inline-flex; align-items: center; white-space: nowrap;">
+
+                    {# 核心：隐藏字段保留搜索词，防丢失 #}
+                    {% if search_query %}
+                        <input type="hidden" name="q" value="{{ search_query }}">
                     {% endif %}
 
-                    {% for num in paged_items.paginator.page_range %}
-                        {% if paged_items.number == num %}
-                            <li class="page-item active"><span class="page-link">{{ num }}</span></li>
-                        {% else %}
-                            <li class="page-item"><a class="page-link" href="{% pageurl page %}?{% if search_query %}q={{ search_query|urlencode }}&{% endif %}page={{ num }}">{{ num }}</a></li>
-                        {% endif %}
-                    {% endfor %}
-
-                    {% if paged_items.has_next %}
-                        <li class="page-item"><a class="page-link" href="{% pageurl page %}?{% if search_query %}q={{ search_query|urlencode }}&{% endif %}page={{ paged_items.next_page_number }}">下一页</a></li>
-                    {% else %}
-                        <li class="page-item disabled"><span class="page-link">下一页</span></li>
-                    {% endif %}
-                </ul>
-            </nav>
+                    <div class="form-group" style="display: inline-flex; align-items: center; margin-left: 5px;">
+                        <label for="jumptopage_b" style="margin-right: 8px; font-weight: normal; color: #333; white-space: nowrap; line-height: 40px;">跳转到:</label>
+                        <input type="number" name="page" id="jumptopage_b" min="1" max="{{ paged_items.paginator.num_pages }}" placeholder="页" style="width: 60px; height: 40px; padding: 0 8px; border: 1px solid #ddd; border-radius: 3px; text-align: center; line-height: normal;" required>
+                    </div>
+                    <button type="submit" class="theme-btn btn-style-two" style="height: 40px; line-height: 20px; padding: 10px 15px; margin-left: 5px;">跳转</button>
+                </form>
+            </div>
             {% endif %}
+            {# ========================== 模式 B 分页结束 ========================== #}
+
         {% else %}
             <p>标签无法找到{% if search_query %} 匹配您的搜索 "{{ search_query }}"{% endif %}.</p>
         {% endif %}
 
     {% else %}
-        {# 默认情况或未定义模式时的回退（理论上 mode 应该总是被设置） #}
+        {# 默认情况或未定义模式时的回退 #}
         <p class="alert alert-info">欢迎来到标签页面。请选择标签或搜索.</p>
-        {# 可以再次显示标签列表作为回退 #}
-        {# (复制模式B中显示所有标签的逻辑到这里，或者确保 mode 总是有值) #}
     {% endif %}
 </div>
 {% endblock %}

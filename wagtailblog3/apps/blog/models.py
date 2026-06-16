@@ -142,34 +142,56 @@ class BlogTagIndexPage(Page):
 			# --- 模式 B: 标签列表模式 ---
 			context['mode'] = "tag_list"
 			
-			# 1. 获取所有使用过的标签的基础查询集
-			#    确保只获取那些至少被一篇 BlogPage 使用的标签 (live & public)
-			active_blog_pages_tags_ids = BlogPage.objects.live().public().values_list('tags', flat=True).distinct()
-			used_tags_queryset = Tag.objects.filter(pk__in=active_blog_pages_tags_ids)
+			# =====================================================================
+			# 【终极优化】：从 Tag 侧出发，Subquery + JOIN，单条 SQL 完成全部工作
+			#
+			# 生成的 SQL 等价于：
+			#   SELECT taggit_tag.*, COUNT(blog_blogpagetag.id) AS count
+			#   FROM taggit_tag
+			#   INNER JOIN blog_blogpagetag
+			#       ON blog_blogpagetag.tag_id = taggit_tag.id
+			#   WHERE blog_blogpagetag.content_object_id IN (
+			#       SELECT page_ptr_id FROM blog_blogpage
+			#       INNER JOIN wagtailcore_page ON ...   -- live() + public() 的过滤
+			#   )
+			#   [AND taggit_tag.name ILIKE %search_query%]
+			#   GROUP BY taggit_tag.id
+			#   ORDER BY count DESC
+			#   LIMIT 50 OFFSET N;    -- 由 Paginator 自动加上，只取当前页数据
+			#
+			# 关键点：
+			# 1. Subquery 让 live_public_page_ids 永远不求值到 Python，只是 SQL 嵌套子查询
+			# 2. Paginator 接收 QuerySet，内部用 LIMIT/OFFSET，永远不加载全量数据
+			# 3. 整个流程零 Python 内存峰值，千万级标签同样稳定
+			# =====================================================================
 			
-			# 2. 应用标签名称搜索查询 (如果存在)
+			# Step 1: 描述"live+public 的 BlogPage ID"——注意 .values('id') 让它保持惰性子查询形态
+			live_public_page_ids = BlogPage.objects.live().public().values('id')
+			
+			# Step 2: 从 Tag 侧，经 BlogPageTag 中间表 JOIN，过滤并聚合计数
+			#   blog_blogpagetag_items  是 taggit TaggedItemBase 在 Tag 上自动生成的反向关系名
+			#   命名规则: %(app_label)s_%(class)s_items → blog_blogpagetag_items
+			tags_qs = Tag.objects.filter(
+				blog_blogpagetag_items__content_object_id__in=live_public_page_ids
+			).annotate(
+				count=Count('blog_blogpagetag_items')
+			)
+			
+			# Step 3: 标签名搜索（仍在数据库层面，不碰 Python）
 			if search_query:
-				used_tags_queryset = used_tags_queryset.filter(name__icontains=search_query)
+				tags_qs = tags_qs.filter(name__icontains=search_query)
 			
-			used_tags_queryset = used_tags_queryset.order_by('name')
+			# Step 4: 数据库层面排序
+			tags_qs = tags_qs.order_by('-count')
 			
-			# 3. 为每个标签附加文章数量
-			tags_with_counts = []
-			for tag_item in used_tags_queryset:
-				# 确保计数也只计算 live 和 public 的文章
-				count = BlogPage.objects.live().public().filter(tags=tag_item).count()
-				if count > 0:  # 只显示实际有文章的标签
-					tags_with_counts.append({'tag': tag_item, 'count': count})
-			
-			# 4. 对带有计数的标签列表进行分页
-			paginator = Paginator(tags_with_counts, self.items_tag_page)
+			# Step 5: Paginator 直接消费 QuerySet（触发 LIMIT/OFFSET，只取当页 50 条）
+			paginator = Paginator(tags_qs, self.items_tag_page)
 			try:
 				context['paged_items'] = paginator.page(page_number)
 			except PageNotAnInteger:
 				context['paged_items'] = paginator.page(1)
 			except EmptyPage:
 				context['paged_items'] = paginator.page(paginator.num_pages)
-		
 		return context
 
 
@@ -472,9 +494,11 @@ class BlogPage(Page):
 	
 	# 索引字段
 	search_fields = Page.search_fields + [
-		index.SearchField('title', boost=10),
+		index.SearchField('title', boost=10, partial_match=False),
 		index.SearchField('intro', boost=5),
-		index.SearchField('get_full_text_for_search', boost=2),
+		index.SearchField('body_text', boost=2),  # ← 改名，独立字段
+		# index.SearchField('subtitle', boost=8), # 👉 仅需在这里加一行
+		index.AutocompleteField('title'),
 		index.FilterField('date'),
 		index.FilterField('tags'),
 		index.FilterField('categories'),
@@ -799,6 +823,11 @@ class BlogPage(Page):
 		
 		# 4. 调用父类的serve方法，使用我们准备好的body内容去渲染模板
 		return super().serve(request)
+	
+	@property
+	def body_text(self):
+		"""ES 索引专用：从 MongoDB 拉取并拼接纯文本"""
+		return self.get_full_text_for_search()
 	
 	def get_full_text_for_search(self):
 		content = self.get_content_from_mongodb()

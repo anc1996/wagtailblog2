@@ -3,23 +3,26 @@
 import logging
 
 from django.templatetags.static import static
-from wagtail import hooks
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 from django.db.models import Sum
-from wagtail.models import Page
 from django.shortcuts import render, get_object_or_404
 from django.urls import path, reverse
 from django.contrib import messages
+from django.views.generic.edit import UpdateView
+from django.utils.decorators import method_decorator
+from wagtail import hooks
+
+from wagtail.models import Page
 from wagtail.admin.views.reports import ReportView
 from wagtail.admin.menu import MenuItem
 from wagtail.admin.ui.tables import Column, Table
-from django.views.generic.edit import UpdateView
-from django.utils.decorators import method_decorator
 from wagtail.admin.auth import require_admin_access
 from wagtail.admin.rich_text.editors.draftail import features as draftail_features
 from wagtail.admin.rich_text.converters.html_to_contentstate import InlineStyleElementHandler
+from wagtail.snippets.models import register_snippet
 
+from .admin import TagsSnippetViewSet
 from .models import PageViewCount
 from .forms import PageViewCountForm
 
@@ -313,3 +316,9 @@ def register_underline_feature(features):
 	
 	# 4. 注册转换规则
 	features.register_converter_rule('contentstate', feature_name, db_conversion)
+
+
+
+
+# 注册这个视图集，生成管理 UI
+register_snippet(TagsSnippetViewSet)

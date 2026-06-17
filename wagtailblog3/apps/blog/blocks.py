@@ -1,6 +1,7 @@
 # blog/blocks.py
 
 from django.db import models
+from wagtail.embeds.blocks import EmbedBlock
 from wagtailmedia.blocks import AudioChooserBlock, VideoChooserBlock
 from wagtail.contrib.table_block.blocks import TableBlock as WagtailTableBlock
 from wagtail.documents.models import Document, AbstractDocument
@@ -143,3 +144,33 @@ class CustomTableBlock(WagtailTableBlock):
 		icon = "table"
 		label = "表格"
 		help_text = "创建一个包含标题和表头的表格。"
+		
+		
+# 声明一个高级自定义嵌入块类
+class CustomEmbedBlock(blocks.StructBlock):
+    title = blocks.CharBlock(
+        required=True,
+        label="媒体标题 / 无障碍描述",
+        help_text="请输入此视频或音频的真实名称。"
+    )
+    embed_url = EmbedBlock(
+        label="流媒体链接",
+        help_text="直接粘贴 B站、YouTube、优酷、腾讯、网易云、QQ音乐等平台的单页链接"
+    )
+
+    # 👇 核心魔法：兼容旧数据的钩子函数
+    def to_python(self, value):
+        # 如果从数据库读出来的数据是一个纯字符串（旧版的纯 URL 数据）
+        if isinstance(value, str):
+            # 强行包装成新的字典结构，实现无感热更新
+            value = {
+                'title': '历史媒体档案',  # 给以前的老视频一个默认的兜底标题
+                'embed_url': value
+            }
+        # 交给 Wagtail 继续按正常流程处理
+        return super().to_python(value)
+
+    class Meta:
+        template = 'blog/streams/embed_block.html'
+        icon = 'media'
+        label = '高级多媒体嵌入'

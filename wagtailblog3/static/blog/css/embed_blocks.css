@@ -1,19 +1,17 @@
 /* ==========================================================================
-   Wagtail高级流媒体矩阵（极客自适应 V4 终极版）
-   文件路径：wagtailblog3/static/blog/css/embed_blocks.css
+   Wagtail高级流媒体矩阵（StructBlock 联动自适应版）
    ========================================================================== */
 
-/* 1. 强行解除 Wagtail 原生 StreamField 块的收缩限制，无视一切外部 Flex/Grid 干扰 */
-.content-block-wrapper[data-block-type="embed_block"],
-.content-block-wrapper[data-block-type="iframe_embed"] {
+/* 1. 强行撑满 blog-center-column，跟随你博客精妙的拖拽栏目实时缩放 */
+.content-block-wrapper[data-block-type="embed_block"] {
     display: block !important;
     width: 100% !important;
     max-width: 100% !important;
-    flex: 1 1 100% !important; /* 核心：在任何 flex 遗留环境里，强制撑满 100% */
-    margin: 3rem 0 !important;
+    flex: 1 1 100% !important;
+    margin: 3.5rem 0 !important; /* 加大上下留白，给予极客硬核文风呼吸感 */
 }
 
-/* 2. 极客暗黑容器主装甲 */
+/* 2. 极客暗黑卡片主装甲 */
 .geek-embed-container {
     display: block !important;
     width: 100% !important;
@@ -21,116 +19,76 @@
     overflow: hidden;
     background-color: #121214;
     border: 1px solid rgba(255, 255, 255, 0.06);
-    transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.4s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.4s ease;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+    transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1),
+                box-shadow 0.4s cubic-bezier(0.16, 1, 0.3, 1),
+                border-color 0.4s ease;
 }
-
 .geek-embed-container:hover {
     transform: translateY(-5px);
-    border-color: rgba(0, 210, 255, 0.25);
-    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.35) !important;
+    border-color: rgba(0, 210, 255, 0.3); /* 悬浮时泛起标志性的赛博蓝高光 */
+    box-shadow: 0 24px 48px rgba(0, 0, 0, 0.4) !important;
 }
 
-.geek-custom-embed {
-    display: block !important;
-    width: 100% !important;
-}
-
-/* 3. 锁定 16:9 物理防线，绝不妥协（强行撑开 0px 高度坍塌） */
+/* 3. 视频 16:9 物理防线（彻底降服 YouTube 200x113 和 B站 300x150 默认小缩略图） */
 .geek-native-video-wrapper,
-.geek-custom-embed .video-embed-wrapper.responsive-16by9 {
+.geek-custom-embed.video-mode .video-embed-wrapper.responsive-16by9 {
     position: relative !important;
     display: block !important;
     width: 100% !important;
-    padding-bottom: 56.25% !important; /* 强制高度为宽度的 56.25% (16:9) */
+    padding-bottom: 56.25% !important; /* 16:9 黄金宽高压缩比 */
     height: 0 !important;
     overflow: hidden !important;
     background-color: #000000;
 }
 
-/* 4. 强酸覆盖！直接溶解掉 YouTube/B站 带来的死宽高 (width="200" height="113") */
+/* 4. 穿透覆盖：强行溶解 iframe 的硬编码长宽属性 */
 .geek-native-video-wrapper iframe,
-.geek-native-video-wrapper object,
-.geek-native-video-wrapper embed,
-.geek-custom-embed .video-embed-wrapper.responsive-16by9 iframe {
+.geek-custom-embed.video-mode .video-embed-wrapper.responsive-16by9 iframe {
     position: absolute !important;
-    top: 0 !important;
-    left: 0 !important;
-    width: 100% !important;
-    height: 100% !important;
+    top: 0 !important; left: 0 !important;
+    width: 100% !important; height: 100% !important;
     border: 0 !important;
-    margin: 0 !important;
-    padding: 0 !important;
 }
 
-/* 5. 智能音频盒自适应适配 (彻底废弃对 provider_name 的依赖) */
+/* 5. 智能音频/音乐盒自适应（剔除视频拉伸，恢复精致小巧的自然高度） */
 .geek-custom-embed.audio-mode {
+    display: block !important;
     width: 100% !important;
     padding: 0 !important;
     background: linear-gradient(180deg, #1a1a1e, #121214);
 }
-
 .geek-custom-embed.audio-mode .audio-embed-wrapper {
     margin: 0 !important;
     width: 100% !important;
-    border: 0 !important;
 }
-
-/* 解除音频 iframe 的强行拉伸，恢复自然高度 (网易云66px, Spotify 152px) */
 .geek-custom-embed.audio-mode iframe {
     position: relative !important;
     width: 100% !important;
-    /* 取消 height: 100%，让 iframe 自带的 height 属性生效 */
-    height: auto !important;
+    height: auto !important; /* 允许网易云 66px，Spotify 152px 自然撑开 */
     min-height: 66px;
     border: 0 !important;
     display: block !important;
 }
 
-/* 6. 底部极客元数据控制台（Metadata Bar） */
+/* 6. 底部手填元数据控制台（Metadata Bar） */
 .geek-embed-meta {
-    background-color: rgba(0, 0, 0, 0.25);
+    background-color: rgba(0, 0, 0, 0.4); /* 压暗底色，突显文字 */
     border-top: 1px solid rgba(255, 255, 255, 0.05);
-    padding: 0.6rem 1.2rem !important;
+    padding: 0.7rem 1.2rem !important;
 }
-
 .geek-embed-meta .embed-title {
-    font-size: 0.78rem;
-    font-family: 'Fira Code', 'Cascadia Code', Consolas, Monaco, monospace;
-    color: #8a8a93 !important;
-    letter-spacing: 0.3px;
+    font-size: 0.82rem;
+    font-family: 'Fira Code', 'Cascadia Code', monospace; /* 黑客专属等宽字体 */
+    color: #a1a1aa !important;
+    letter-spacing: 0.5px;
 }
-
-.geek-embed-meta .embed-title i {
-    color: rgba(255, 255, 255, 0.3);
-    transition: color 0.3s ease;
-}
-
-.geek-embed-container:hover .geek-embed-meta .embed-title i {
-    color: #00d2ff;
-}
-
 .geek-embed-meta .badge-geek-dark {
     background-color: rgba(255, 255, 255, 0.06);
-    color: #00d2ff;
+    color: #00d2ff; /* 极客标志蓝色 */
     font-family: 'Fira Code', monospace;
     font-size: 0.68rem;
-    font-weight: 500;
-    letter-spacing: 1px;
     padding: 3px 8px;
     border-radius: 4px;
     border: 1px solid rgba(0, 210, 255, 0.15);
-}
-
-/* 7. 手机端响应式微调 */
-@media (max-width: 768px) {
-    .content-block-wrapper[data-block-type="embed_block"],
-    .content-block-wrapper[data-block-type="iframe_embed"] {
-        margin: 2rem 0 !important;
-    }
-    .geek-embed-meta {
-        padding: 0.5rem 0.8rem !important;
-    }
-    .geek-embed-meta .embed-title {
-        font-size: 0.72rem;
-    }
 }

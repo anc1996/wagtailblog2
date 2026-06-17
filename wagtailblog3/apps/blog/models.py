@@ -36,7 +36,7 @@ from wagtail_ai.panels import AITitleFieldPanel, AIDescriptionFieldPanel, AIFiel
 from wagtailmarkdown.blocks import MarkdownBlock
 
 from blog.page_view_counter import PageViewCounter
-from blog.blocks import AudioBlock, VideoBlock, CustomTableBlock, MermaidBlock, PureCodeBlock
+from blog.blocks import AudioBlock, VideoBlock, CustomTableBlock, MermaidBlock, PureCodeBlock, CustomEmbedBlock
 from wagtailblog3.mongodb import MongoDBStreamFieldAdapter
 from wagtailblog3.mongo import MongoManager
 
@@ -453,8 +453,9 @@ class BlogPage(Page):
 		)),
 		
 		# 代码块 - 使用wagtail-codeblock
-		# ("code_block", CodeBlock(label='Code', default_language='python')),
 		("code_block", PureCodeBlock(default_language='python')),
+		
+		
 		# Markdown块 - 使用wagtail-markdown (包含代码高亮和数学公式支持)
 		('markdown_block', MarkdownBlock(
 			icon='code',
@@ -465,13 +466,9 @@ class BlogPage(Page):
 		# StreamField 中注册我们的 MermaidBlock ---
 		('mermaid_chart', MermaidBlock()),
 		
-		# 嵌入块 - 用于嵌入外部内容
-		('embed_block', EmbedBlock(
+		# 嵌入块 - 将原来的 EmbedBlock 整体升级为我们的 CustomEmbedBlock
+		('embed_block', CustomEmbedBlock(
 			label="嵌入媒体",
-			# 更新为全矩阵支持提示
-			help_text="直接粘贴 B站、YouTube、优酷、腾讯、网易云、QQ音乐等单页链接",
-			# 👇 罪魁祸首就是漏了下面这一行！强制它绑定你的前端模板！
-			template='blog/streams/embed_block.html'
 		)),
 		
 		# 表格块

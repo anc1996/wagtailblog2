@@ -13,6 +13,7 @@
                        class="stream-image-link">
                         {% image value width-800 class="stream-blog-image img-fluid" %}
                     </a>
+                        <div class="stream-image-model">{{ value.get_model_name }}</div>
                 </div>
                 {% if value.caption %}
                     <figcaption class="stream-image-caption">
@@ -23,6 +24,7 @@
                     </figcaption>
                 {% endif %}
             </figure>
+
         </div>
     {% else %}
         <div class="stream-image-placeholder">

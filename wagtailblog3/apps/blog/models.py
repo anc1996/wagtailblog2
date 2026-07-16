@@ -758,31 +758,55 @@ class BlogPage(Page):
 	def _render_markdown_in_body(self, body_data):
 		"""
 		一个辅助函数，接收从MongoDB获取的body原始数据列表，
-		找到其中的 'markdown_block' 并就地进行渲染。
-
-		:param body_data: 从MongoDB获取的body字段的原始列表。
-		:return: 经过处理的body列表，其中Markdown已渲染为HTML。
+		找到其中的 'markdown_block' 并就地进行渲染，同时修复严格的语法排版。
 		"""
 		try:
-			# 导入需要的模块
-			# 获取WAGTAILMARKDOWN的配置
-			WAGTAILMARKDOWN = settings.WAGTAILMARKDOWN
+			WAGTAILMARKDOWN = getattr(settings, 'WAGTAILMARKDOWN', {})
 			
-			# 遍历body数据列表
 			for block_data in body_data:
-				# 检查是否是我们要处理的 markdown_block
 				if isinstance(block_data, dict) and block_data.get('type') == 'markdown_block':
-					# 获取原始的Markdown文本
-					raw_markdown_text = block_data.get('value', '')
+					raw_md = block_data.get('value', '')
 					
-					# 使用settings.py中的配置进行渲染
+					# ========== 🚀 核心补丁：GFM 语法兼容层 ==========
+					
+					# 1. 修复嵌套列表缩进：将 2~3 个空格强转为 Python-Markdown 严格要求的 4 空格
+					# 匹配逻辑: 行首的引用符(可选) + 2~3个空格 + 列表符(-, *, + 或 数字.)
+					raw_md = re.sub(
+						r'^(>[\s]*)?( {2,3})([-\*\+]\s|\d+\.\s)',
+						r'\1    \3',
+						raw_md,
+						flags=re.MULTILINE
+					)
+					
+					# 2. 修复粘连段落：自动在紧贴着文本的列表上方插入空行
+					lines = raw_md.split('\n')
+					fixed_lines = []
+					# 匹配列表的首行特征
+					list_pattern = re.compile(r'^(>[\s]*)?( {0,4})([-\*\+]\s|\d+\.\s)')
+					
+					for i, line in enumerate(lines):
+						if i > 0:
+							curr_match = list_pattern.match(line)
+							prev_match = list_pattern.match(lines[i - 1])
+							prev_is_empty = not lines[i - 1].strip('> \t\r')
+							
+							# 如果当前行是列表，但前一行有文字且不是列表，说明发生了粘连
+							if curr_match and not prev_match and not prev_is_empty:
+								bq_prefix = curr_match.group(1) or ''
+								# 强行插入一个对应的空行（如果在块引用内，就会插入一个空的 '>'）
+								fixed_lines.append(bq_prefix.strip())
+						
+						fixed_lines.append(line)
+					
+					raw_md = '\n'.join(fixed_lines)
+					# ===================================================
+					
+					# 执行渲染
 					rendered_html = markdown(
-						raw_markdown_text,
+						raw_md,
 						extensions=WAGTAILMARKDOWN.get('extensions', []),
 						extension_configs=WAGTAILMARKDOWN.get('extension_configs', {})
 					)
-					
-					# 用渲染好的、安全的HTML替换掉原来的原始文本
 					block_data['value'] = mark_safe(rendered_html)
 			
 			return body_data
@@ -791,7 +815,6 @@ class BlogPage(Page):
 			import traceback
 			logger.error(f"渲染Markdown时出错: {e}")
 			logger.error(traceback.format_exc())
-			# 如果出错，返回原始数据，避免整个页面崩溃
 			return body_data
 	
 	def get_context(self, request, *args, **kwargs):

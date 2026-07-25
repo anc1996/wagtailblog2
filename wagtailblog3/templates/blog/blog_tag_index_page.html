@@ -3,6 +3,7 @@
 
 {% block extra_css %}
     {{ block.super }}
+    <link href="{% static 'css/flatpickr.min.css' %}" rel="stylesheet">
     <link rel="stylesheet" href="{% static 'blog/css/blog.css' %}">
 {% endblock %}
 
@@ -245,5 +246,8 @@
 
 {% block extra_js %}
     {{ block.super }}
+    <script src="{% static 'js/flatpickr.js' %}"></script>
+    <script src="{% static 'js/zh.js' %}"></script>
+    <script src="{% static 'js/frontend_datepicker.js' %}"></script>
     <script src="{% static 'blog/js/blog_tag_index_page.js' %}"></script>
 {% endblock %}

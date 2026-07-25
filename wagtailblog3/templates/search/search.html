@@ -5,6 +5,7 @@
 
 {% block extra_css %}
     {{ block.super }}
+    <link href="{% static 'css/flatpickr.min.css' %}" rel="stylesheet">
     <link rel="stylesheet" href="{% static 'search/css/search.css' %}">
 {% endblock %}
 
@@ -178,6 +179,9 @@
 
 {% block extra_js %}
     {{ block.super }}
+    <script src="{% static 'js/flatpickr.js' %}"></script>
+    <script src="{% static 'js/zh.js' %}"></script>
+    <script src="{% static 'js/frontend_datepicker.js' %}"></script>
     <script>
         const currentSearchQuery = "{% if search_query and search_query != 'None' %}{{ search_query|escapejs }}{% endif %}";
         const currentSearchType = "{{ search_type|default:'all'|escapejs }}";
@@ -185,6 +189,5 @@
         const currentEndDate = "{% if end_date and end_date != 'None' %}{{ end_date|escapejs }}{% endif %}";
         const currentOrderBy = "{% if order_by and order_by != 'None' %}{{ order_by|escapejs }}{% endif %}";
     </script>
-    <script src="{% static 'js/frontend_datepicker.js' %}"></script>
     <script src="{% static 'search/js/search.js' %}"></script>
 {% endblock %}

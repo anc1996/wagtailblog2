@@ -5,6 +5,20 @@
 
 {% block body_class %}home-page{% endblock %}
 
+{% block extra_css %}
+    <link href="{% static 'gretzia/css/owl.css' %}" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'archive/css/archive.css' %}">
+{% endblock %}
+
+{% block page_vendor_js %}
+    <script src="{% static 'gretzia/js/isotope.js' %}"></script>
+    <script src="{% static 'gretzia/js/owl.js' %}"></script>
+{% endblock %}
+
+{% block extra_js %}
+    <script src="{% static 'archive/js/archive.js' %}"></script>
+{% endblock %}
+
 {% block content %}
 <!--获取homepage目录下的BlogIndexPage并渲染轮播-->
 <section class="main-slider style-two">

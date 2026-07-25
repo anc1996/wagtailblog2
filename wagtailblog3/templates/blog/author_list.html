@@ -6,6 +6,10 @@
 {% block title %}{% translate "Authors List" %}{% endblock %}
 
 
+{% block extra_css %}
+    <link rel="stylesheet" href="{% static 'archive/css/archive.css' %}">
+{% endblock %}
+
 {% block content %}
 <div class="sidebar-page-container">
     <div class="auto-container">
@@ -134,4 +138,5 @@
 
 {% block extra_js %}
     {{ block.super }}
+    <script src="{% static 'archive/js/archive.js' %}"></script>
 {% endblock %}

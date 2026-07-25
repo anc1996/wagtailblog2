@@ -6,17 +6,16 @@
     {{ block.super }}
     <link rel="stylesheet" href="{% static 'blog/css/blog.css' %}">
     <link rel="stylesheet" href="{% static 'blog/css/blog-resize.css' %}">
-    <link rel="stylesheet" href="{% static 'blog/css/lightbox/lightbox.css' %}">
-    <link rel="stylesheet" href="{% static 'blog/css/jquery-ui/jquery-ui.css' %}">
+    {% if has_image or has_gallery %}<link rel="stylesheet" href="{% static 'blog/css/lightbox/lightbox.css' %}">{% endif %}
 
     <link rel="stylesheet" href="{% static 'blog/css/github-markdown.min.css' %}">
     <link rel="stylesheet" href="{% static 'blog/css/markdown-theme.css' %}">
 
-    <link rel="stylesheet" href="{% static 'blog/css/katex/katex.min.css' %}">
+    {% if has_katex %}<link rel="stylesheet" href="{% static 'blog/css/katex/katex.min.css' %}">{% endif %}
 
-    <link rel="stylesheet" href="{% static 'blog/js/highlightjs/styles/github-dark.min.css' %}">
+    {% if has_code %}<link rel="stylesheet" href="{% static 'blog/js/highlightjs/styles/github-dark.min.css' %}">{% endif %}
 
-<style>
+{% if has_code %}<style>
         /* === 第一招：重塑 pre 容器为弹性盒子（兼容两种区块） === */
         .blog-layout-container .markdown-body pre,
         .blog-layout-container [data-block-type="code_block"] pre {
@@ -62,13 +61,13 @@
             min-width: 0 !important;
             overflow-x: auto !important; /* 代码过长仅右侧滚动，左侧行号钉死 */
         }
-    </style>
-    <link rel="stylesheet" href="{% static 'blog/css/image_blocks.css' %}">
-    <link rel="stylesheet" href="{% static 'blog/css/video_blocks.css' %}">
-    <link rel="stylesheet" href="{% static 'blog/css/audio_blocks.css' %}">
-    <link rel="stylesheet" href="{% static 'blog/css/embed_blocks.css' %}">
-    <link rel="stylesheet" href="{% static 'blog/css/table_blocks.css' %}">
-    <link rel="stylesheet" href="{% static 'blog/css/mermaid_block.css' %}">
+    </style>{% endif %}
+    {% if has_image %}<link rel="stylesheet" href="{% static 'blog/css/image_blocks.css' %}">{% endif %}
+    {% if has_video %}<link rel="stylesheet" href="{% static 'blog/css/video_blocks.css' %}">{% endif %}
+    {% if has_audio %}<link rel="stylesheet" href="{% static 'blog/css/audio_blocks.css' %}">{% endif %}
+    {% if has_embed %}<link rel="stylesheet" href="{% static 'blog/css/embed_blocks.css' %}">{% endif %}
+    {% if has_table %}<link rel="stylesheet" href="{% static 'blog/css/table_blocks.css' %}">{% endif %}
+    {% if has_mermaid %}<link rel="stylesheet" href="{% static 'blog/css/mermaid_block.css' %}">{% endif %}
     <link rel="stylesheet" href="{% static 'comments/css/comments.css' %}">
 
     {# 禁用主题自带的 mCustomScrollbar #}
@@ -304,20 +303,22 @@
     <!-- 使用 ES6 模块 -->
     <script type="module" src="{% static 'comments/js/comments.js' %}"></script>
 
-    <script src="{% static 'blog/js/blog_page.js' %}" async></script>
+    <script src="{% static 'blog/js/blog_page.js' %}" defer></script>
 
     <!-- 🆕 添加拖动布局JS -->
     <script src="{% static 'blog/js/resize-manager.js' %}"></script>
 
-    <script src="{% static 'blog/css/katex/katex.js' %}" async></script>
-    <script src="{% static 'blog/js/katex/auto-render.min.js' %}" async></script>
-    <script src="{% static 'blog/js/lightbox/lightbox.js' %}" async></script>
-    <script src="{% static 'blog/js/jquery-ui/jquery-ui.js' %}" async></script>
-    <script src="{% static 'blog/js/image_blocks.js' %}" async></script>
-    <script src="{% static 'blog/js/video_blocks.js' %}" async></script>
-    <script src="{% static 'blog/js/editor-enhancements.js' %}" async></script>
-    <script src="{% static 'blog/js/mermaid_block.js' %}" async></script>
+    {% if has_katex %}
+    <script src="{% static 'blog/css/katex/katex.js' %}" defer></script>
+    <script src="{% static 'blog/js/katex/auto-render.min.js' %}" defer></script>
+    {% endif %}
+    {% if has_image or has_gallery %}<script src="{% static 'blog/js/lightbox/lightbox.js' %}" defer></script>{% endif %}
+    {% if has_image %}<script src="{% static 'blog/js/image_blocks.js' %}" defer></script>{% endif %}
+    {% if has_video %}<script src="{% static 'blog/js/video_blocks.js' %}" defer></script>{% endif %}
+    {% if has_mermaid %}<script src="{% static 'blog/js/mermaid_block.js' %}" defer></script>{% endif %}
 
-    <script src="{% static 'blog/js/highlightjs/highlight.min.js' %}"></script>
+    {% if has_code %}
+    <script src="{% static 'blog/js/highlightjs/highlight.min.js' %}" defer></script>
     <script src="{% static 'blog/js/highlighting.js' %}?v=4.1" defer></script>
+    {% endif %}
 {% endblock %}

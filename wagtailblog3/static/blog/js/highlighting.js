@@ -15,6 +15,8 @@ $(function() {
     const langAliases = {
         'js': 'javascript', 'py': 'python', 'html': 'xml',
         'sh': 'bash', 'ps1': 'powershell', 'yml': 'yaml',
+        'cmd': 'dos', 'text': 'plaintext', 'txt': 'plaintext',
+        'md': 'markdown', 'csv': 'plaintext', 'mermaid': 'plaintext',
         'c#': 'csharp', 'c++': 'cpp'
     };
 

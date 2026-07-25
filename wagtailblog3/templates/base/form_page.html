@@ -24,7 +24,7 @@
                         {% if page.feature_image %}
                             {% image page.feature_image fill-600x400 alt=page.title %}
                         {% else %}
-                            <img src="{% static 'gretzia/images/resource/contact.jpg' %}" alt="{{ page.title }}" />
+                            <img src="{% static 'gretzia/images/resource/contact-img.jpg' %}" alt="{{ page.title }}" />
                         {% endif %}
                     </div>
 
@@ -326,6 +326,10 @@
     </div>
 </div>
 
+{% endblock content %}
+
+{% block extra_js %}
+    {{ block.super }}
 <!-- 表单验证和增强脚本 -->
 <script>
 $(document).ready(function() {
@@ -428,5 +432,4 @@ $(document).ready(function() {
     }
 });
 </script>
-
-{% endblock content %}
+{% endblock extra_js %}

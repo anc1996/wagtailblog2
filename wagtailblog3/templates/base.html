@@ -45,10 +45,6 @@
     <link href="{% static 'gretzia/css/style.css' %}" rel="stylesheet">
     <link href="{% static 'gretzia/css/responsive.css' %}" rel="stylesheet">
 
-    {% block custom_scrollbar_assets %}
-    <link href="{% static 'gretzia/css/jquery.mCustomScrollbar.min.css' %}" rel="stylesheet">
-    {% endblock custom_scrollbar_assets %}
-
     {# 3. 最后加载自定义样式 (确保我们可以覆盖上面的所有样式) #}
     <link rel="stylesheet" href="{% static 'css/blog_interactions.css' %}">
 
@@ -90,14 +86,8 @@
     {# 插件库 #}
     {% block page_vendor_js %}{% endblock %}
 
-    {% block custom_scrollbar_assets_js %}
-    <script src="{% static 'gretzia/js/jquery.mCustomScrollbar.concat.min.js' %}"></script>
-    {% endblock custom_scrollbar_assets_js %}
-
     {# 你的自定义逻辑 #}
     <script src="{% static 'gretzia/js/script.js' %}"></script>
-    <script src="{% static 'gretzia/js/enhanced-jquery-compatibility.js' %}"></script>
-    <script src="{% static 'gretzia/js/jquery.mCustomScrollbar.js' %}"></script>
     {% block extra_js %}
     {% endblock %}
 

@@ -70,9 +70,6 @@
     {% if has_mermaid %}<link rel="stylesheet" href="{% static 'blog/css/mermaid_block.css' %}">{% endif %}
     <link rel="stylesheet" href="{% static 'comments/css/comments.css' %}">
 
-    {# 禁用主题自带的 mCustomScrollbar #}
-    {% block custom_scrollbar_assets_js %}{% endblock custom_scrollbar_assets_js %}
-
 {% endblock %}
 
 {% block content %}

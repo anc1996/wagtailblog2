@@ -66,7 +66,7 @@ def editor_css_easymde():
 	# 1. 动态链接部分：继续使用 format_html 保障安全
 	links = format_html(
 		'<link rel="stylesheet" href="{}">\n<link rel="stylesheet" href="{}">',
-		static('blog/js/highlightjs/styles/github.min.css'),
+		static('vendor/highlightjs/styles/github.min.css'),
 		static('blog/css/katex/katex.min.css')
 	)
 	
@@ -113,7 +113,7 @@ def editor_js_easymde():
 		<script src="{}"></script>
 		<script src="{}"></script>
 		""",
-		static('blog/js/highlightjs/highlight.min.js'),
+		static('vendor/highlightjs/highlight.min.js'),
 		static('blog/css/katex/katex.min.js'),
 		static('blog/js/katex/auto-render.min.js'),
 		static('blog/js/easymde_custom.js')

@@ -15,6 +15,8 @@ import traceback
 from datetime import datetime
 
 from django.db.models import Count, Case, When, Subquery
+from django.utils.html import strip_tags
+from django.utils.text import Truncator
 from wagtail.models import Page
 from wagtail.contrib.search_promotions.models import Query
 from wagtail.search.backends import get_search_backend
@@ -49,7 +51,7 @@ def _is_meaningless_query(clean_query):
 def _generate_dynamic_field_weights():
 	"""自动读取 BlogPage 中定义的 search_fields，生成 ES 物理字段名与权重映射"""
 	weights = {}
-	
+
 	for field in BlogPage.get_search_fields():
 		if isinstance(field, SearchField):
 			boost = field.boost if field.boost is not None else 1.0
@@ -59,9 +61,9 @@ def _generate_dynamic_field_weights():
 				app_label = BlogPage._meta.app_label
 				model_name = BlogPage._meta.model_name
 				es_name = f"{app_label}_{model_name}__{field.field_name}"
-			
+
 			weights[es_name] = boost
-	
+
 	return weights
 
 
@@ -97,7 +99,7 @@ class ESLazyResults:
 		self.query = dsl_query
 		self.filter = dsl_filter
 		self._count_cache = None
-	
+
 	def _build_body(self, frm=0, size=20, source=False):
 		bool_body = {"must": [self.query]}
 		if self.filter:
@@ -109,7 +111,7 @@ class ESLazyResults:
 			"_source": source,
 			"track_total_hits": True,
 		}
-	
+
 	def count(self):
 		if self._count_cache is None:
 			body = {"query": self._build_body()["query"]}
@@ -121,10 +123,10 @@ class ESLazyResults:
 				logger.error(f"ES _count 失败: {e}")
 				self._count_cache = 0
 		return self._count_cache
-	
+
 	def __len__(self):
 		return min(self.count(), MAX_RESULT_WINDOW)
-	
+
 	def __getitem__(self, k):
 		if isinstance(k, slice):
 			start = k.start or 0
@@ -133,22 +135,22 @@ class ESLazyResults:
 			return self._fetch_slice(start, size)
 		objs = self._fetch_slice(k, 1)
 		return objs[0] if objs else None
-	
+
 	def _fetch_slice(self, start, size):
 		if size <= 0:
 			return []
 		if start >= MAX_RESULT_WINDOW:
 			return []
 		size = min(size, MAX_RESULT_WINDOW - start)
-		
+
 		body = self._build_body(frm=start, size=size, source=False)
-		
+
 		try:
 			hits = self.es.search(index=self.index, body=body)["hits"]["hits"]
 		except Exception as e:
 			logger.error(f"ES search 失败: {e}\n{traceback.format_exc()}")
 			return []
-		
+
 		page_ids = []
 		for h in hits:
 			raw_id = str(h.get("_id", ""))
@@ -158,10 +160,10 @@ class ESLazyResults:
 					page_ids.append(int(digits[-1]))
 				except ValueError:
 					continue
-		
+
 		if not page_ids:
 			return []
-		
+
 		preserved = Case(*[When(pk=pk, then=pos) for pos, pk in enumerate(page_ids)])
 		return list(
 			Page.objects.filter(pk__in=page_ids).specific().order_by(preserved)
@@ -180,7 +182,7 @@ def _build_base_qs(search_type, parsed_start, parsed_end, order_by):
 			qs = qs.filter(date__lte=parsed_end)
 		if order_by in ('date', '-date'):
 			qs = qs.order_by(order_by)
-	
+
 	elif search_type == 'pages':
 		blog_ids_subq = Subquery(BlogPage.objects.values('id'))
 		qs = Page.objects.live().public().exclude(id__in=blog_ids_subq)
@@ -192,7 +194,7 @@ def _build_base_qs(search_type, parsed_start, parsed_end, order_by):
 			qs = qs.order_by('last_published_at')
 		elif order_by == '-date':
 			qs = qs.order_by('-last_published_at')
-	
+
 	else:
 		qs = Page.objects.live().public()
 		if parsed_start:
@@ -203,7 +205,7 @@ def _build_base_qs(search_type, parsed_start, parsed_end, order_by):
 			qs = qs.order_by('first_published_at')
 		elif order_by == '-date':
 			qs = qs.order_by('-first_published_at')
-	
+
 	return qs
 
 
@@ -213,7 +215,7 @@ def _build_base_qs(search_type, parsed_start, parsed_end, order_by):
 def _get_es_client_and_index():
 	backend = get_search_backend('default')
 	es = getattr(backend, 'es', None) or getattr(backend, 'client', None)
-	
+
 	# 直接调用原生 API，避免一切拼接错误（例如前缀丢失、多加下划线等问题）
 	index_name = backend.get_index_for_model(Page).name
 	return es, index_name
@@ -224,7 +226,7 @@ def _get_es_client_and_index():
 # =============================================================================
 def _build_search_dsl(clean_query, search_type, parsed_start, parsed_end):
 	should_clauses = []
-	
+
 	# A. 字段级 match_phrase（精确连贯短语 × 字段权重 × 10）
 	for field, weight in FIELD_WEIGHTS.items():
 		should_clauses.append({
@@ -236,7 +238,7 @@ def _build_search_dsl(clean_query, search_type, parsed_start, parsed_end):
 				}
 			}
 		})
-	
+
 	# B. 分词 fallback（加入 75% 命中率防线）
 	should_clauses.append({
 		"multi_match": {
@@ -248,26 +250,26 @@ def _build_search_dsl(clean_query, search_type, parsed_start, parsed_end):
 			"boost": 1.0,
 		}
 	})
-	
+
 	dsl_query = {
 		"bool": {
 			"should": should_clauses,
 			"minimum_should_match": 1,
 		}
 	}
-	
+
 	# C. 过滤条件
 	dsl_filter = [
 		{"term": {"live_filter": True}},
 	]
-	
+
 	if search_type == 'blog':
 		dsl_filter.append({"term": {"_django_content_type": "blog.BlogPage"}})
 	elif search_type == 'pages':
 		dsl_filter.append({
 			"bool": {"must_not": [{"term": {"_django_content_type": "blog.BlogPage"}}]}
 		})
-	
+
 	# D. 日期区间
 	if parsed_start or parsed_end:
 		range_q = {}
@@ -281,7 +283,7 @@ def _build_search_dsl(clean_query, search_type, parsed_start, parsed_end):
 			else "first_published_at_filter"
 		)
 		dsl_filter.append({"range": {date_field: range_q}})
-	
+
 	return dsl_query, dsl_filter
 
 
@@ -291,18 +293,18 @@ def _build_search_dsl(clean_query, search_type, parsed_start, parsed_end):
 def perform_search(query_string, search_type='all', start_date=None, end_date=None, order_by=None):
 	parsed_start = _parse_date(start_date)
 	parsed_end = _parse_date(end_date)
-	
+
 	if not query_string:
 		return _build_base_qs(search_type, parsed_start, parsed_end, order_by)
-	
+
 	clean_query = _clean_query(query_string)
-	
+
 	# 【新增应用层拦截】：如果是空字符、单字查询，或常见停用词，直接返回空查询集
 	if not clean_query or _is_meaningless_query(clean_query):
 		return _build_base_qs(search_type, parsed_start, parsed_end, order_by).none()
-	
+
 	use_relevance = order_by not in ('date', '-date')
-	
+
 	if not use_relevance:
 		qs = _build_base_qs(search_type, parsed_start, parsed_end, order_by)
 		try:
@@ -312,19 +314,19 @@ def perform_search(query_string, search_type='all', start_date=None, end_date=No
 		except Exception as e:
 			logger.error(f"时间排序搜索失败，降级到原始 QS: {e}")
 			return qs
-	
+
 	try:
 		es, index_name = _get_es_client_and_index()
 		if es is None:
 			raise RuntimeError("无法获取 ES 客户端")
-		
+
 		dsl_query, dsl_filter = _build_search_dsl(
 			clean_query, search_type, parsed_start, parsed_end
 		)
-		
+
 		Query.get(query_string).add_hit()
 		return ESLazyResults(es, index_name, dsl_query, dsl_filter)
-	
+
 	except Exception as e:
 		logger.error(f"ES 原生 DSL 检索失败，降级到 Wagtail 抽象层: {e}\n{traceback.format_exc()}")
 		qs = _build_base_qs(search_type, parsed_start, parsed_end, order_by)
@@ -350,13 +352,13 @@ def format_search_results_for_api(search_results):
 				'id': page.id,
 				'title': page.title,
 				'url': page.get_url(),
-				'search_description': getattr(page, 'search_description', '') or '',
+				'search_description': Truncator(strip_tags(str(getattr(page, 'search_description', '') or ''))).chars(190),
 				'content_type': page.content_type.model,
 				'last_published_at': page.last_published_at.strftime('%Y-%m-%d %H:%M')
 				if page.last_published_at else '',
 			}
 			if isinstance(specific_page, BlogPage):
-				data['intro'] = specific_page.intro or ''
+				data['intro'] = Truncator(strip_tags(str(specific_page.intro or ''))).chars(190)
 				data['date'] = specific_page.date.strftime('%Y-%m-%d') if specific_page.date else ''
 				if hasattr(specific_page, 'tags'):
 					data['tags'] = [tag.name for tag in specific_page.tags.all()]
@@ -374,14 +376,14 @@ def format_search_results_for_api(search_results):
 def get_search_suggestions(query_string, limit=5):
 	if not query_string or len(query_string) < 2:
 		return []
-	
+
 	try:
 		suggestions = Query.objects.filter(
 			query_string__icontains=query_string
 		).annotate(
 			total_hits_count=Count('daily_hits')
 		).order_by('-total_hits_count')[:limit]
-		
+
 		return [
 			{'query': item.query_string, 'hits': item.total_hits_count}
 			for item in suggestions

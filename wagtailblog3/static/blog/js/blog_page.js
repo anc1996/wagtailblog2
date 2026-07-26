@@ -531,3 +531,31 @@ $(function() {
     initZenMode();
     console.log("🎉 博客页面脚本加载完成");
 });
+// BlogPage 简介：仅在内容确实超过折叠高度时显示展开按钮。
+document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('[data-blog-intro]').forEach((intro) => {
+        const content = intro.querySelector('.blog-intro-content');
+        const toggle = intro.querySelector('.blog-intro-toggle');
+        if (!content || !toggle) return;
+
+        const label = toggle.querySelector('span');
+        const collapsedLines = Number.parseInt(
+            getComputedStyle(intro).getPropertyValue('--blog-intro-collapsed-lines'),
+            10
+        ) || 5;
+        const lineHeight = Number.parseFloat(getComputedStyle(content).lineHeight);
+        const collapsedHeight = lineHeight * collapsedLines;
+        const isLong = content.scrollHeight > collapsedHeight + 4;
+
+        if (!isLong) return;
+
+        intro.classList.add('is-collapsible');
+        toggle.hidden = false;
+
+        toggle.addEventListener('click', () => {
+            const expanded = intro.classList.toggle('is-expanded');
+            toggle.setAttribute('aria-expanded', String(expanded));
+            if (label) label.textContent = expanded ? '收起简介' : '展开简介';
+        });
+    });
+});

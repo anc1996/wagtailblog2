@@ -65,9 +65,6 @@
 * - 单项轮播 (`.single-item-carousel`): 初始化 Owl Carousel，配置为循环、自动播放、导航按钮等。
 * - 三项轮播 (`.three-item-carousel`): 初始化 Owl Carousel，配置为循环、边距、自动播放、导航按钮，并为不同屏幕尺寸设置不同的显示项数。
 *
-* 10. **图片灯箱 (Lightbox - FancyBox Plugin)**:
-* - 为类名为 `.lightbox-image` 的元素初始化 FancyBox，实现点击图片放大显示的效果，并配置了打开/关闭的淡入淡出效果。
-*
 * 11. **联系表单验证 (Contact Form Validation - jQuery Validate Plugin)**:
 * - 为 ID 为 `#contact-form` 的表单初始化 jQuery Validation 插件，定义了用户名 (username)、邮箱 (email) 和消息 (message) 字段的验证规则 (如必填、邮箱格式)。
 *
@@ -225,7 +222,6 @@
 	
 	//Mobile Nav Hide Show
 	if($('.mobile-menu').length){
-		//$('.mobile-menu .menu-box').mCustomScrollbar();
 		var mobileMenuContent = $('.main-header .nav-outer .main-menu').html();
 		$('.mobile-menu .menu-box .menu-outer').append(mobileMenuContent);
 		$('.sticky-header .main-menu').append(mobileMenuContent);
@@ -420,18 +416,6 @@
 				}
 			}
 		});    		
-	}
-	
-	
-	//LightBox / Fancybox
-	if($('.lightbox-image').length) {
-		$('.lightbox-image').fancybox({
-			openEffect  : 'fade',
-			closeEffect : 'fade',
-			helpers : {
-				media : {}
-			}
-		});
 	}
 	
 	

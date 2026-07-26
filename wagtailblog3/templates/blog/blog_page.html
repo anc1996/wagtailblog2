@@ -4,75 +4,25 @@
 
 {% block extra_css %}
     {{ block.super }}
-    <link rel="stylesheet" href="{% static 'blog/css/blog.css' %}">
+    <link rel="stylesheet" href="{% static 'blog/css/blog.css' %}?v=20260726-1">
     <link rel="stylesheet" href="{% static 'blog/css/blog-resize.css' %}">
-    <link rel="stylesheet" href="{% static 'blog/css/lightbox/lightbox.css' %}">
-    <link rel="stylesheet" href="{% static 'blog/css/jquery-ui/jquery-ui.css' %}">
+    {% if has_image or has_gallery %}<link rel="stylesheet" href="{% static 'blog/css/lightbox/lightbox.css' %}">{% endif %}
 
     <link rel="stylesheet" href="{% static 'blog/css/github-markdown.min.css' %}">
     <link rel="stylesheet" href="{% static 'blog/css/markdown-theme.css' %}">
 
-    <link rel="stylesheet" href="{% static 'blog/css/katex/katex.min.css' %}">
+    {% if has_katex %}<link rel="stylesheet" href="{% static 'blog/css/katex/katex.min.css' %}">{% endif %}
 
-    <link rel="stylesheet" href="{% static 'blog/js/highlightjs/styles/github-dark.min.css' %}">
-
-<style>
-        /* === 第一招：重塑 pre 容器为弹性盒子（兼容两种区块） === */
-        .blog-layout-container .markdown-body pre,
-        .blog-layout-container [data-block-type="code_block"] pre {
-            background-color: #0d1117 !important; /* Github Dark 极客黑 */
-            padding: 0 !important;
-            margin-bottom: 16px !important;
-            border: none !important;
-            border-radius: 8px !important;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1) !important;
-            display: flex !important; /* 开启弹性布局放置行号 */
-            flex-direction: row !important;
-            position: relative !important;
-            overflow: hidden !important;
-        }
-
-        /* === 第二招：前端原生行号列样式（防复制设计） === */
-        .hljs-line-numbers {
-            padding: 16px 12px 16px 16px !important;
-            color: #6e7681 !important;
-            background-color: #0d1117 !important;
-            border-right: 1px solid #30363d !important;
-            font-family: Consolas, "Courier New", monospace !important;
-            font-size: 14px !important;
-            line-height: 1.5 !important;
-            text-align: right !important;
-            user-select: none !important; /* 🌟 灵魂属性：彻底禁止用户鼠标选中行号！ */
-            white-space: pre !important;
-        }
-
-        /* === 第三招：代码区域独立滚动 === */
-        .blog-layout-container .markdown-body pre > code,
-        .blog-layout-container [data-block-type="code_block"] pre > code {
-            background-color: transparent !important;
-            padding: 16px !important;
-            margin: 0 !important;
-            border-radius: 0 !important;
-            font-family: Consolas, "Courier New", monospace !important;
-            font-size: 14px !important;
-            line-height: 1.5 !important;
-            text-shadow: none !important;
-            display: block !important;
-            flex-grow: 1 !important;
-            min-width: 0 !important;
-            overflow-x: auto !important; /* 代码过长仅右侧滚动，左侧行号钉死 */
-        }
-    </style>
-    <link rel="stylesheet" href="{% static 'blog/css/image_blocks.css' %}">
-    <link rel="stylesheet" href="{% static 'blog/css/video_blocks.css' %}">
-    <link rel="stylesheet" href="{% static 'blog/css/audio_blocks.css' %}">
-    <link rel="stylesheet" href="{% static 'blog/css/embed_blocks.css' %}">
-    <link rel="stylesheet" href="{% static 'blog/css/table_blocks.css' %}">
-    <link rel="stylesheet" href="{% static 'blog/css/mermaid_block.css' %}">
-    <link rel="stylesheet" href="{% static 'comments/css/comments.css' %}">
-
-    {# 禁用主题自带的 mCustomScrollbar #}
-    {% block custom_scrollbar_assets_js %}{% endblock custom_scrollbar_assets_js %}
+    {# 评论支持代码围栏，因此评论区存在时也按需启用公共代码高亮能力。 #}
+    {% include "includes/content/code_highlighting_css.html" %}
+    {% if has_image %}<link rel="stylesheet" href="{% static 'blog/css/image_blocks.css' %}">{% endif %}
+    {% if has_gallery %}<link rel="stylesheet" href="{% static 'blog/css/blog-gallery.css' %}?v=20260726-2">{% endif %}
+    {% if has_video %}<link rel="stylesheet" href="{% static 'blog/css/video_blocks.css' %}">{% endif %}
+    {% if has_audio %}<link rel="stylesheet" href="{% static 'blog/css/audio_blocks.css' %}">{% endif %}
+    {% if has_embed %}<link rel="stylesheet" href="{% static 'blog/css/embed_blocks.css' %}">{% endif %}
+    {% if has_table %}<link rel="stylesheet" href="{% static 'blog/css/table_blocks.css' %}">{% endif %}
+    {% if has_mermaid %}{% include "includes/content/mermaid_css.html" %}{% endif %}
+    <link rel="stylesheet" href="{% static 'comments/css/comments.css' %}?v=20260726-2">
 
 {% endblock %}
 
@@ -86,7 +36,19 @@
             <div class="blog-hero-content">
                 <h1 class="blog-title">{{ page.title }}</h1>
                 {% if page.intro %}
-                    <div class="blog-intro">{{ page.intro|richtext }}</div>
+                    <div class="blog-intro" data-blog-intro>
+                        <div class="blog-intro-content" id="blog-intro-content">
+                            {{ page.intro|richtext }}
+                        </div>
+                        <button class="blog-intro-toggle"
+                                type="button"
+                                aria-expanded="false"
+                                aria-controls="blog-intro-content"
+                                hidden>
+                            <span>展开简介</span>
+                            <i class="fa fa-angle-down" aria-hidden="true"></i>
+                        </button>
+                    </div>
                 {% endif %}
                 <div class="blog-meta">
                     {% if page.authors.all %}
@@ -266,20 +228,57 @@
             <i class="fa fa-angle-right"></i>
         </div>
 
-        {% if page.gallery_images.all %}
-            <div class="blog-gallery">
-                <h4><i class="fa fa-images"></i> 图片画廊</h4>
-                <div class="gallery-grid">
-                    {% for gallery_image in page.gallery_images.all %}
-                        <div class="gallery-item">
-                            <a href="{% image_url gallery_image.image 'original' %}" data-lightbox="gallery" data-title="{{ gallery_image.caption }}">
-                                {% image gallery_image.image width-400 %}
-                            </a>
+        {% with gallery_images=page.gallery_images.all %}
+            {% if gallery_images %}
+                <section class="blog-gallery"
+                         data-gallery-batch-size="8"
+                         data-gallery-total="{{ gallery_images|length }}"
+                         aria-labelledby="blog-gallery-title">
+                    <div class="blog-gallery-header">
+                        <div>
+                            <span class="blog-gallery-kicker">IMAGE GALLERY</span>
+                            <h2 id="blog-gallery-title"><i class="fa fa-images" aria-hidden="true"></i> 图片画廊</h2>
                         </div>
-                    {% endfor %}
-                </div>
-            </div>
-        {% endif %}
+                        <span class="blog-gallery-count">{{ gallery_images|length }} 张图片</span>
+                    </div>
+                    <div class="gallery-grid">
+                        {% for gallery_image in gallery_images %}
+                            {% image gallery_image.image fill-640x400 format-webp as gallery_thumb %}
+                            <figure class="gallery-item" data-gallery-index="{{ forloop.counter0 }}">
+                                <a class="gallery-link"
+                                   href="{% image_url gallery_image.image 'original' %}"
+                                   data-lightbox="blog-page-gallery"
+                                   data-title="{% if gallery_image.caption %}{{ gallery_image.caption }}{% else %}{{ gallery_image.image.title }}{% endif %}"
+                                   aria-label="查看大图：{% if gallery_image.caption %}{{ gallery_image.caption }}{% else %}{{ gallery_image.image.title }}{% endif %}">
+                                    <img src="{{ gallery_thumb.url }}"
+                                         alt="{% if gallery_image.caption %}{{ gallery_image.caption }}{% else %}{{ gallery_image.image.title }}{% endif %}"
+                                         width="{{ gallery_thumb.width }}"
+                                         height="{{ gallery_thumb.height }}"
+                                         loading="lazy"
+                                         decoding="async">
+                                    <span class="gallery-zoom" aria-hidden="true"><i class="fa fa-search-plus"></i></span>
+                                    <span class="gallery-number" aria-hidden="true">{{ forloop.counter|stringformat:"02d" }}</span>
+                                </a>
+                                {% if gallery_image.caption %}
+                                    <figcaption>{{ gallery_image.caption }}</figcaption>
+                                {% endif %}
+                            </figure>
+                        {% endfor %}
+                    </div>
+                    {% if gallery_images|length > 8 %}
+                        <div class="blog-gallery-controls">
+                            <button class="blog-gallery-toggle"
+                                    type="button"
+                                    aria-expanded="false">
+                                <span class="blog-gallery-toggle-label">查看更多图片</span>
+                                <i class="fa fa-angle-down" aria-hidden="true"></i>
+                            </button>
+                            <span class="blog-gallery-status" aria-live="polite"></span>
+                        </div>
+                    {% endif %}
+                </section>
+            {% endif %}
+        {% endwith %}
 
         {% if page.pk %}
         <div class="blog-comments-section">
@@ -302,22 +301,22 @@
 {% block extra_js %}
     {{ block.super }}
     <!-- 使用 ES6 模块 -->
-    <script type="module" src="{% static 'comments/js/comments.js' %}"></script>
+    <script type="module" src="{% static 'comments/js/comments.js' %}?v=20260726-2"></script>
 
-    <script src="{% static 'blog/js/blog_page.js' %}" async></script>
+    <script src="{% static 'blog/js/blog_page.js' %}?v=20260726-1" defer></script>
 
     <!-- 🆕 添加拖动布局JS -->
     <script src="{% static 'blog/js/resize-manager.js' %}"></script>
 
-    <script src="{% static 'blog/css/katex/katex.js' %}" async></script>
-    <script src="{% static 'blog/js/katex/auto-render.min.js' %}" async></script>
-    <script src="{% static 'blog/js/lightbox/lightbox.js' %}" async></script>
-    <script src="{% static 'blog/js/jquery-ui/jquery-ui.js' %}" async></script>
-    <script src="{% static 'blog/js/image_blocks.js' %}" async></script>
-    <script src="{% static 'blog/js/video_blocks.js' %}" async></script>
-    <script src="{% static 'blog/js/editor-enhancements.js' %}" async></script>
-    <script src="{% static 'blog/js/mermaid_block.js' %}" async></script>
+    {% if has_katex %}
+    <script src="{% static 'blog/css/katex/katex.js' %}" defer></script>
+    <script src="{% static 'blog/js/katex/auto-render.min.js' %}" defer></script>
+    {% endif %}
+    {% if has_image or has_gallery %}<script src="{% static 'blog/js/lightbox/lightbox.js' %}" defer></script>{% endif %}
+    {% if has_gallery %}<script src="{% static 'blog/js/blog-gallery.js' %}?v=20260726-1" defer></script>{% endif %}
+    {% if has_image %}<script src="{% static 'blog/js/image_blocks.js' %}" defer></script>{% endif %}
+    {% if has_video %}<script src="{% static 'blog/js/video_blocks.js' %}" defer></script>{% endif %}
+    {% if has_mermaid %}{% include "includes/content/mermaid_js.html" %}{% endif %}
 
-    <script src="{% static 'blog/js/highlightjs/highlight.min.js' %}"></script>
-    <script src="{% static 'blog/js/highlighting.js' %}?v=4.1" defer></script>
+    {% include "includes/content/code_highlighting_js.html" %}
 {% endblock %}

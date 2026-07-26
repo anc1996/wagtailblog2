@@ -6,6 +6,10 @@
 {% block title %}{% translate "Authors List" %}{% endblock %}
 
 
+{% block extra_css %}
+    <link rel="stylesheet" href="{% static 'archive/css/archive.css' %}">
+{% endblock %}
+
 {% block content %}
 <div class="sidebar-page-container">
     <div class="auto-container">
@@ -68,7 +72,7 @@
                                                 <img src="{{ author_img.url }}" alt="{{ author.name }}" style="border-radius: 50%;">
                                             {% else %}
                                                 {# 提供一个备用的占位图 #}
-                                                <img src="{% static 'gretzia/images/resource/author-thumb-1.jpg' %}" alt="{{ author.name }}" style="border-radius: 50%;">
+                                                <img src="{% static 'gretzia/images/resource/author-1.jpg' %}" alt="{{ author.name }}" style="border-radius: 50%;">
                                             {% endif %}
                                         </a>
                                     </div>
@@ -134,4 +138,5 @@
 
 {% block extra_js %}
     {{ block.super }}
+    <script src="{% static 'archive/js/archive.js' %}"></script>
 {% endblock %}

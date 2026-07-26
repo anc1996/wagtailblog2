@@ -27,12 +27,6 @@ font-family: 'Playfair Display', serif;
 font-family: 'Lora', serif;
 font-family: 'Montserrat', sans-serif;*/
 
-@import url('font-awesome.css');
-@import url('animate.css');
-@import url('owl.css');
-@import url('jquery.fancybox.css');
-@import url('hover.css');
-@import url('jquery.mCustomScrollbar.min.css');
 
 /*** 
 
@@ -1020,75 +1014,6 @@ img{
 	width:30px;
 	height:1px;
 	background-color:#eaeaea;
-}
-
-/*** 
-
-====================================================================
-	Fancy Box
-====================================================================
-
-***/
-
-.fancybox-next span,
-.fancybox-prev span{
-	background-image:none !important;
-	width:44px !important;
-	height:44px !important;
-	line-height:44px !important;
-	text-align:center;
-}
-
-.fancybox-next span:before,
-.fancybox-prev span:before{
-	content:'';
-	position:absolute;
-	font-family: 'FontAwesome';
-	left:0px;
-	top:0px;
-	font-size:12px;
-	width:44px !important;
-	height:44px !important;
-	line-height:44px !important;
-	background-color:rgba(28,28,28,0.40) !important;
-	color:#ffffff;
-	visibility:visible;
-	transition: all 300ms ease;
-	-webkit-transition: all 300ms ease;
-	-ms-transition: all 300ms ease;
-	-o-transition: all 300ms ease;
-	-moz-transition: all 300ms ease;
-}
-
-.fancybox-next span:before{
-	content:'\f178';
-}
-
-.fancybox-prev span:before{
-	content:'\f177';
-}
-
-.fancybox-next:hover span:before,
-.fancybox-prev:hover span:before{
-	background-color:#ffffff !important;
-	color:#000000;	
-}
-
-.fancybox-type-image .fancybox-close{
-	right:0px;
-	top:0px;
-	width:45px;
-	height:45px;
-	background:url(../images/icons/icon-cross.png) center center no-repeat;
-	background-color:rgba(17,17,17,0.50) !important;	
-}
-
-.fancybox-type-image .fancybox-close:hover{
-	background-color:#ba6d3c !important;	
-}
-
-.fancybox-type-image .fancybox-skin{
-	padding:0px !important;	
 }
 
 .main-header .links-nav li.language{
@@ -3389,8 +3314,4 @@ img{
 .main-header #navbarSupportedContent{
 	display:block;
 	padding:0px 0px;
-}
-
-.main-header .mCSB_inside > .mCSB_container{
-	margin-right:0px;
 }

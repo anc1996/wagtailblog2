@@ -5,7 +5,14 @@
 
 {% block extra_css %}
     {{ block.super }}
-    <link rel="stylesheet" href="{% static 'blog/css/blog.css' %}">
+    <link href="{% static 'gretzia/css/animate.css' %}" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'archive/css/archive.css' %}">
+    <link rel="stylesheet" href="{% static 'blog/css/blog.css' %}?v=20260726-1">
+    <link rel="stylesheet" href="{% static 'blog/css/blog-index.css' %}?v=20260726-3">
+{% endblock %}
+
+{% block page_vendor_js %}
+    <script src="{% static 'gretzia/js/wow.js' %}"></script>
 {% endblock %}
 
 {% block content %}
@@ -137,25 +144,28 @@
                                                 <i class="fa fa-calendar me-1"></i>{{ post.specific.date | date:"Y-m-d" }}
                                             </span>
 
-                                            {# 标签列表 —— 仅 BlogPage 才有 tags #}
-                                            {% with specific=post.specific %}
-                                            {% if specific.tags %}   {# BlogIndexPage 无此字段，自然跳过 #}
-                                                <span class="tags me-2">
-                                                    <i class="fa fa-tags me-1"></i>
-                                                    {% for tag in specific.tags.all %}
-                                                        {% if blog_tag_index_page %}
-                                                            <a href="{% pageurl blog_tag_index_page %}?tag={{ tag.slug }}"
-                                                               style="color: inherit;">{{ tag.name }}</a>{% if not forloop.last %}, {% endif %}
-                                                        {% else %}
-                                                            <span>{{ tag.name }}</span>{% if not forloop.last %}, {% endif %}
-                                                        {% endif %}
-                                                    {% endfor %}
-                                                </span>
-                                            {% endif %}
-                                            {% endwith %}
-
                                             {# 访问统计 #}
                                             {% include "blog/stats_block.html" with page=post %}
+
+                                            {# 标签单独占一行，数量多时自然换行 #}
+                                            {% with specific=post.specific %}
+                                            {% with tags=specific.tags.all %}
+                                            {% if tags %}
+                                                <div class="post-tags-row" aria-label="文章标签">
+                                                    <i class="fa fa-tags post-tags-icon" aria-hidden="true"></i>
+                                                    <div class="post-tags-list">
+                                                        {% for tag in tags %}
+                                                            {% if blog_tag_index_page %}
+                                                                <a class="post-tag" href="{% pageurl blog_tag_index_page %}?tag={{ tag.slug }}">{{ tag.name }}</a>
+                                                            {% else %}
+                                                                <span class="post-tag">{{ tag.name }}</span>
+                                                            {% endif %}
+                                                        {% endfor %}
+                                                    </div>
+                                                </div>
+                                            {% endif %}
+                                            {% endwith %}
+                                            {% endwith %}
                                         </div>
 
                                         {# 文章简介 (已修改截断方式) #}
@@ -252,5 +262,6 @@
 
 {% block extra_js %}
     {{ block.super }}
+    <script src="{% static 'archive/js/archive.js' %}"></script>
     <script src="{% static 'blog/js/blog_index_page.js' %}"></script>
 {% endblock %}

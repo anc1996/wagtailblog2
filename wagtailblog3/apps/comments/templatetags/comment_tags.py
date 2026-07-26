@@ -1,10 +1,11 @@
 # wagtailblog3/apps/comments/templatetags/comment_tags.py
 from django import template
 from django.utils.safestring import mark_safe
+from django.utils.html import conditional_escape
 from comments.models import BlogPageComment, CommentReaction
 from django.core.paginator import Paginator
 
-from wagtailmarkdown.utils import render_markdown as wagtail_render_markdown
+from comments.markdown import render_comment_markdown
 
 register = template.Library()
 
@@ -13,18 +14,18 @@ register = template.Library()
 def render_comments(context, page):
 	"""渲染评论区块 - 修复版本"""
 	request = context['request']
-	
+
 	# 获取一级评论（按热门排序）
 	comments = BlogPageComment.objects.filter(
 		page=page,
 		parent__isnull=True,
 		status='approved'
 	).select_related('author_user').order_by('-like_count', '-created_at')
-	
+
 	# 分页
 	paginator = Paginator(comments, 20)  # 每页20条
 	comments_page = paginator.get_page(1)  # 默认第一页
-	
+
 	# 获取用户反应状态
 	user_reactions = {}
 	if request.user.is_authenticated:
@@ -33,13 +34,13 @@ def render_comments(context, page):
 			user=request.user
 		)
 		user_reactions = {r.comment_id: r.reaction_type for r in reactions}
-	
+
 	# 评论总数
 	comment_count = BlogPageComment.objects.filter(
 		page=page,
 		status='approved'
 	).count()
-	
+
 	return {
 		'page': page,
 		'comments': comments_page,
@@ -55,14 +56,14 @@ def render_comments(context, page):
 
 @register.filter(name='render_markdown')
 def render_markdown(value):
-	"""
-	将 Markdown 文本渲染为安全的 HTML，使用 wagtailmarkdown 的渲染器。
-	"""
-	if not value:
-		return ""
-	# 调用 wagtailmarkdown 提供的渲染函数
-	html = wagtail_render_markdown(value)
-	return mark_safe(html)
+	"""Render the restricted, sanitized Markdown dialect used by comments."""
+	return mark_safe(render_comment_markdown(value))
+
+
+@register.filter(name='escape_attr')
+def escape_attr(value):
+	"""Escape raw Markdown before placing it in a data attribute."""
+	return conditional_escape(value or "")
 
 
 @register.filter(name='get_item')

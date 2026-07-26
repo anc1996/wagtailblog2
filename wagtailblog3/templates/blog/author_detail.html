@@ -5,6 +5,14 @@
 
 {% block title %}{{ author.name }} - 作者详情{% endblock %}
 
+{% block extra_css %}
+    <link rel="stylesheet" href="{% static 'archive/css/archive.css' %}">
+{% endblock %}
+
+{% block extra_js %}
+    <script src="{% static 'archive/js/archive.js' %}"></script>
+{% endblock %}
+
 {% block content %}
 <div class="sidebar-page-container">
     <div class="auto-container">

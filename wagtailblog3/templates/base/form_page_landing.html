@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load wagtailcore_tags wagtailimages_tags static %}
+{% load wagtailcore_tags wagtailimages_tags %}
 
 {% block body_class %}template-formpage thank-you-page{% endblock %}
 
@@ -19,10 +19,6 @@
                     {% if page.feature_image %}
                         <div class="image">
                             {% image page.feature_image fill-600x400 alt=page.title %}
-                        </div>
-                    {% else %}
-                        <div class="image">
-                            <img src="{% static 'gretzia/images/resource/thank-you.jpg' %}" alt="{{ page.title }}" />
                         </div>
                     {% endif %}
                 </div>
@@ -151,7 +147,10 @@
     </div>
 </div>
 
-<!-- 页面加载动画 -->
+{% endblock content %}
+
+{% block extra_js %}
+{{ block.super }}
 <script>
 $(document).ready(function() {
     // 感谢页面淡入效果
@@ -239,5 +238,4 @@ $(document).ready(function() {
     $('<style>').text(styleContent).appendTo('head');
 });
 </script>
-
-{% endblock content %}
+{% endblock extra_js %}

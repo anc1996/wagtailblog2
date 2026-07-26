@@ -817,19 +817,78 @@ class BlogPage(Page):
 			logger.error(traceback.format_exc())
 			return body_data
 	
+	@staticmethod
+	def _strip_markdown_code(text):
+		"""Remove fenced and inline code before looking for maths markup."""
+		text = str(text or "")
+		text = re.sub(r"(?ms)^[ \t]*(`{3,}|~{3,}).*?^\s*\1\s*$", "", text)
+		return re.sub(r"`+[^`\n]*`+", "", text)
+
+	@classmethod
+	def _contains_math_markup(cls, text):
+		text = cls._strip_markdown_code(text)
+		if re.search(r"\$\$[\s\S]+?\$\$|\\\([\s\S]+?\\\)|\\\[[\s\S]+?\\\]", text):
+			return True
+		for match in re.finditer(r"(?<!\\)\$([^$\n]+?)(?<!\\)\$", text):
+			formula = match.group(1).strip()
+			if re.search(r"\\[A-Za-z]+|[=+*/^_<>]|\d\s*[-+]\s*\d", formula):
+				return True
+		return False
+
+	@classmethod
+	def get_frontend_resource_features(cls, body_data, has_gallery=False):
+		"""Derive article asset needs from the already-fetched MongoDB body."""
+		features = {
+			'has_code': False, 'has_katex': False, 'has_mermaid': False,
+			'has_image': False, 'has_gallery': bool(has_gallery),
+			'has_video': False, 'has_audio': False, 'has_table': False,
+			'has_embed': False, 'has_document': False,
+		}
+		type_flags = {
+			'mermaid_chart': 'has_mermaid', 'image_block': 'has_image',
+			'video_block': 'has_video', 'audio_block': 'has_audio',
+			'table_block': 'has_table', 'embed_block': 'has_embed',
+			'document_block': 'has_document',
+		}
+		for block in body_data if isinstance(body_data, list) else []:
+			if not isinstance(block, dict):
+				continue
+			block_type = block.get('type')
+			value = block.get('value', '')
+			flag = type_flags.get(block_type)
+			if flag:
+				features[flag] = True
+			if block_type == 'code_block':
+				features['has_code'] = True
+			elif block_type in {'rich_text', 'raw_html'}:
+				plain = str(value or '')
+				features['has_code'] |= bool(re.search(r'<(?:pre|code)\b', plain, re.I))
+				features['has_katex'] |= cls._contains_math_markup(strip_tags(plain))
+			elif block_type == 'markdown_block':
+				plain = str(value or '')
+				features['has_code'] |= bool(re.search(r'(?m)^[ \t]*(`{3,}|~{3,})', plain) or re.search(r'(?m)^(?: {4}|\t)\S', plain))
+				features['has_katex'] |= cls._contains_math_markup(plain)
+		return features
+
 	def get_context(self, request, *args, **kwargs):
 		context = super().get_context(request, *args, **kwargs)
 		# 注入标签索引页，供模板生成标签跳转链接
 		context['blog_tag_index_page'] = BlogTagIndexPage.objects.live().first()
+		context.update(getattr(self, '_frontend_resource_features', {}))
 		return context
-	
+
 	def serve(self, request):
 		# ✅ 记录访问，一行搞定
 		if self.pk:
 			PageViewCounter(self.pk).record(request)
 		
-		# 1. 从MongoDB获取最原始、最纯净的内容
+		# 1. 从MongoDB获取正文，并复用这次读取计算前端资源需求。
 		mongo_content = self.get_content_from_mongodb()
+		body_data = mongo_content.get('body', []) if mongo_content else []
+		self._frontend_resource_features = self.get_frontend_resource_features(
+			body_data,
+			has_gallery=self.gallery_images.exists(),
+		)
 		
 		if mongo_content and 'body' in mongo_content:
 			

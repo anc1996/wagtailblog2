@@ -1,180 +1,210 @@
 {% extends "base.html" %}
 {% load wagtailcore_tags wagtailimages_tags search_tags static %}
 
-{% block body_class %}search-results{% endblock %}
+{% block body_class %}search-results-page{% endblock %}
 
 {% block extra_css %}
     {{ block.super }}
     <link href="{% static 'css/flatpickr.min.css' %}" rel="stylesheet">
-    <link rel="stylesheet" href="{% static 'search/css/search.css' %}">
+    <link rel="stylesheet" href="{% static 'search/css/search.css' %}?v=20260726-1">
 {% endblock %}
 
 {% block content %}
-<div class="search-container">
-    <header class="search-header">
-        <h1>搜索</h1>
-    </header>
+<main class="search-page-shell">
+    <div class="auto-container search-container">
+        <header class="search-header">
+            <div class="search-eyebrow"><i class="fa fa-search" aria-hidden="true"></i> 全站内容检索</div>
+            <h1>搜索</h1>
+            <p>搜索博客文章和站内页面，并通过类型、日期和排序快速缩小范围。</p>
+        </header>
 
-    <form action="{% url 'search:search' %}" method="get" class="search-form" id="search-form">
-        <div class="search-input-wrapper">
-            <input type="text"
-                   name="query"
-                   value="{% if search_query and search_query != 'None' %}{{ search_query }}{% endif %}"
-                   placeholder="搜索文章、页面..."
-                   class="search-input"
-                   id="search-input"
-                   autocomplete="off" />
-            <div class="suggestions" id="suggestions"></div>
-        </div>
-        <button type="submit" class="search-button">搜索</button>
-
-        <div class="search-advanced-options">
-            <div class="search-filters">
-                <button type="button" class="filter-button {% if search_type == 'all' %}active{% endif %}"
-                        data-type="all">全部</button>
-                <button type="button" class="filter-button {% if search_type == 'blog' %}active{% endif %}"
-                        data-type="blog">博客文章</button>
-                <button type="button" class="filter-button {% if search_type == 'pages' %}active{% endif %}"
-                        data-type="pages">其他页面--标题</button>
-                <input type="hidden" name="type" id="search-type-input" value="{{ search_type|default:'all' }}">
-            </div>
-
-            <div class="date-range-filter">
-                <span class="filter-label">发布时间:</span>
-                <input type="text"
-                       name="start_date"
-                       value="{% if start_date and start_date != 'None' %}{{ start_date }}{% endif %}"
-                       class="date-input flatpickr-input"
-                       id="start-date"
-                       placeholder="开始日期" />
-                <span class="date-separator">至</span>
-                <input type="text"
-                       name="end_date"
-                       value="{% if end_date and end_date != 'None' %}{{ end_date }}{% endif %}"
-                       class="date-input flatpickr-input"
-                       id="end-date"
-                       placeholder="结束日期" />
-            </div>
-
-            <div class="sort-options">
-                <span class="filter-label">排序:</span>
-                <select name="order_by" class="sort-select" id="order-by">
-                    <option value="" {% if not order_by or order_by == 'None' %}selected{% endif %}>相关性</option>
-                    <option value="-date" {% if order_by == '-date' %}selected{% endif %}>最新发布</option>
-                    <option value="date" {% if order_by == 'date' %}selected{% endif %}>最早发布</option>
-                </select>
-            </div>
-
-            <button type="button" id="clear-filters" class="clear-filters-button">清除筛选</button>
-        </div>
-    </form>
-
-    {% if popular_search_terms %}
-    <div class="popular-searches-container">
-        <span class="popular-searches-label">热门搜索：</span>
-        <ul class="popular-search-tags">
-            {% for term_item in popular_search_terms %}
-                <li>
-                    <a href="{% url 'search:search' %}?query={{ term_item.query|urlencode }}&type={{ search_type|default:'all' }}" class="popular-tag">
-                        {{ term_item.query }}
-                    </a>
-                </li>
-            {% endfor %}
-        </ul>
-    </div>
-    {% endif %}
-
-    {% if search_query and search_query != 'None' %}
-        <div class="search-results-info">
-            {% if search_results.paginator.count > 0 %}
-                找到 {{ search_results.paginator.count }} 条关于 "<strong>{{ search_query }}</strong>" 的结果
-                {% if start_date and start_date != 'None' or end_date and end_date != 'None' %}
-                <span class="date-filter-info">
-                    {% if start_date and start_date != 'None' %}从 {{ start_date }}{% endif %}
-                    {% if end_date and end_date != 'None' %}到 {{ end_date }}{% endif %}
-                </span>
-                {% endif %}
-            {% else %}
-                未找到关于 "<strong>{{ search_query }}</strong>" 的结果
-            {% endif %}
-        </div>
-    {% endif %}
-
-    <div class="results-list">
-        {% for result in search_results %}
-            <article class="search-result">
-                <h2 class="result-title">
-                    <a href="{% pageurl result %}">{{ result.title|safe }}</a>
-                </h2>
-
-                <div class="result-meta">
-                    <span class="result-type">{{ result|verbose_name }}</span>
-                    {% if result.specific.date %}
-                        <span class="result-date">{{ result.specific.date|date:"Y年m月d日" }}</span>
-                    {% endif %}
+        <form action="{% url 'search:search' %}" method="get" class="search-form" id="search-form">
+            <div class="search-main-row">
+                <div class="search-input-wrapper">
+                    <i class="fa fa-search search-input-icon" aria-hidden="true"></i>
+                    <input type="text" name="query"
+                           value="{% if search_query and search_query != 'None' %}{{ search_query }}{% endif %}"
+                           placeholder="输入文章标题、主题或关键词"
+                           class="search-input" id="search-input" autocomplete="off" />
+                    <div class="suggestions" id="suggestions"></div>
                 </div>
+                <button type="submit" class="search-button"><i class="fa fa-search" aria-hidden="true"></i> 搜索</button>
+            </div>
 
-                {% if result.specific.intro %}
-                    <div class="result-intro">
-                        {{ result.specific.intro|truncatewords:30 }}
+            <div class="search-advanced-options">
+                <fieldset class="search-filter-group search-type-group">
+                    <legend>内容类型</legend>
+                    <div class="search-filters">
+                        <button type="button" class="filter-button {% if search_type == 'all' %}active{% endif %}" data-type="all">
+                            <i class="fa fa-th-large" aria-hidden="true"></i> 全部
+                        </button>
+                        <button type="button" class="filter-button {% if search_type == 'blog' %}active{% endif %}" data-type="blog">
+                            <i class="fa fa-file-text-o" aria-hidden="true"></i> 博客文章
+                        </button>
+                        <button type="button" class="filter-button {% if search_type == 'pages' %}active{% endif %}" data-type="pages">
+                            <i class="fa fa-files-o" aria-hidden="true"></i> 其他页面
+                        </button>
+                        <input type="hidden" name="type" id="search-type-input" value="{{ search_type|default:'all' }}">
+                    </div>
+                </fieldset>
+
+                <fieldset class="search-filter-group search-date-group">
+                    <legend>发布时间</legend>
+                    <div class="date-range-filter">
+                        <div class="search-control-with-icon">
+                            <i class="fa fa-calendar" aria-hidden="true"></i>
+                            <input type="text" name="start_date"
+                                   value="{% if start_date and start_date != 'None' %}{{ start_date }}{% endif %}"
+                                   class="date-input flatpickr-input" id="start-date" placeholder="开始日期" />
+                        </div>
+                        <span class="date-separator">至</span>
+                        <div class="search-control-with-icon">
+                            <i class="fa fa-calendar" aria-hidden="true"></i>
+                            <input type="text" name="end_date"
+                                   value="{% if end_date and end_date != 'None' %}{{ end_date }}{% endif %}"
+                                   class="date-input flatpickr-input" id="end-date" placeholder="结束日期" />
+                        </div>
+                    </div>
+                </fieldset>
+
+                <fieldset class="search-filter-group search-sort-group">
+                    <legend>结果排序</legend>
+                    <div class="search-control-with-icon sort-options">
+                        <i class="fa fa-sort-amount-desc" aria-hidden="true"></i>
+                        <select name="order_by" class="sort-select" id="order-by">
+                            <option value="" {% if not order_by or order_by == 'None' %}selected{% endif %}>按相关性</option>
+                            <option value="-date" {% if order_by == '-date' %}selected{% endif %}>最新发布</option>
+                            <option value="date" {% if order_by == 'date' %}selected{% endif %}>最早发布</option>
+                        </select>
+                    </div>
+                </fieldset>
+
+                <button type="button" id="clear-filters" class="clear-filters-button">
+                    <i class="fa fa-refresh" aria-hidden="true"></i> 重置条件
+                </button>
+            </div>
+        </form>
+
+        {% if popular_search_terms %}
+            <section class="popular-searches-container" aria-label="热门搜索">
+                <span class="popular-searches-label"><i class="fa fa-fire" aria-hidden="true"></i> 热门搜索</span>
+                <ul class="popular-search-tags">
+                    {% for term_item in popular_search_terms %}
+                        <li><a href="{% url 'search:search' %}?query={{ term_item.query|urlencode }}&type={{ search_type|default:'all' }}" class="popular-tag">{{ term_item.query }}</a></li>
+                    {% endfor %}
+                </ul>
+            </section>
+        {% endif %}
+
+        {% if search_query and search_query != 'None' %}
+            <div class="search-results-info" role="status">
+                <i class="fa {% if search_results.paginator.count > 0 %}fa-check-circle{% else %}fa-info-circle{% endif %}" aria-hidden="true"></i>
+                <span>
+                    {% if search_results.paginator.count > 0 %}
+                        找到 <strong>{{ search_results.paginator.count }}</strong> 条关于“<strong>{{ search_query }}</strong>”的结果
+                        {% if start_date and start_date != 'None' or end_date and end_date != 'None' %}
+                            <span class="date-filter-info">
+                                {% if start_date and start_date != 'None' %}从 {{ start_date }}{% endif %}
+                                {% if end_date and end_date != 'None' %}至 {{ end_date }}{% endif %}
+                            </span>
+                        {% endif %}
+                    {% else %}
+                        未找到关于“<strong>{{ search_query }}</strong>”的结果
+                    {% endif %}
+                </span>
+            </div>
+        {% endif %}
+
+        <section class="results-list" aria-label="搜索结果">
+            {% for result in search_results %}
+                <article class="search-result">
+                    {% if result.specific.featured_image %}
+                        <a href="{% pageurl result %}" class="result-image" tabindex="-1" aria-hidden="true">
+                            {% image result.specific.featured_image fill-320x200 format-webp as result_image %}
+                            <img src="{{ result_image.url }}" alt="" loading="lazy">
+                        </a>
+                    {% endif %}
+
+                    <div class="result-content{% if not result.specific.featured_image %} result-content-full{% endif %}">
+                        <div class="result-meta">
+                            <span class="result-type"><i class="fa fa-file-o" aria-hidden="true"></i>{{ result|verbose_name }}</span>
+                            {% if result.specific.date %}
+                                <span class="result-date"><i class="fa fa-calendar" aria-hidden="true"></i>{{ result.specific.date|date:"Y年m月d日" }}</span>
+                            {% elif result.last_published_at %}
+                                <span class="result-date"><i class="fa fa-calendar" aria-hidden="true"></i>{{ result.last_published_at|date:"Y年m月d日" }}</span>
+                            {% endif %}
+                        </div>
+
+                        <h2 class="result-title"><a href="{% pageurl result %}">{{ result.title }}</a></h2>
+
+                        {% if result.specific.intro %}
+                            <p class="result-intro">{{ result.specific.intro|striptags|truncatechars:190 }}</p>
+                        {% elif result.search_description %}
+                            <p class="result-intro">{{ result.search_description|striptags|truncatechars:190 }}</p>
+                        {% endif %}
+
+                        <a href="{% pageurl result %}" class="view-result">查看详情 <i class="fa fa-angle-right" aria-hidden="true"></i></a>
+                    </div>
+                </article>
+            {% empty %}
+                {% if search_query and search_query != 'None' %}
+                    <div class="no-results">
+                        <i class="fa fa-search-minus" aria-hidden="true"></i>
+                        <h2>没有找到相关内容</h2>
+                        <p>可以尝试以下方法：</p>
+                        <ul>
+                            <li>检查关键词是否有错别字</li>
+                            <li>减少关键词数量或使用更短的词组</li>
+                            <li>改用含义相近的关键词</li>
+                            {% if start_date and start_date != 'None' or end_date and end_date != 'None' %}<li>放宽发布时间范围</li>{% endif %}
+                            {% if search_type != 'all' %}<li>将内容类型切换为“全部”</li>{% endif %}
+                        </ul>
+                    </div>
+                {% else %}
+                    <div class="search-welcome-state">
+                        <i class="fa fa-compass" aria-hidden="true"></i>
+                        <h2>输入关键词开始搜索</h2>
+                        <p>支持搜索文章标题、简介和站内页面内容。</p>
                     </div>
                 {% endif %}
+            {% endfor %}
+        </section>
 
-                <a href="{% pageurl result %}" class="view-result">查看详情 →</a>
-            </article>
-        {% empty %}
-            {% if search_query and search_query != 'None' %}
-                <div class="no-results">
-                    <p>没有找到相关内容</p>
-                    <p>建议：</p>
-                    <ul>
-                        <li>检查拼写是否正确</li>
-                        <li>尝试使用不同的关键词</li>
-                        <li>使用更通用的搜索词</li>
-                        {% if start_date and start_date != 'None' or end_date and end_date != 'None' %}
-                        <li>尝试放宽时间范围限制</li>
-                        {% endif %}
-                    </ul>
-                </div>
-            {% endif %}
-        {% endfor %}
+        {% if search_results.has_other_pages %}
+            <nav class="search-pagination" aria-label="搜索结果分页">
+                {% if search_results.has_previous %}
+                    <a href="?{% if search_query and search_query != 'None' %}query={{ search_query|urlencode }}&{% endif %}type={{ search_type }}&page={{ search_results.previous_page_number }}{% if start_date and start_date != 'None' %}&start_date={{ start_date }}{% endif %}{% if end_date and end_date != 'None' %}&end_date={{ end_date }}{% endif %}{% if order_by and order_by != 'None' %}&order_by={{ order_by }}{% endif %}" class="pagination-button">
+                        <i class="fa fa-angle-left" aria-hidden="true"></i> 上一页
+                    </a>
+                {% else %}
+                    <span class="pagination-button disabled"><i class="fa fa-angle-left" aria-hidden="true"></i> 上一页</span>
+                {% endif %}
+
+                <span class="pagination-info">第 <strong>{{ search_results.number }}</strong> / {{ search_results.paginator.num_pages }} 页</span>
+
+                <form method="get" action="{% url 'search:search' %}" class="jump-to-page-form" id="jump-to-page-form-nav">
+                    {% if search_query and search_query != 'None' %}<input type="hidden" name="query" value="{{ search_query }}">{% endif %}
+                    <input type="hidden" name="type" value="{{ search_type }}">
+                    {% if start_date and start_date != 'None' %}<input type="hidden" name="start_date" value="{{ start_date }}">{% endif %}
+                    {% if end_date and end_date != 'None' %}<input type="hidden" name="end_date" value="{{ end_date }}">{% endif %}
+                    {% if order_by and order_by != 'None' %}<input type="hidden" name="order_by" value="{{ order_by }}">{% endif %}
+                    <label for="search-jump-page">跳转</label>
+                    <input id="search-jump-page" type="number" name="page" min="1" max="{{ search_results.paginator.num_pages }}"
+                           value="{{ search_results.number }}" aria-label="跳转到页码" class="jump-page-input" required>
+                    <button type="submit" class="jump-page-button">确定</button>
+                </form>
+
+                {% if search_results.has_next %}
+                    <a href="?{% if search_query and search_query != 'None' %}query={{ search_query|urlencode }}&{% endif %}type={{ search_type }}&page={{ search_results.next_page_number }}{% if start_date and start_date != 'None' %}&start_date={{ start_date }}{% endif %}{% if end_date and end_date != 'None' %}&end_date={{ end_date }}{% endif %}{% if order_by and order_by != 'None' %}&order_by={{ order_by }}{% endif %}" class="pagination-button">
+                        下一页 <i class="fa fa-angle-right" aria-hidden="true"></i>
+                    </a>
+                {% else %}
+                    <span class="pagination-button disabled">下一页 <i class="fa fa-angle-right" aria-hidden="true"></i></span>
+                {% endif %}
+            </nav>
+        {% endif %}
     </div>
-
-    {% if search_results.has_other_pages %}
-        <nav class="pagination">
-            {% if search_results.has_previous %}
-                <a href="?{% if search_query and search_query != 'None' %}query={{ search_query }}&{% endif %}type={{ search_type }}&page={{ search_results.previous_page_number }}{% if start_date and start_date != 'None' %}&start_date={{ start_date }}{% endif %}{% if end_date and end_date != 'None' %}&end_date={{ end_date }}{% endif %}{% if order_by and order_by != 'None' %}&order_by={{ order_by }}{% endif %}"
-                   class="pagination-button">上一页</a>
-            {% else %}
-                <span class="pagination-button disabled">上一页</span>
-            {% endif %}
-
-            <span class="pagination-info">
-                第 {{ search_results.number }} 页，共 {{ search_results.paginator.num_pages }} 页
-            </span>
-
-            <form method="get" action="{% url 'search:search' %}" class="jump-to-page-form" id="jump-to-page-form-nav">
-                {% if search_query and search_query != 'None' %}<input type="hidden" name="query" value="{{ search_query }}">{% endif %}
-                <input type="hidden" name="type" value="{{ search_type }}">
-                {% if start_date and start_date != 'None' %}<input type="hidden" name="start_date" value="{{ start_date }}">{% endif %}
-                {% if end_date and end_date != 'None' %}<input type="hidden" name="end_date" value="{{ end_date }}">{% endif %}
-                {% if order_by and order_by != 'None' %}<input type="hidden" name="order_by" value="{{ order_by }}">{% endif %}
-
-                <input type="number" name="page" min="1" max="{{ search_results.paginator.num_pages }}"
-                       placeholder="页码" value="{{ search_results.number }}"
-                       aria-label="跳转到页码" class="jump-page-input" required>
-                <button type="submit" class="jump-page-button">跳转</button>
-            </form>
-
-            {% if search_results.has_next %}
-                <a href="?{% if search_query and search_query != 'None' %}query={{ search_query }}&{% endif %}type={{ search_type }}&page={{ search_results.next_page_number }}{% if start_date and start_date != 'None' %}&start_date={{ start_date }}{% endif %}{% if end_date and end_date != 'None' %}&end_date={{ end_date }}{% endif %}{% if order_by and order_by != 'None' %}&order_by={{ order_by }}{% endif %}"
-                   class="pagination-button">下一页</a>
-            {% else %}
-                <span class="pagination-button disabled">下一页</span>
-            {% endif %}
-        </nav>
-    {% endif %}
-</div>
+</main>
 {% endblock %}
 
 {% block extra_js %}

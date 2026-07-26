@@ -1,0 +1,189 @@
+/* BlogIndexPage list refinements. Keep every rule scoped to this page. */
+.blog-index-page .post-meta-info {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.45rem 0.85rem;
+}
+
+.blog-index-page .post-meta-info > span,
+.blog-index-page .post-meta-info .page-stats {
+    margin: 0 !important;
+}
+
+.blog-index-page .post-meta-info > span {
+    display: inline-flex;
+    align-items: center;
+    min-width: 0;
+}
+
+.blog-index-page .post-meta-info > span > i {
+    width: 1.1em;
+    margin-right: 0.38rem;
+    color: #ba6d3c;
+    text-align: center;
+}
+
+.blog-index-page .page-stats {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 0.45rem;
+    font-size: inherit;
+    color: inherit;
+}
+
+.blog-index-page .view-stats {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.blog-index-page .view-stats span {
+    margin: 0;
+}
+
+.blog-index-page .view-stats-total,
+.blog-index-page .view-stats-today {
+    display: inline-flex;
+    align-items: center;
+    min-height: 1.8rem;
+    border-radius: 999px;
+    white-space: nowrap;
+}
+
+.blog-index-page .view-stats-total {
+    gap: 0.42rem;
+    padding: 0.28rem 0.7rem 0.28rem 0.34rem;
+    border: 1px solid rgba(186, 109, 60, 0.22);
+    background: rgba(186, 109, 60, 0.08);
+    color: #8d4d29;
+    font-weight: 600;
+}
+
+.blog-index-page .view-stats-total > i {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.25rem;
+    height: 1.25rem;
+    border-radius: 50%;
+    background: #ba6d3c;
+    color: #fff;
+    font-size: 0.7rem;
+    line-height: 1;
+}
+
+.blog-index-page .view-stats-today {
+    padding: 0.28rem 0.62rem;
+    border: 1px solid #e8ebef;
+    background: #f7f8fa;
+    color: #74787d;
+}
+
+.blog-index-page .view-stats-today strong {
+    margin-left: 0.25rem;
+    color: #4f5459;
+    font-weight: 700;
+}
+
+.blog-index-page .reaction-stats:empty {
+    display: none;
+}
+
+@media (max-width: 575px) {
+    .blog-index-page .post-meta-info {
+        gap: 0.55rem 0.75rem;
+    }
+
+    .blog-index-page .page-stats,
+    .blog-index-page .view-stats {
+        max-width: 100%;
+        flex-wrap: wrap;
+    }
+}
+
+.blog-index-page .post-tags-row {
+    display: flex;
+    flex: 0 0 100%;
+    align-items: flex-start;
+    width: 100%;
+    gap: 0.55rem;
+    margin-top: 0.15rem;
+    padding-top: 0.65rem;
+    border-top: 1px dashed rgba(186, 109, 60, 0.2);
+}
+
+.blog-index-page .post-tags-icon {
+    flex: 0 0 auto;
+    width: 1.1em;
+    margin-top: 0.42rem;
+    color: #ba6d3c;
+    text-align: center;
+}
+
+.blog-index-page .post-tags-list {
+    display: flex;
+    flex: 1 1 auto;
+    flex-wrap: wrap;
+    gap: 0.4rem 0.5rem;
+    min-width: 0;
+}
+
+.blog-index-page .post-tag {
+    display: inline-flex;
+    align-items: center;
+    max-width: 100%;
+    padding: 0.22rem 0.6rem;
+    border: 1px solid #e6e8eb;
+    border-radius: 999px;
+    background: #fafafa;
+    color: #666 !important;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+    text-decoration: none;
+    transition: border-color 0.2s ease, background-color 0.2s ease, color 0.2s ease;
+}
+
+.blog-index-page a.post-tag:hover,
+.blog-index-page a.post-tag:focus {
+    border-color: rgba(186, 109, 60, 0.42);
+    background: rgba(186, 109, 60, 0.08);
+    color: #8d4d29 !important;
+    text-decoration: none;
+}
+
+.blog-index-page .reaction-stats {
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}
+
+.blog-index-page .reaction-count {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    min-height: 1.8rem;
+    margin: 0;
+    padding: 0.28rem 0.62rem;
+    border: 1px solid rgba(202, 74, 95, 0.2);
+    border-radius: 999px;
+    background: rgba(202, 74, 95, 0.07);
+    color: #a33d50;
+    white-space: nowrap;
+}
+
+.blog-index-page .reaction-count > i {
+    color: #ca4a5f;
+    font-size: 0.92em;
+}
+
+.blog-index-page .reaction-count strong {
+    color: #873143;
+    font-weight: 700;
+}
+
+.blog-index-page .reaction-name {
+    color: #8f5963;
+}

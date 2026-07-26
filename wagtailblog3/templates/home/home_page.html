@@ -8,6 +8,7 @@
 {% block extra_css %}
     <link href="{% static 'gretzia/css/owl.css' %}" rel="stylesheet">
     <link rel="stylesheet" href="{% static 'archive/css/archive.css' %}">
+    <link rel="stylesheet" href="{% static 'css/home-carousel.css' %}?v=20260726-2">
 {% endblock %}
 
 {% block page_vendor_js %}
@@ -25,16 +26,23 @@
     <div class="auto-container">
 
         {#  获取BlogIndexPage的所有实例，轮播 #}
-        <div class="single-item-carousel owl-carousel owl-theme">
+        <div class="single-item-carousel owl-carousel owl-theme home-featured-carousel">
             {% if blog_indexs %}
                 {% for blog_index in blog_indexs %}
                 <!--Slide-->
                 <div class="slide">
                     <figure class="image">
                         {% if blog_index.featured_image %}
-                            {% image blog_index.featured_image fill-800x400 alt=blog_index.title %}
+                            {% image blog_index.featured_image fill-800x400 format-webp as slide_img %}
+                            <img src="{{ slide_img.url }}"
+                                 alt="{{ blog_index.title }}"
+                                 width="{{ slide_img.width }}"
+                                 height="{{ slide_img.height }}" />
                         {% else %}
-                            <img src="{% static 'gretzia/images/resource/slide-1.jpg' %}" alt="{{ blog_index.title }}" />
+                            <img src="{% static 'gretzia/images/resource/slide-1.jpg' %}"
+                                 alt="{{ blog_index.title }}"
+                                 width="1170"
+                                 height="648" />
                         {% endif %}
                     </figure>
                     <div class="overlay-box">

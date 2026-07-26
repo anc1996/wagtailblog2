@@ -24,7 +24,8 @@
             </div>
 
             {# 评论内容，对应 Gretzia 的 .text #}
-            <div class="text" id="comment-text-{{ comment.id }}">
+            <div class="text comment-markdown" id="comment-text-{{ comment.id }}">
+                <textarea class="comment-raw-source" hidden aria-hidden="true">{{ comment.content }}</textarea>
                 {% if comment.replied_to_user and comment.parent %}
                     <span class="replied-to-user">@{{ comment.replied_to_user.username }} </span>
                 {% endif %}

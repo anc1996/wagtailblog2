@@ -364,8 +364,11 @@ def edit_comment(request):
 	comment_id = request.POST.get('comment_id')
 	new_content = request.POST.get('content')
 	
+	new_content = (new_content or '').strip()
 	if not new_content:
 		return JsonResponse({'status': 'error', 'message': '评论内容不能为空'}, status=400)
+	if len(new_content) > 10000:
+		return JsonResponse({'status': 'error', 'message': '评论内容不能超过 10000 个字符'}, status=400)
 	
 	try:
 		comment = BlogPageComment.objects.get(id=comment_id)

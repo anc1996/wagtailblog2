@@ -34,6 +34,15 @@ class CommentForm(forms.ModelForm):
         # 这些字段在 CommentForm 的 Meta.fields 中不包含，所以它们不再是表单的一部分
         # 已登录用户，其信息会从 request.user 获取，无需表单填写
 
+    def clean_content(self):
+        """Normalize and bound untrusted Markdown before storing it."""
+        content = (self.cleaned_data.get('content') or '').strip()
+        if not content:
+            raise forms.ValidationError('评论内容不能为空')
+        if len(content) > 10000:
+            raise forms.ValidationError('评论内容不能超过 10000 个字符')
+        return content
+
     def clean(self):
         """验证表单数据"""
         cleaned_data = super().clean()

@@ -119,7 +119,20 @@
     <div id="edit-form-template" class="template-hidden">
         <div class="edit-comment-form">
             <div class="form-group">
-                <textarea class="form-control edit-textarea" rows="4" placeholder="编辑您的评论..."></textarea>
+                <div class="comment-markdown-toolbar" role="toolbar" aria-label="Markdown 格式工具">
+                    <button type="button" data-md-action="bold" title="加粗：**文字**"><strong>B</strong></button>
+                    <button type="button" data-md-action="italic" title="斜体：*文字*"><em>I</em></button>
+                    <button type="button" data-md-action="underline" title="下划线：++文字++"><u>U</u></button>
+                    <button type="button" data-md-action="mark" title="标记：==文字=="><mark>M</mark></button>
+                    <button type="button" data-md-action="strike" title="删除线：~~文字~~"><del>S</del></button>
+                    <button type="button" data-md-action="quote" title="引用">❞</button>
+                    <button type="button" data-md-action="ul" title="无序列表">• 列表</button>
+                    <button type="button" data-md-action="ol" title="有序列表">1. 列表</button>
+                    <button type="button" data-md-action="code" title="行内代码">&lt;/&gt;</button>
+                    <button type="button" data-md-action="codeblock" title="代码块">代码框</button>
+                </div>
+                <textarea class="form-control edit-textarea" rows="5" placeholder="编辑您的评论（支持 Markdown）..."></textarea>
+                <p class="comment-markdown-help">支持 Markdown：<code>**加粗**</code>、<code>++下划线++</code>、<code>==标记==</code>、列表、引用和代码框。</p>
             </div>
             <div class="edit-form-actions">
                 <button type="button" class="theme-btn save-edit-btn">保存</button>
@@ -168,7 +181,20 @@
                     <input type="hidden" name="replied_to_user_id" id="replied-to-user-id" value="">
 
                     <div class="form-group">
-                        <textarea name="content" id="comment-content" placeholder="发一条友善的评论 (支持 Markdown)" rows="4" class="form-control"></textarea>
+                        <div class="comment-markdown-toolbar" role="toolbar" aria-label="Markdown 格式工具">
+                            <button type="button" data-md-action="bold" title="加粗：**文字**"><strong>B</strong></button>
+                            <button type="button" data-md-action="italic" title="斜体：*文字*"><em>I</em></button>
+                            <button type="button" data-md-action="underline" title="下划线：++文字++"><u>U</u></button>
+                            <button type="button" data-md-action="mark" title="标记：==文字=="><mark>M</mark></button>
+                            <button type="button" data-md-action="strike" title="删除线：~~文字~~"><del>S</del></button>
+                            <button type="button" data-md-action="quote" title="引用">❞</button>
+                            <button type="button" data-md-action="ul" title="无序列表">• 列表</button>
+                            <button type="button" data-md-action="ol" title="有序列表">1. 列表</button>
+                            <button type="button" data-md-action="code" title="行内代码">&lt;/&gt;</button>
+                            <button type="button" data-md-action="codeblock" title="代码块">代码框</button>
+                        </div>
+                        <textarea name="content" id="comment-content" placeholder="发一条友善的评论（支持 Markdown）" rows="5" class="form-control"></textarea>
+                        <p class="comment-markdown-help">示例：<code>**这句很重要。**</code> 会显示为粗体；还支持 <code>++下划线++</code>、<code>==标记==</code>、列表和代码框。</p>
                     </div>
                     <div class="comment-form-actions-gretzia">
                         <span id="reply-to-info" class="reply-to-info template-hidden">

@@ -539,6 +539,66 @@ const CommentSystem = (function() {
         }
     };
 
+
+    // ===== Markdown 格式工具 =====
+    const MarkdownToolbar = {
+        actions: {
+            bold: { prefix: '**', suffix: '**', placeholder: '加粗文字' },
+            italic: { prefix: '*', suffix: '*', placeholder: '斜体文字' },
+            underline: { prefix: '++', suffix: '++', placeholder: '下划线文字' },
+            mark: { prefix: '==', suffix: '==', placeholder: '重点标记' },
+            strike: { prefix: '~~', suffix: '~~', placeholder: '删除线文字' },
+            code: { prefix: '`', suffix: '`', placeholder: '代码' },
+            codeblock: { prefix: '```\n', suffix: '\n```', placeholder: '在这里输入代码' }
+        },
+
+        apply($button) {
+            const action = $button.attr('data-md-action');
+            const $form = $button.closest('form, .edit-comment-form');
+            const $textarea = $form.find('textarea[name="content"], .edit-textarea').first();
+            if (!$textarea.length) return;
+
+            const textarea = $textarea[0];
+            const value = textarea.value;
+            const start = textarea.selectionStart ?? value.length;
+            const end = textarea.selectionEnd ?? value.length;
+            const selected = value.slice(start, end);
+
+            if (action === 'quote' || action === 'ul' || action === 'ol') {
+                this.applyLinePrefix(textarea, action, start, end);
+                return;
+            }
+
+            const config = this.actions[action];
+            if (!config) return;
+
+            const content = selected || config.placeholder;
+            const replacement = config.prefix + content + config.suffix;
+            textarea.setRangeText(replacement, start, end, 'select');
+            if (!selected) {
+                textarea.setSelectionRange(start + config.prefix.length, start + config.prefix.length + content.length);
+            }
+            $textarea.trigger('input').focus();
+        },
+
+        applyLinePrefix(textarea, action, start, end) {
+            const value = textarea.value;
+            const lineStart = value.lastIndexOf('\n', Math.max(0, start - 1)) + 1;
+            const nextBreak = value.indexOf('\n', end);
+            const lineEnd = nextBreak === -1 ? value.length : nextBreak;
+            const block = value.slice(lineStart, lineEnd) || '文字';
+            const lines = block.split('\n');
+            const transformed = lines.map((line, index) => {
+                if (action === 'quote') return '> ' + line;
+                if (action === 'ol') return (index + 1) + '. ' + line;
+                return '- ' + line;
+            }).join('\n');
+
+            textarea.setRangeText(transformed, lineStart, lineEnd, 'select');
+            textarea.focus();
+        }
+    };
+
     // ===== 评论加载器 =====
     const CommentLoader = {
         loadComments(pageNumber = 1, sortBy = 'hot') {
@@ -687,10 +747,13 @@ const CommentSystem = (function() {
                 const $commentText = Utils.getCommentText($comment);
                 const $actions = Utils.getCommentActions($comment);
 
-                // 获取纯文本内容
-                let currentContent = $commentText.clone()
-                    .children('.replied-to-user').remove().end()
-                    .text().trim();
+                // 从隐藏的原始内容读取 Markdown，避免编辑时丢失 **、列表和代码围栏。
+                let currentContent = $commentText.find('.comment-raw-source').val();
+                if (currentContent === undefined) {
+                    currentContent = $commentText.clone()
+                        .children('.replied-to-user, .comment-raw-source').remove().end()
+                        .text().trim();
+                }
 
                 // 【修复】只隐藏当前评论的操作按钮
                 $actions.hide();
@@ -737,7 +800,12 @@ const CommentSystem = (function() {
                     const $actions = Utils.getCommentActions($comment);
 
                     const repliedToHtml = $commentText.find('.replied-to-user').prop('outerHTML') || '';
-                    $commentText.html(repliedToHtml + data.content);
+                    const rawSource = $('<textarea>', {
+                        class: 'comment-raw-source',
+                        hidden: true,
+                        'aria-hidden': 'true'
+                    }).val(newContent);
+                    $commentText.empty().append(rawSource).append(repliedToHtml).append(data.content);
                     $actions.show();
 
                     TemplateManager.showSuccess(Config.text.editSuccess, $comment);
@@ -814,6 +882,12 @@ const CommentSystem = (function() {
                 Utils.error('评论容器不存在');
                 return;
             }
+
+            // Markdown 工具栏（主评论、回复和编辑表单共用）
+            $container.on('click', '.comment-markdown-toolbar button[data-md-action]', function(e) {
+                e.preventDefault();
+                MarkdownToolbar.apply($(this));
+            });
 
             // 登录按钮
             $container.on('click', '.login-btn', (e) => {

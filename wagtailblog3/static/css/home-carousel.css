@@ -1,0 +1,30 @@
+/* 首页顶部轮播：统一为数据库上传图原有的 800:400 响应式比例。 */
+.home-featured-carousel,
+.home-featured-carousel .owl-stage-outer,
+.home-featured-carousel .owl-stage,
+.home-featured-carousel .owl-item,
+.home-featured-carousel .slide {
+    width: 100%;
+}
+
+.home-featured-carousel .slide {
+    aspect-ratio: 800 / 400;
+    overflow: hidden;
+    background: #111;
+}
+
+.home-featured-carousel .slide .image {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+}
+
+.home-featured-carousel .slide .image img {
+    width: 100%;
+    height: 100%;
+    max-width: 100%;
+    display: block;
+    object-fit: cover;
+    object-position: center;
+}

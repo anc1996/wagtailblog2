@@ -7,8 +7,8 @@
 
 {% block extra_css %}
     <link href="{% static 'gretzia/css/owl.css' %}" rel="stylesheet">
-    <link rel="stylesheet" href="{% static 'archive/css/archive.css' %}">
-    <link rel="stylesheet" href="{% static 'css/home-carousel.css' %}?v=20260726-2">
+    <link rel="stylesheet" href="{% static 'archive/css/archive.css' %}?v=20260726-4">
+    <link rel="stylesheet" href="{% static 'css/home-carousel.css' %}?v=20260726-3">
 {% endblock %}
 
 {% block page_vendor_js %}
@@ -17,7 +17,7 @@
 {% endblock %}
 
 {% block extra_js %}
-    <script src="{% static 'archive/js/archive.js' %}"></script>
+    <script src="{% static 'archive/js/archive.js' %}?v=20260726-4"></script>
 {% endblock %}
 
 {% block content %}
@@ -179,17 +179,29 @@
                                     {# 显示访问统计和反应 #}
                                     {% with view_counts=post.get_view_count reactions=post.get_reactions %}
                                         {% if view_counts or reactions %}
-                                            <div class="post-stats" style="margin: 15px 0; font-size: 13px; color: #888; border-top: 1px solid #eee; padding-top: 15px;">
+                                            <div class="post-stats">
                                                 {% if view_counts %}
-                                                    <span style="margin-right: 20px;">
-                                                        <i class="fa fa-eye"></i> {{ view_counts.total }} 次浏览
+                                                    <span class="view-count view-count-today" title="今日访问次数">
+                                                        <i class="fa fa-calendar-check-o" aria-hidden="true"></i>
+                                                        今日 <strong>{{ view_counts.today }}</strong> 次
+                                                    </span>
+                                                    <span class="view-count view-count-total" title="累计访问次数">
+                                                        <i class="fa fa-eye" aria-hidden="true"></i>
+                                                        总共 <strong>{{ view_counts.total }}</strong> 次
                                                     </span>
                                                 {% endif %}
                                                 {% if reactions %}
-                                                    <span>
-                                                        <i class="fa fa-heart"></i>
+                                                    <span class="reaction-stats">
                                                         {% for reaction in reactions %}
-                                                            {{ reaction.icon }} {{ reaction.count }}
+                                                            <span class="reaction-count" title="{{ reaction.name }}">
+                                                                {% if reaction.name == '点赞' %}<i class="fa fa-thumbs-up" aria-hidden="true"></i>
+                                                                {% elif reaction.name == '喜爱' %}<i class="fa fa-heart" aria-hidden="true"></i>
+                                                                {% elif reaction.name == '惊讶' %}<i class="fa fa-exclamation-circle" aria-hidden="true"></i>
+                                                                {% elif reaction.name == '思考' %}<i class="fa fa-lightbulb-o" aria-hidden="true"></i>
+                                                                {% else %}<i class="fa fa-star" aria-hidden="true"></i>{% endif %}
+                                                                <span class="sr-only">{{ reaction.name }}</span>
+                                                                {{ reaction.count }}
+                                                            </span>
                                                         {% endfor %}
                                                     </span>
                                                 {% endif %}

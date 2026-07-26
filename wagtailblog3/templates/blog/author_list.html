@@ -7,7 +7,7 @@
 
 
 {% block extra_css %}
-    <link rel="stylesheet" href="{% static 'archive/css/archive.css' %}">
+    <link rel="stylesheet" href="{% static 'archive/css/archive.css' %}?v=20260726-4">
 {% endblock %}
 
 {% block content %}
@@ -138,5 +138,5 @@
 
 {% block extra_js %}
     {{ block.super }}
-    <script src="{% static 'archive/js/archive.js' %}"></script>
+    <script src="{% static 'archive/js/archive.js' %}?v=20260726-4"></script>
 {% endblock %}

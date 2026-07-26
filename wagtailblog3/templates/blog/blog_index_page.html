@@ -6,7 +6,7 @@
 {% block extra_css %}
     {{ block.super }}
     <link href="{% static 'gretzia/css/animate.css' %}" rel="stylesheet">
-    <link rel="stylesheet" href="{% static 'archive/css/archive.css' %}">
+    <link rel="stylesheet" href="{% static 'archive/css/archive.css' %}?v=20260726-4">
     <link rel="stylesheet" href="{% static 'blog/css/blog.css' %}?v=20260726-1">
     <link rel="stylesheet" href="{% static 'blog/css/blog-index.css' %}?v=20260726-3">
 {% endblock %}
@@ -262,6 +262,6 @@
 
 {% block extra_js %}
     {{ block.super }}
-    <script src="{% static 'archive/js/archive.js' %}"></script>
+    <script src="{% static 'archive/js/archive.js' %}?v=20260726-4"></script>
     <script src="{% static 'blog/js/blog_index_page.js' %}"></script>
 {% endblock %}

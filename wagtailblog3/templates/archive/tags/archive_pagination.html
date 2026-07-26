@@ -1,0 +1,36 @@
+{% if pages.paginator.num_pages > 1 %}
+<nav class="archive-pagination" aria-label="文章分页">
+    <div class="archive-pagination-main">
+        {% if pages.has_previous %}
+            <a href="?page={{ pages.previous_page_number }}{% if search_query %}&search={{ search_query|urlencode }}{% endif %}" class="archive-page-button"><i class="fa fa-angle-left" aria-hidden="true"></i> 上一页</a>
+        {% else %}
+            <span class="archive-page-button is-disabled"><i class="fa fa-angle-left" aria-hidden="true"></i> 上一页</span>
+        {% endif %}
+        <div class="archive-page-numbers" aria-label="页码列表">
+            {% for page_num in pagination_range %}
+                {% if page_num == pages.number %}
+                    <span class="archive-page-number is-current" aria-current="page">{{ page_num }}</span>
+                {% elif page_num == '…' %}
+                    <span class="archive-page-number is-ellipsis" aria-hidden="true">{{ page_num }}</span>
+                {% else %}
+                    <a href="?page={{ page_num }}{% if search_query %}&search={{ search_query|urlencode }}{% endif %}" class="archive-page-number">{{ page_num }}</a>
+                {% endif %}
+            {% endfor %}
+        </div>
+        {% if pages.has_next %}
+            <a href="?page={{ pages.next_page_number }}{% if search_query %}&search={{ search_query|urlencode }}{% endif %}" class="archive-page-button">下一页 <i class="fa fa-angle-right" aria-hidden="true"></i></a>
+        {% else %}
+            <span class="archive-page-button is-disabled">下一页 <i class="fa fa-angle-right" aria-hidden="true"></i></span>
+        {% endif %}
+    </div>
+    <div class="archive-pagination-tools">
+        <span class="archive-page-info">第 <strong>{{ pages.number }}</strong> / {{ pages.paginator.num_pages }} 页，共 {{ pages.paginator.count }} 篇</span>
+        <form method="get" action="" class="archive-jump-form">
+            {% if search_query %}<input type="hidden" name="search" value="{{ search_query }}">{% endif %}
+            <label for="archive-jump-page">跳转到</label>
+            <input id="archive-jump-page" type="number" name="page" min="1" max="{{ pages.paginator.num_pages }}" value="{{ pages.number }}" required>
+            <button type="submit">确定</button>
+        </form>
+    </div>
+</nav>
+{% endif %}

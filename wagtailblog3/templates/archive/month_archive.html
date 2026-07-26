@@ -8,16 +8,16 @@
 
 {% block extra_css %}
     {{ block.super }}
-    <link rel="stylesheet" href="{% static 'archive/css/archive.css' %}">
+    <link rel="stylesheet" href="{% static 'archive/css/archive.css' %}?v=20260726-5">
     <link rel="stylesheet" href="{% static 'blog/css/blog.css' %}">
 {% endblock %}
 
 {% block extra_js %}
-    <script src="{% static 'archive/js/archive.js' %}"></script>
+    <script src="{% static 'archive/js/archive.js' %}?v=20260726-5"></script>
 {% endblock %}
 
 {% block content %}
-<div class="container">
+<div class="container archive-page archive-list-page">
     <div class="row">
         <div class="col-md-8">
             <header>
@@ -66,8 +66,8 @@
                     <article class="blog-item">
                         <h3><a href="{% pageurl post %}">{{ post.title }}</a></h3>
 
-                        <div class="meta">
-                            <i class="fas fa-calendar"></i> {{ post.date|date:"Y年m月d日" }}
+                        <div class="meta archive-post-meta">
+                            <span class="archive-post-date"><i class="fa fa-calendar-o" aria-hidden="true"></i>{{ post.date|date:"Y年m月d日" }}</span>
                             {% include "blog/stats_block.html" with page=post %}
                         </div>
 
@@ -77,30 +77,15 @@
                             </a>
                         {% endif %}
 
-                        <div class="intro">{{ post.intro }}</div>
-                        <a href="{% pageurl post %}" class="read-more">阅读更多</a>
+                        <p class="intro archive-post-intro">{{ post.intro|striptags|truncatechars:180 }}</p>
+                        <a href="{% pageurl post %}" class="read-more archive-read-more">阅读更多</a>
                     </article>
                 {% empty %}
                     <p>{{ year }}年{{ month }}月没有符合条件的文章。</p>
                 {% endfor %}
             </div>
 
-            <!-- 分页 -->
-            {% if pages.paginator.num_pages > 1 %}
-            <div class="pagination">
-                <span class="page-info">
-                    第 {{ pages.number }} 页，共 {{ pages.paginator.num_pages }} 页
-                </span>
-
-                {% if pages.has_previous %}
-                    <a href="?page={{ pages.previous_page_number }}{% if search_query %}&search={{ search_query|urlencode }}{% endif %}" class="previous">上一页</a>
-                {% endif %}
-
-                {% if pages.has_next %}
-                    <a href="?page={{ pages.next_page_number }}{% if search_query %}&search={{ search_query|urlencode }}{% endif %}" class="next">下一页</a>
-                {% endif %}
-            </div>
-            {% endif %}
+            {% include "archive/tags/archive_pagination.html" with pages=pages pagination_range=pagination_range search_query=search_query %}
         </div>
 
         <div class="col-md-4">

@@ -28,3 +28,58 @@
     object-fit: cover;
     object-position: center;
 }
+
+/* 首页热门阅读：访问量与反应统计保持紧凑并列。 */
+.home-page .post-stats {
+    display: flex;
+    align-items: center;
+    flex-wrap: nowrap;
+    gap: 10px;
+    margin: 15px 0;
+    padding-top: 15px;
+    overflow-x: auto;
+    color: #777;
+    font-size: 13px;
+    line-height: 1;
+    white-space: nowrap;
+    border-top: 1px solid #eee;
+    scrollbar-width: thin;
+}
+
+.home-page .post-stats .view-count,
+.home-page .post-stats .reaction-count {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 4px;
+    margin: 0;
+}
+
+.home-page .post-stats .view-count i,
+.home-page .post-stats .reaction-count i {
+    color: #c58a42;
+    font-size: 14px;
+}
+
+.home-page .post-stats .view-count strong {
+    color: #555;
+    font-weight: 600;
+}
+
+.home-page .post-stats .reaction-stats {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 10px;
+}
+
+@media (max-width: 575px) {
+    .home-page .post-stats {
+        gap: 8px;
+        font-size: 12px;
+    }
+
+    .home-page .post-stats .reaction-stats {
+        gap: 8px;
+    }
+}

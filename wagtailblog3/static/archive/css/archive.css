@@ -1,38 +1,689 @@
-/* archive_sidebar.html 的折叠样式 (可选) */
-.year-entry {
-    display: flex; /* 使用 flex 布局让链接和按钮在同一行 */
-    justify-content: space-between; /* 将链接和按钮推到两端 */
-    align-items: center; /* 垂直居中对齐 */
-    padding: 5px 0; /* 给年份条目一些垂直内边距 */
+/* 紧凑文章归档卡片 */
+.archive-tree {
+    overflow: hidden;
+    color: #5f574f;
+    background: #fffdf9;
+    border: 1px solid #eee3d5;
+    border-radius: 12px;
+    box-shadow: 0 8px 24px rgba(100, 72, 42, 0.06);
 }
 
-.year-entry .year-link {
-    flex-grow: 1; /*让年份链接占据多余空间*/
+.archive-summary {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 13px 14px;
+    background: linear-gradient(135deg, #fff8ee 0%, #f8eee1 100%);
+    border-bottom: 1px solid #eee0cf;
 }
 
-.month-toggle {
+.archive-summary-icon {
+    display: inline-flex;
+    flex: 0 0 34px;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    color: #fff;
+    background: #c58a42;
+    border-radius: 9px;
+}
+
+.archive-summary-text {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    line-height: 1.3;
+}
+
+.archive-summary-text strong {
+    color: #6f4d28;
+    font-size: 16px;
+}
+
+.archive-summary-text small {
+    margin-top: 2px;
+    color: #938273;
+    font-size: 12px;
+}
+
+.archive-year-list,
+.archive-year-list ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.archive-year-item {
+    border-bottom: 1px solid #f2ebe3;
+}
+
+.archive-year-item:last-child {
+    border-bottom: 0;
+}
+
+.archive-year-item.is-hidden {
+    display: none;
+}
+
+.archive-tree .year-entry {
+    display: flex;
+    align-items: stretch;
+    min-height: 44px;
+    padding: 0;
+}
+
+.archive-tree .year-link {
+    display: flex;
+    min-width: 0;
+    flex: 1 1 auto;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 6px 10px 13px;
+    color: #5f574f;
+    text-decoration: none;
+    transition: color .2s ease, background-color .2s ease;
+}
+
+.archive-tree .year-link:hover,
+.archive-tree .year-link:focus,
+.archive-tree .year-link.active {
+    color: #9b642c;
+    background: #fff8ef;
+}
+
+.archive-tree .year-label,
+.archive-tree .month-link > span:first-child {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.archive-tree .year-label i,
+.archive-tree .month-link i {
+    width: 14px;
+    color: #c58a42;
+    text-align: center;
+}
+
+.archive-count-badge {
+    display: inline-flex;
+    min-width: 25px;
+    height: 21px;
+    align-items: center;
+    justify-content: center;
+    padding: 0 7px;
+    color: #8a6847;
+    background: #f4eadf;
+    border-radius: 11px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.archive-tree .month-toggle {
+    display: inline-flex;
+    flex: 0 0 42px;
+    align-items: center;
+    justify-content: center;
+    margin: 0;
+    padding: 0;
+    color: #a3774c;
+    background: transparent;
+    border: 0;
+    border-left: 1px solid #f2ebe3;
+    border-radius: 0;
     cursor: pointer;
-    padding: 2px 6px; /* 给图标一些可点击区域 */
-    margin-left: 8px; /* 与年份文本的间距 */
-    font-size: 1em; /* 图标大小可以调整 */
-    color: #555; /* 图标颜色 */
-    transition: color 0.3s ease;
+    transition: color .2s ease, background-color .2s ease;
 }
 
-.month-toggle:hover,
-.month-toggle:focus {
-    color: #000; /* 鼠标悬停或聚焦时改变颜色 */
+.archive-tree .month-toggle:hover,
+.archive-tree .month-toggle:focus {
+    color: #774a20;
+    background: #f9efe3;
+    outline: none;
 }
 
-.months-list {
-    /* 你可以为月份列表添加额外的样式，如果需要的话 */
-    /* 例如，添加一个左边框来表示层级 */
-    /* border-left: 1px dashed #eee; */
-    /* margin-top: 5px; */
-    /* margin-bottom: 5px; */
+.archive-tree .months-panel {
+    padding: 11px 12px 9px;
+    background: #fcfaf7;
+    border-top: 1px dashed #eadcca;
 }
-.months-list li a {
-    /* 月份链接的样式可以调整得更细致一些 */
-    /* font-size: 0.9em; */
-    /* color: #666; */
+
+.archive-tree .months-panel[hidden] {
+    display: none;
+}
+
+.archive-tree .months-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 7px;
+}
+
+.archive-tree .month-cell {
+    display: flex;
+    min-width: 0;
+    min-height: 48px;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 3px;
+    padding: 6px 4px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    line-height: 1.15;
+    text-align: center;
+    text-decoration: none;
+}
+
+.archive-tree .month-name {
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.archive-tree .month-count {
+    font-size: 11px;
+}
+
+.archive-tree .month-cell.has-posts {
+    color: #835323;
+    background: #fff3e3;
+    border-color: #e8c89f;
+    box-shadow: 0 2px 6px rgba(133, 83, 35, 0.08);
+    cursor: pointer;
+    transition: color .2s ease, background-color .2s ease, border-color .2s ease, transform .2s ease;
+}
+
+.archive-tree .month-cell.has-posts .month-count {
+    color: #a36b33;
+    font-weight: 600;
+}
+
+.archive-tree .month-cell.has-posts:hover,
+.archive-tree .month-cell.has-posts:focus {
+    color: #613914;
+    background: #fbe7ce;
+    border-color: #d5a66c;
+    outline: none;
+    transform: translateY(-1px);
+}
+
+.archive-tree .month-cell.has-posts.active {
+    color: #fff;
+    background: #b97835;
+    border-color: #9f6327;
+    box-shadow: 0 0 0 2px rgba(197, 138, 66, 0.22);
+}
+
+.archive-tree .month-cell.has-posts.active .month-count {
+    color: #fff7ec;
+}
+
+.archive-tree .month-cell.is-empty {
+    color: #aaa098;
+    background: #f4f1ed;
+    border-color: #ebe5de;
+}
+
+.archive-tree .month-cell.is-empty .month-count {
+    color: #b8b0a9;
+}
+
+.archive-tree .months-grid-hint {
+    margin: 9px 0 0;
+    color: #9b8b7c;
+    font-size: 11px;
+    text-align: center;
+}
+
+.archive-tree .months-grid-hint i {
+    margin-right: 4px;
+    color: #c58a42;
+    font-size: 7px;
+    vertical-align: 1px;
+}
+
+.archive-more-toggle {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 11px 13px;
+    color: #8b633c;
+    background: #faf5ee;
+    border: 0;
+    border-top: 1px solid #eee0cf;
+    cursor: pointer;
+    font-size: 13px;
+    transition: color .2s ease, background-color .2s ease;
+}
+
+.archive-more-toggle:hover,
+.archive-more-toggle:focus {
+    color: #68421e;
+    background: #f5e9da;
+    outline: none;
+}
+
+.archive-more-chevron {
+    transition: transform .2s ease;
+}
+
+.archive-more-toggle[aria-expanded="true"] .archive-more-chevron {
+    transform: rotate(180deg);
+}
+
+.archive-empty {
+    padding: 18px 14px;
+    color: #938273;
+    text-align: center;
+}
+
+.archive-empty i {
+    margin-right: 6px;
+    color: #c58a42;
+}
+
+/* 归档年/月列表页 */
+.archive-list-page > .row {
+    align-items: flex-start;
+}
+
+.archive-list-page header {
+    margin-bottom: 14px;
+}
+
+.archive-list-page header h1 {
+    margin-bottom: 6px;
+    color: #4f443b;
+    font-size: 28px;
+    line-height: 1.25;
+}
+
+.archive-list-page header .lead {
+    margin-bottom: 0;
+    color: #8c7a68;
+    font-size: 15px;
+}
+
+.archive-list-page .breadcrumb {
+    margin-bottom: 18px;
+    padding: 9px 12px;
+    background: #fff8ef;
+    border: 1px solid #eee0cf;
+    border-radius: 8px;
+}
+
+.archive-list-page .blog-list {
+    display: grid;
+    gap: 14px;
+}
+
+.archive-list-page .blog-item {
+    position: relative;
+    overflow: hidden;
+    padding: 18px 18px 16px;
+    background: #fffdf9;
+    border: 1px solid #eee3d5;
+    border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(100, 72, 42, 0.055);
+}
+
+.archive-list-page .blog-item h3 {
+    margin: 0 0 9px;
+    font-size: 21px;
+    line-height: 1.35;
+}
+
+.archive-list-page .blog-item h3 a {
+    color: #3f352d;
+    text-decoration: none;
+}
+
+.archive-list-page .blog-item h3 a:hover,
+.archive-list-page .blog-item h3 a:focus {
+    color: #a15f25;
+}
+
+.archive-list-page .archive-post-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 7px 9px;
+    margin: 0 0 12px;
+    color: #786b5f;
+    font-size: 13px;
+}
+
+.archive-list-page .archive-post-date,
+.archive-list-page .page-stats,
+.archive-list-page .view-stats,
+.archive-list-page .reaction-stats {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+.archive-list-page .archive-post-date,
+.archive-list-page .view-stats-total,
+.archive-list-page .view-stats-today,
+.archive-list-page .reaction-count {
+    min-height: 28px;
+    align-items: center;
+    border-radius: 999px;
+    white-space: nowrap;
+}
+
+.archive-list-page .archive-post-date {
+    padding: 4px 9px;
+    color: #7a6048;
+    background: #f7efe6;
+    border: 1px solid #eadcca;
+}
+
+.archive-list-page .archive-post-date i {
+    color: #c58a42;
+}
+
+.archive-list-page .page-stats {
+    flex-wrap: wrap;
+    color: inherit;
+    font-size: inherit;
+}
+
+.archive-list-page .view-stats-total,
+.archive-list-page .view-stats-today,
+.archive-list-page .reaction-count {
+    display: inline-flex;
+    gap: 5px;
+    padding: 4px 9px;
+    border: 1px solid #eee3d5;
+    background: #fbf6ef;
+    color: #76573b;
+}
+
+.archive-list-page .view-stats-total {
+    border-color: rgba(197, 138, 66, 0.32);
+    background: #fff3e3;
+    color: #835323;
+}
+
+.archive-list-page .view-stats-total i,
+.archive-list-page .view-stats-today i,
+.archive-list-page .reaction-count i {
+    color: #c58a42;
+}
+
+.archive-list-page .view-stats strong,
+.archive-list-page .reaction-count strong {
+    color: #4f443b;
+    font-weight: 700;
+}
+
+.archive-list-page .reaction-stats:empty {
+    display: none;
+}
+
+.archive-list-page .reaction-name {
+    font-size: 12px;
+}
+
+.archive-list-page .featured-image-link {
+    display: block;
+    margin: 4px 0 12px;
+}
+
+.archive-list-page .thumbnail {
+    max-width: 100%;
+    height: auto;
+    border-radius: 8px;
+}
+
+.archive-list-page .archive-post-intro {
+    display: -webkit-box;
+    overflow: hidden;
+    margin: 0 0 13px;
+    color: #6f655c;
+    font-size: 15px;
+    line-height: 1.7;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+}
+
+.archive-list-page .archive-read-more {
+    display: inline-flex;
+    align-items: center;
+    min-height: 32px;
+    padding: 6px 12px;
+    color: #fff;
+    background: #b97835;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    text-decoration: none;
+    transition: background-color .2s ease, transform .2s ease;
+}
+
+.archive-list-page .archive-read-more:hover,
+.archive-list-page .archive-read-more:focus {
+    color: #fff;
+    background: #995f28;
+    outline: none;
+    transform: translateY(-1px);
+}
+
+.archive-list-page .tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px dashed #eadcca;
+}
+
+.archive-list-page .tag {
+    display: inline-flex;
+    align-items: center;
+    min-height: 24px;
+    padding: 3px 8px;
+    color: #8a6847;
+    background: #f4eadf;
+    border-radius: 999px;
+    font-size: 12px;
+}
+
+@media (max-width: 575px) {
+    .archive-list-page .blog-item {
+        padding: 15px 14px;
+    }
+
+    .archive-list-page .archive-post-meta,
+    .archive-list-page .page-stats,
+    .archive-list-page .view-stats {
+        gap: 6px;
+    }
+
+    .archive-list-page .archive-post-date,
+    .archive-list-page .view-stats-total,
+    .archive-list-page .view-stats-today,
+    .archive-list-page .reaction-count {
+        min-height: 27px;
+        padding: 4px 8px;
+    }
+}
+
+/* 归档列表分页：支持直接选择页码和快速跳转 */
+.archive-pagination {
+    margin: 24px 0 8px;
+    padding: 14px;
+    background: #fffdf9;
+    border: 1px solid #eee3d5;
+    border-radius: 10px;
+}
+
+.archive-pagination-main,
+.archive-pagination-tools,
+.archive-page-numbers,
+.archive-jump-form {
+    display: flex;
+    align-items: center;
+}
+
+.archive-pagination-main {
+    justify-content: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.archive-page-numbers {
+    gap: 4px;
+}
+
+.archive-page-button,
+.archive-page-number,
+.archive-jump-form button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 34px;
+    border-radius: 7px;
+    font-size: 13px;
+    line-height: 1;
+    text-decoration: none;
+}
+
+.archive-page-button {
+    gap: 5px;
+    padding: 0 11px;
+    color: #855725;
+    background: #fff3e3;
+    border: 1px solid #ead3b8;
+}
+
+.archive-page-button:hover,
+.archive-page-button:focus {
+    color: #fff;
+    background: #b97835;
+    border-color: #b97835;
+    outline: none;
+}
+
+.archive-page-button.is-disabled {
+    color: #b9aaa0;
+    background: #f8f5f1;
+    border-color: #eee8e2;
+    cursor: default;
+}
+
+.archive-page-number {
+    min-width: 34px;
+    padding: 0 7px;
+    color: #76573b;
+    background: #fff;
+    border: 1px solid #eadfD3;
+}
+
+.archive-page-number:hover,
+.archive-page-number:focus {
+    color: #995f28;
+    background: #fff8ef;
+    border-color: #d5a66f;
+    outline: none;
+}
+
+.archive-page-number.is-current {
+    color: #fff;
+    background: #b97835;
+    border-color: #b97835;
+    font-weight: 700;
+}
+
+.archive-page-number.is-ellipsis {
+    color: #a59689;
+    background: transparent;
+    border-color: transparent;
+}
+
+.archive-pagination-tools {
+    justify-content: center;
+    gap: 14px;
+    flex-wrap: wrap;
+    margin-top: 12px;
+    padding-top: 11px;
+    border-top: 1px dashed #eadcca;
+}
+
+.archive-page-info {
+    color: #89796b;
+    font-size: 13px;
+}
+
+.archive-page-info strong {
+    color: #5d4735;
+}
+
+.archive-jump-form {
+    gap: 6px;
+    color: #89796b;
+    font-size: 13px;
+}
+
+.archive-jump-form input {
+    width: 58px;
+    min-height: 32px;
+    padding: 4px 7px;
+    color: #5d4735;
+    background: #fff;
+    border: 1px solid #ddcfbf;
+    border-radius: 6px;
+    text-align: center;
+}
+
+.archive-jump-form input:focus {
+    border-color: #c58a42;
+    outline: 2px solid rgba(197, 138, 66, .16);
+}
+
+.archive-jump-form button {
+    min-height: 32px;
+    padding: 0 10px;
+    color: #fff;
+    background: #b97835;
+    border: 1px solid #b97835;
+    cursor: pointer;
+}
+
+.archive-jump-form button:hover,
+.archive-jump-form button:focus {
+    background: #995f28;
+    border-color: #995f28;
+    outline: none;
+}
+
+@media (max-width: 575px) {
+    .archive-pagination {
+        padding: 11px 8px;
+    }
+
+    .archive-pagination-main {
+        justify-content: space-between;
+    }
+
+    .archive-page-button {
+        padding: 0 8px;
+    }
+
+    .archive-page-numbers {
+        max-width: 100%;
+        overflow-x: auto;
+        scrollbar-width: thin;
+    }
+
+    .archive-pagination-tools {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 8px;
+    }
 }

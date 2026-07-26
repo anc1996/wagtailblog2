@@ -1,26 +1,42 @@
+(function ($) {
+    'use strict';
 
-$(document).ready(function() {
-    // 文章归档年份折叠/展开
-    $('.archive-tree .month-toggle').on('click keydown', function(event) {
-        // 允许通过 Enter 或 Space 键触发
-        if (event.type === 'keydown' && (event.key !== 'Enter' && event.key !== ' ')) {
-            return;
-        }
-        event.preventDefault(); // 阻止默认行为，特别是对于 enter 键
+    $(function () {
+        $('[data-archive-tree]').each(function () {
+            var $tree = $(this);
 
-        var $this = $(this);
-        var targetId = $this.data('target');
-        var $monthsList = $(targetId);
-        var $icon = $this.find('i.fa');
+            $tree.on('click', '.month-toggle', function () {
+                var $toggle = $(this);
+                var $monthsPanel = $tree.find($toggle.attr('data-target'));
+                var willExpand = $toggle.attr('aria-expanded') !== 'true';
 
-        $monthsList.slideToggle(250, function() { // 250ms 动画时长
-            if ($monthsList.is(':visible')) {
-                $icon.removeClass('fa-plus-square-o').addClass('fa-minus-square-o');
-                $this.attr('aria-expanded', 'true');
-            } else {
-                $icon.removeClass('fa-minus-square-o').addClass('fa-plus-square-o');
-                $this.attr('aria-expanded', 'false');
-            }
+                $toggle.attr('aria-expanded', String(willExpand));
+                $toggle.attr('aria-label', (willExpand ? '收起' : '展开') + $toggle.attr('aria-controls').replace('months-', '') + '年月份');
+                $toggle.find('i.fa')
+                    .toggleClass('fa-plus', !willExpand)
+                    .toggleClass('fa-minus', willExpand);
+
+                if (willExpand) {
+                    $monthsPanel.prop('hidden', false).hide().slideDown(180);
+                } else {
+                    $monthsPanel.stop(true, true).slideUp(180, function () {
+                        $monthsPanel.prop('hidden', true).removeAttr('style');
+                    });
+                }
+            });
+
+            $tree.on('click', '.archive-more-toggle', function () {
+                var $toggle = $(this);
+                var expanded = $toggle.attr('aria-expanded') === 'true';
+                var $olderYears = $tree.find('.archive-year-older');
+                var hiddenCount = $olderYears.length;
+
+                $toggle.attr('aria-expanded', String(!expanded));
+                $toggle.find('.archive-more-label').text(
+                    expanded ? '查看更早的 ' + hiddenCount + ' 个年份' : '收起更早年份'
+                );
+                $olderYears.toggleClass('is-hidden', expanded);
+            });
         });
     });
-});
+})(jQuery);

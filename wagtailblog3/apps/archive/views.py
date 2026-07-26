@@ -110,6 +110,11 @@ def year_archive(request, year):
 	except EmptyPage:
 		paginated_pages = paginator.page(paginator.num_pages)
 	
+	# 生成紧凑页码范围，避免几百页时把所有页码全部输出
+	pagination_range = paginator.get_elided_page_range(
+		number=paginated_pages.number, on_each_side=2, on_ends=1
+	)
+
 	# 获取归档数据用于侧边栏
 	archive_data = get_archive_data()
 	
@@ -117,6 +122,7 @@ def year_archive(request, year):
 	return render(request, 'archive/year_archive.html', {
 		'year': year,
 		'pages': paginated_pages,
+		'pagination_range': pagination_range,
 		'archive_data': archive_data,
 		'search_query': search_query,
 		'total_count': pages_queryset.count()
@@ -161,6 +167,11 @@ def month_archive(request, year, month):
 	except EmptyPage:
 		paginated_pages = paginator.page(paginator.num_pages)
 	
+	# 生成紧凑页码范围，避免几百页时把所有页码全部输出
+	pagination_range = paginator.get_elided_page_range(
+		number=paginated_pages.number, on_each_side=2, on_ends=1
+	)
+
 	# 获取归档数据用于侧边栏
 	archive_data = get_archive_data()
 	
@@ -173,6 +184,7 @@ def month_archive(request, year, month):
 		'month': month,
 		'month_name': month_name,
 		'pages': paginated_pages,
+		'pagination_range': pagination_range,
 		'archive_data': archive_data,
 		'search_query': search_query,
 		'total_count': pages_queryset.count()

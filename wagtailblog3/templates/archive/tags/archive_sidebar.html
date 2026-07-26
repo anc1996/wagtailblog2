@@ -1,43 +1,72 @@
 {# archive/templates/archive/tags/archive_sidebar.html #}
-{% load static %}
+<div class="archive-tree" data-archive-tree>
+    {% if archive_tree %}
+        <div class="archive-summary" aria-label="归档概览">
+            <span class="archive-summary-icon" aria-hidden="true"><i class="fa fa-folder-open-o"></i></span>
+            <span class="archive-summary-text">
+                <strong>{{ archive_total_posts }}</strong> 篇文章
+                <small>{{ archive_earliest_year }}–{{ archive_latest_year }} · {{ archive_year_count }} 个年份</small>
+            </span>
+        </div>
 
-<div class="archive-tree">
-    <ul class="cat-list">
-        {% for year, year_data in archive_tree.items %}
-            <li>
-                <div class="year-entry">
+        <ul class="archive-year-list">
+            {% for year, year_data in archive_tree.items %}
+                <li class="archive-year-item{% if year_data.is_initially_hidden %} archive-year-older is-hidden{% endif %}{% if year == current_year %} is-current{% endif %}">
+                    <div class="year-entry">
+                        <a href="{{ year_data.url }}" class="year-link{% if year == current_year %} active{% endif %}">
+                            <span class="year-label"><i class="fa fa-calendar" aria-hidden="true"></i>{{ year }}年</span>
+                            <span class="archive-count-badge">{{ year_data.count }}</span>
+                        </a>
 
-                    {# 年份链接 #}
-                    <a href="{{ year_data.url }}"
-                       class="year-link {% if year == current_year %}active{% endif %}">
-                        <i class="fa fa-calendar-alt"></i> {{ year }}年 ({{ year_data.count }})
-                    </a>
+                        {% if year_data.months %}
+                            <button type="button"
+                                    class="month-toggle"
+                                    data-target="#months-{{ year }}"
+                                    aria-expanded="{% if year == current_year %}true{% else %}false{% endif %}"
+                                    aria-controls="months-{{ year }}"
+                                    aria-label="{% if year == current_year %}收起{% else %}展开{% endif %}{{ year }}年月份">
+                                <i class="fa {% if year == current_year %}fa-minus{% else %}fa-plus{% endif %}" aria-hidden="true"></i>
+                            </button>
+                        {% endif %}
+                    </div>
 
-                    {# 折叠/展开触发器 - 仅当有月份时显示 #}
                     {% if year_data.months %}
-                        <span class="month-toggle" data-target="#months-{{ year }}" role="button" tabindex="0" aria-expanded="{% if year == current_year %}true{% else %}false{% endif %}" aria-controls="months-{{ year }}">
-                            <i class="fa {% if year == current_year %}fa-minus-square-o{% else %}fa-plus-square-o{% endif %}"></i>
-                        </span>
+                        <div id="months-{{ year }}" class="months-panel"{% if year != current_year %} hidden{% endif %}>
+                            <div class="months-grid" role="list" aria-label="{{ year }}年各月文章数量">
+                                {% for month_data in year_data.month_grid %}
+                                    {% if month_data.has_posts %}
+                                        <a href="{{ month_data.url }}"
+                                           class="month-cell has-posts{% if year == current_year and month_data.month == current_month %} active{% endif %}"
+                                           role="listitem"
+                                           aria-label="{{ year }}年{{ month_data.display_name }}，{{ month_data.count }}篇文章">
+                                            <span class="month-name">{{ month_data.display_name }}</span>
+                                            <span class="month-count">{{ month_data.count }}篇</span>
+                                        </a>
+                                    {% else %}
+                                        <span class="month-cell is-empty"
+                                              role="listitem"
+                                              aria-label="{{ year }}年{{ month_data.display_name }}，暂无文章">
+                                            <span class="month-name">{{ month_data.display_name }}</span>
+                                            <span class="month-count">0篇</span>
+                                        </span>
+                                    {% endif %}
+                                {% endfor %}
+                            </div>
+                            <p class="months-grid-hint"><i class="fa fa-circle" aria-hidden="true"></i> 高亮月份可查看文章</p>
+                        </div>
                     {% endif %}
-                </div>
+                </li>
+            {% endfor %}
+        </ul>
 
-                {# 月份列表 - 默认根据 current_year 决定是否显示 #}
-                {% if year_data.months %}
-                <ul id="months-{{ year }}" class="months-list" style="padding-left: 25px; list-style: none; {% if year != current_year %}display: none;{% endif %}">
-                    {% for month, month_data in year_data.months.items %}
-                        <li>
-                            <a href="{{ month_data.url }}"
-                               class="month-link {% if year == current_year and month == current_month %}active{% endif %}">
-                                <i class="fa fa-calendar-day"></i> {{ month_data.display_name }} ({{ month_data.count }})
-                            </a>
-                        </li>
-                    {% endfor %}
-                </ul>
-                {% endif %}
-            </li>
-        {% empty %}
-            <li><a href="#">暂无归档文章</a></li>
-        {% endfor %}
-    </ul>
+        {% if hidden_year_count %}
+            <button type="button" class="archive-more-toggle" aria-expanded="false">
+                <i class="fa fa-history" aria-hidden="true"></i>
+                <span class="archive-more-label">查看更早的 {{ hidden_year_count }} 个年份</span>
+                <i class="fa fa-angle-down archive-more-chevron" aria-hidden="true"></i>
+            </button>
+        {% endif %}
+    {% else %}
+        <div class="archive-empty"><i class="fa fa-folder-open-o" aria-hidden="true"></i> 暂无归档文章</div>
+    {% endif %}
 </div>
-

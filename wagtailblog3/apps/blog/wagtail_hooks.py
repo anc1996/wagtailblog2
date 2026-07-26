@@ -125,8 +125,9 @@ def editor_js_easymde():
 def editor_js():
 	"""添加JavaScript支持到编辑器"""
 	return format_html(
-		'<script src="{}"></script>',
-		static('blog/js/editor-enhancements.js')
+		'<script src="{}"></script>\n<script src="{}"></script>',
+		static('blog/js/editor-enhancements.js'),
+		static('blog/js/wagtail_ai_context.js')
 	)
 
 

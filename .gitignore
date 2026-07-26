@@ -31,3 +31,6 @@ staticfiles_collected/
 # 刚才提到的中文说明书文件夹（如果你还没改名）
 # 如果你想保留它，就不要加下面这一行
 ''$'\350\257\264\346\230\216\344\271\246'
+# Local debugging / rollback artifacts
+.ai-fix-backups/
+wagtailblog3/static/wagtail_ai/

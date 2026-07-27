@@ -315,6 +315,155 @@
     border-radius: 8px;
 }
 
+.archive-list-page .blog-search-filter {
+    margin-bottom: 20px;
+    padding: 16px;
+    background: linear-gradient(135deg, #fffaf3 0%, #fffdf9 100%);
+    border: 1px solid #eadcca;
+    border-radius: 12px;
+    box-shadow: 0 8px 24px rgba(100, 72, 42, 0.055);
+}
+
+.archive-search-heading {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    margin-bottom: 12px;
+}
+
+.archive-search-icon {
+    display: inline-flex;
+    flex: 0 0 38px;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 38px;
+    color: #a15f25;
+    background: #f7e7d5;
+    border: 1px solid #ead2b8;
+    border-radius: 10px;
+}
+
+.archive-search-heading h2 {
+    margin: 0 0 2px;
+    color: #4f4034;
+    font-size: 16px;
+    line-height: 1.35;
+}
+
+.archive-search-heading p {
+    margin: 0;
+    color: #8c7a68;
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.archive-list-page .search-filter-form,
+.archive-list-page .search-input-wrapper {
+    width: 100%;
+}
+
+.archive-list-page .search-input-wrapper {
+    position: relative;
+    display: flex;
+    align-items: stretch;
+    gap: 8px;
+}
+
+.archive-list-page .search-input-icon {
+    position: absolute;
+    z-index: 1;
+    top: 50%;
+    left: 14px;
+    color: #a9917b;
+    pointer-events: none;
+    transform: translateY(-50%);
+}
+
+.archive-list-page .search-input {
+    min-width: 0;
+    height: 42px;
+    flex: 1 1 auto;
+    padding: 9px 14px 9px 39px;
+    color: #4f443b;
+    background: #fff;
+    border: 1px solid #ddcdbb;
+    border-radius: 9px;
+    outline: none;
+    font-size: 14px;
+    transition: border-color .2s ease, box-shadow .2s ease;
+}
+
+.archive-list-page .search-input::placeholder {
+    color: #aa9b8d;
+}
+
+.archive-list-page .search-input:focus {
+    border-color: #c58a42;
+    box-shadow: 0 0 0 3px rgba(197, 138, 66, 0.14);
+}
+
+.archive-list-page .search-button,
+.archive-list-page .clear-filter-btn {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 42px;
+    padding: 9px 15px;
+    border-radius: 9px;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1;
+    text-decoration: none;
+    transition: border-color .2s ease, background-color .2s ease, transform .2s ease;
+}
+
+.archive-list-page .search-button {
+    color: #fff;
+    background: #b97835;
+    border: 1px solid #b97835;
+    cursor: pointer;
+}
+
+.archive-list-page .search-button:hover,
+.archive-list-page .search-button:focus {
+    color: #fff;
+    background: #995f28;
+    border-color: #995f28;
+    outline: none;
+    transform: translateY(-1px);
+}
+
+.archive-list-page .clear-filter-btn {
+    color: #80664d;
+    background: #fff;
+    border: 1px solid #ddcdbb;
+}
+
+.archive-list-page .clear-filter-btn:hover,
+.archive-list-page .clear-filter-btn:focus {
+    color: #9a5720;
+    background: #fff8ef;
+    border-color: #cda77e;
+    outline: none;
+}
+
+.archive-list-page .search-results-info {
+    margin: -8px 0 16px;
+    padding: 10px 13px;
+    color: #75583e;
+    background: #fff6e9;
+    border-left: 3px solid #c58a42;
+    border-radius: 0 8px 8px 0;
+    font-size: 13px;
+}
+
+.archive-list-page .search-results-info p {
+    margin: 0;
+}
+
 .archive-list-page .blog-list {
     display: grid;
     gap: 14px;
@@ -492,9 +641,46 @@
     background: #f4eadf;
     border-radius: 999px;
     font-size: 12px;
+    text-decoration: none;
+    transition: color .2s ease, background-color .2s ease, box-shadow .2s ease, transform .2s ease;
+}
+
+.archive-list-page a.tag:hover,
+.archive-list-page a.tag:focus {
+    color: #fff;
+    background: #b97835;
+    box-shadow: 0 4px 10px rgba(161, 95, 37, 0.18);
+    outline: none;
+    transform: translateY(-1px);
+}
+
+.archive-list-page .tag i {
+    margin-right: 4px;
+    font-size: 10px;
 }
 
 @media (max-width: 575px) {
+    .archive-list-page .blog-search-filter {
+        padding: 14px;
+    }
+
+    .archive-list-page .search-input-wrapper {
+        flex-wrap: wrap;
+    }
+
+    .archive-list-page .search-input {
+        flex-basis: calc(100% - 96px);
+    }
+
+    .archive-list-page .clear-filter-btn {
+        order: 3;
+        width: 100%;
+    }
+
+    .archive-list-page .search-button {
+        min-width: 84px;
+    }
+
     .archive-list-page .blog-item {
         padding: 15px 14px;
     }

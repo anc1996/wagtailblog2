@@ -16,7 +16,7 @@ from django.core.cache import caches
 from blog.models import BlogPage
 from comments.forms import CommentForm
 from comments.models import BlogPageComment, CommentReaction
-from comments.templatetags.comment_tags import render_markdown
+from comments.templatetags.comment_tags import render_markdown, render_reply_markdown
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -388,10 +388,15 @@ def edit_comment(request):
 		comment.updated_at = timezone.now()
 		comment.save(update_fields=['content', 'updated_at'])
 		
+		rendered_content = (
+			render_reply_markdown(comment.content, comment.replied_to_user.username)
+			if comment.replied_to_user_id and comment.parent_id
+			else render_markdown(comment.content)
+		)
 		return JsonResponse({
 			'status': 'success',
 			'message': '评论已更新',
-			'content': render_markdown(comment.content)  # 返回渲染后的HTML
+			'content': rendered_content,
 		})
 	
 	except BlogPageComment.DoesNotExist:

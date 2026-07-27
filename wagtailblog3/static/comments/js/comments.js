@@ -397,7 +397,9 @@ const CommentSystem = (function() {
                 .append($newForm);
 
             const $textarea = $newForm.find(`#comment-content-${uniqueId}`);
-            $textarea.val(`@${username} `);
+            // 回复对象由 replied_to_user_id 单独保存并显示，不再把 @用户名
+            // 写入正文，避免结构化提及和 Markdown 正文重复展示。
+            $textarea.val('');
 
             const $replyInfo = $newForm.find('#reply-to-info');
             $replyInfo.find('#reply-to-name').text(username);
@@ -549,7 +551,10 @@ const CommentSystem = (function() {
             mark: { prefix: '==', suffix: '==', placeholder: '重点标记' },
             strike: { prefix: '~~', suffix: '~~', placeholder: '删除线文字' },
             code: { prefix: '`', suffix: '`', placeholder: '代码' },
-            codeblock: { prefix: '```\n', suffix: '\n```', placeholder: '在这里输入代码' }
+            codeblock: { prefix: '```\n', suffix: '\n```', placeholder: '在这里输入代码' },
+            table: {
+                template: '| 表头 1 | 表头 2 |\n| --- | --- |\n| 内容 1 | 内容 2 |'
+            }
         },
 
         apply($button) {
@@ -571,6 +576,15 @@ const CommentSystem = (function() {
 
             const config = this.actions[action];
             if (!config) return;
+
+            if (config.template) {
+                const before = start > 0 && value[start - 1] !== '\n' ? '\n\n' : '';
+                const after = end < value.length && value[end] !== '\n' ? '\n\n' : '';
+                const replacement = before + config.template + after;
+                textarea.setRangeText(replacement, start, end, 'end');
+                $textarea.trigger('input').focus();
+                return;
+            }
 
             const content = selected || config.placeholder;
             const replacement = config.prefix + content + config.suffix;
@@ -595,7 +609,38 @@ const CommentSystem = (function() {
             }).join('\n');
 
             textarea.setRangeText(transformed, lineStart, lineEnd, 'select');
+            $(textarea).trigger('input');
             textarea.focus();
+        },
+
+        insertEmoji($button) {
+            const emoji = $button.attr('data-emoji');
+            const $form = $button.closest('form, .edit-comment-form');
+            const $textarea = $form.find('textarea[name="content"], .edit-textarea').first();
+            if (!emoji || !$textarea.length) return;
+
+            const textarea = $textarea[0];
+            const value = textarea.value;
+            const start = textarea.selectionStart ?? value.length;
+            const end = textarea.selectionEnd ?? value.length;
+            textarea.setRangeText(emoji, start, end, 'end');
+            $textarea.trigger('input').focus();
+            this.closeEmojiPickers();
+        },
+
+        toggleEmojiPicker($toggle) {
+            const $picker = $toggle.siblings('.comment-emoji-picker').first();
+            const willOpen = $picker.prop('hidden');
+            this.closeEmojiPickers();
+            if (willOpen) {
+                $picker.prop('hidden', false);
+                $toggle.attr('aria-expanded', 'true');
+            }
+        },
+
+        closeEmojiPickers() {
+            $('.comment-emoji-picker').prop('hidden', true);
+            $('.comment-emoji-toggle').attr('aria-expanded', 'false');
         }
     };
 
@@ -887,6 +932,24 @@ const CommentSystem = (function() {
             $container.on('click', '.comment-markdown-toolbar button[data-md-action]', function(e) {
                 e.preventDefault();
                 MarkdownToolbar.apply($(this));
+            });
+
+            $container.on('click', '.comment-emoji-toggle', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                MarkdownToolbar.toggleEmojiPicker($(this));
+            });
+
+            $container.on('click', '.comment-emoji-picker button[data-emoji]', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                MarkdownToolbar.insertEmoji($(this));
+            });
+
+            $(document).on('click.commentEmojiPicker', function(e) {
+                if (!$(e.target).closest('.comment-emoji-picker, .comment-emoji-toggle').length) {
+                    MarkdownToolbar.closeEmojiPickers();
+                }
             });
 
             // 登录按钮

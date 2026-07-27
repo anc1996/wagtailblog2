@@ -130,9 +130,25 @@
                     <button type="button" data-md-action="ol" title="有序列表">1. 列表</button>
                     <button type="button" data-md-action="code" title="行内代码">&lt;/&gt;</button>
                     <button type="button" data-md-action="codeblock" title="代码块">代码框</button>
+                    <button type="button" data-md-action="table" title="插入 Markdown 表格">表格</button>
+                    <button type="button" class="comment-emoji-toggle" title="插入表情" aria-label="打开表情选择器" aria-expanded="false">😊</button>
+                    <div class="comment-emoji-picker" role="menu" aria-label="选择表情" hidden>
+                        <button type="button" data-emoji="😀" title="开心">😀</button>
+                        <button type="button" data-emoji="😄" title="大笑">😄</button>
+                        <button type="button" data-emoji="😂" title="笑哭">😂</button>
+                        <button type="button" data-emoji="🥰" title="喜欢">🥰</button>
+                        <button type="button" data-emoji="😍" title="喜爱">😍</button>
+                        <button type="button" data-emoji="🤔" title="思考">🤔</button>
+                        <button type="button" data-emoji="👍" title="赞">👍</button>
+                        <button type="button" data-emoji="👏" title="鼓掌">👏</button>
+                        <button type="button" data-emoji="🎉" title="庆祝">🎉</button>
+                        <button type="button" data-emoji="❤️" title="爱心">❤️</button>
+                        <button type="button" data-emoji="🔥" title="热门">🔥</button>
+                        <button type="button" data-emoji="🙏" title="感谢">🙏</button>
+                    </div>
                 </div>
                 <textarea class="form-control edit-textarea" rows="5" placeholder="编辑您的评论（支持 Markdown）..."></textarea>
-                <p class="comment-markdown-help">支持 Markdown：<code>**加粗**</code>、<code>++下划线++</code>、<code>==标记==</code>、列表、引用和代码框。</p>
+                <p class="comment-markdown-help">支持 Markdown：加粗、下划线、标记、列表、引用、代码框和表格；也可以直接插入表情。</p>
             </div>
             <div class="edit-form-actions">
                 <button type="button" class="theme-btn save-edit-btn">保存</button>
@@ -192,9 +208,25 @@
                             <button type="button" data-md-action="ol" title="有序列表">1. 列表</button>
                             <button type="button" data-md-action="code" title="行内代码">&lt;/&gt;</button>
                             <button type="button" data-md-action="codeblock" title="代码块">代码框</button>
+                            <button type="button" data-md-action="table" title="插入 Markdown 表格">表格</button>
+                            <button type="button" class="comment-emoji-toggle" title="插入表情" aria-label="打开表情选择器" aria-expanded="false">😊</button>
+                            <div class="comment-emoji-picker" role="menu" aria-label="选择表情" hidden>
+                                <button type="button" data-emoji="😀" title="开心">😀</button>
+                                <button type="button" data-emoji="😄" title="大笑">😄</button>
+                                <button type="button" data-emoji="😂" title="笑哭">😂</button>
+                                <button type="button" data-emoji="🥰" title="喜欢">🥰</button>
+                                <button type="button" data-emoji="😍" title="喜爱">😍</button>
+                                <button type="button" data-emoji="🤔" title="思考">🤔</button>
+                                <button type="button" data-emoji="👍" title="赞">👍</button>
+                                <button type="button" data-emoji="👏" title="鼓掌">👏</button>
+                                <button type="button" data-emoji="🎉" title="庆祝">🎉</button>
+                                <button type="button" data-emoji="❤️" title="爱心">❤️</button>
+                                <button type="button" data-emoji="🔥" title="热门">🔥</button>
+                                <button type="button" data-emoji="🙏" title="感谢">🙏</button>
+                            </div>
                         </div>
                         <textarea name="content" id="comment-content" placeholder="发一条友善的评论（支持 Markdown）" rows="5" class="form-control"></textarea>
-                        <p class="comment-markdown-help">示例：<code>**这句很重要。**</code> 会显示为粗体；还支持 <code>++下划线++</code>、<code>==标记==</code>、列表和代码框。</p>
+                        <p class="comment-markdown-help">支持 Markdown 表格，例如“表头 + <code>| --- | --- |</code>”；也可以用 😊 按钮插入表情。</p>
                     </div>
                     <div class="comment-form-actions-gretzia">
                         <span id="reply-to-info" class="reply-to-info template-hidden">

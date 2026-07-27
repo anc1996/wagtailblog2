@@ -29,7 +29,11 @@
                 {% if comment.replied_to_user and comment.parent %}
                     <span class="replied-to-user">@{{ comment.replied_to_user.username }} </span>
                 {% endif %}
-                {{ comment.content|render_markdown }} {# 应用 render_markdown 过滤器 #}
+                {% if comment.replied_to_user and comment.parent %}
+                    {{ comment.content|render_reply_markdown:comment.replied_to_user.username }}
+                {% else %}
+                    {{ comment.content|render_markdown }}
+                {% endif %}
             </div>
 
             {# 评论操作，使用 Gretzia 的 reply-comment 样式，并添加其他操作链接 #}

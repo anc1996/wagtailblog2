@@ -5,9 +5,11 @@
 
 {% block title %}{% translate "Authors List" %}{% endblock %}
 
+{% block body_class %}author-list-page{% endblock %}
 
 {% block extra_css %}
     <link rel="stylesheet" href="{% static 'archive/css/archive.css' %}?v=20260726-4">
+    <link rel="stylesheet" href="{% static 'css/sidebar-card-theme.css' %}?v=20260727-1">
 {% endblock %}
 
 {% block content %}
@@ -42,7 +44,7 @@
 
 
                     {# 你可以根据 Gretzia 风格添加更多 widgets，例如： #}
-                    <div class="sidebar-widget popular-tags">
+                    <div class="sidebar-widget category-widget">
                         {% top_tags_sidebar %}
                     </div>
 

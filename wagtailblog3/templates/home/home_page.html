@@ -8,7 +8,8 @@
 {% block extra_css %}
     <link href="{% static 'gretzia/css/owl.css' %}" rel="stylesheet">
     <link rel="stylesheet" href="{% static 'archive/css/archive.css' %}?v=20260726-4">
-    <link rel="stylesheet" href="{% static 'css/home-carousel.css' %}?v=20260726-3">
+    <link rel="stylesheet" href="{% static 'css/sidebar-card-theme.css' %}?v=20260727-1">
+    <link rel="stylesheet" href="{% static 'css/home-carousel.css' %}?v=20260727-2">
 {% endblock %}
 
 {% block page_vendor_js %}
@@ -226,23 +227,21 @@
             <div class="sidebar-side col-lg-4 col-md-4 col-sm-12 col-xs-12">
                     <aside class="sidebar sticky-top">
 
-                         {# 检查是否存在随机作者 #}
-                        <div class="sidebar-widget about-widget">
-                            {% random_author_sidebar %}
-                            </div>
-
-
-                    	<!-- 标签边框：获取被文章运用最多的前6名标签 -->
-                        <div class="sidebar-widget category-widget">
-                            {% top_tags_sidebar %} {# 这是新的标签 #}
-                        </div>
-
-                        {# --- 新增：文章归档 --- #}
+                        {# 文章归档 #}
                         <div class="sidebar-widget category-widget">
                             <h2>文章归档</h2>
                             {% archive_sidebar %}
                         </div>
-                        {# --- 文章归档结束 --- #}
+
+                        {# 热门标签：获取被文章使用最多的前6名标签 #}
+                        <div class="sidebar-widget category-widget">
+                            {% top_tags_sidebar %}
+                        </div>
+
+                        {# 随机作者 #}
+                        <div class="sidebar-widget about-widget">
+                            {% random_author_sidebar %}
+                        </div>
 
                     </aside>
                 </div>

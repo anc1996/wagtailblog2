@@ -959,22 +959,22 @@ html {
 }
 /* ========== 评论区视觉与安全 Markdown 增强 ========== */
 .comment-box {
-    --comment-accent: #4ca1af;
-    --comment-accent-dark: #357b86;
-    --comment-border: #e5eaee;
-    --comment-muted: #77838f;
+    --comment-accent: #a66f3f;
+    --comment-accent-dark: #7f4f29;
+    --comment-border: #ddcfbe;
+    --comment-muted: #7b6d60;
     padding: clamp(20px, 3vw, 34px);
     border: 1px solid var(--comment-border);
     border-radius: 16px;
-    background: #fff;
-    box-shadow: 0 12px 34px rgba(31, 45, 61, 0.08);
+    background: #fbf7f0;
+    box-shadow: 0 12px 34px rgba(73, 52, 34, 0.08);
 }
 
 .comment-box h2 {
-    color: #25313c;
+    color: #3b3129;
     text-transform: none;
     letter-spacing: 0;
-    border-bottom-color: #edf0f3;
+    border-bottom-color: #e4d8c9;
 }
 
 .comments-sort-area .sort-btn.active,
@@ -1001,10 +1001,18 @@ html {
 
 .comment {
     padding: 20px;
-    border: 1px solid var(--comment-border);
-    border-radius: 12px;
-    background: #fff;
-    box-shadow: 0 4px 15px rgba(31, 45, 61, 0.045);
+    border: 1px solid #dfd2c2;
+    border-left: 4px solid #d1ad82;
+    border-radius: 14px;
+    background: linear-gradient(180deg, #fdf9f3 0%, #f7f0e6 100%);
+    box-shadow: 0 6px 20px rgba(73, 52, 34, 0.055);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.comment:hover {
+    border-color: #d0b99f;
+    border-left-color: var(--comment-accent);
+    box-shadow: 0 10px 26px rgba(73, 52, 34, 0.09);
 }
 
 .comment:last-of-type {
@@ -1014,8 +1022,8 @@ html {
 .comment .image {
     width: 48px;
     height: 48px;
-    border: 2px solid #eef3f5;
-    box-shadow: 0 3px 10px rgba(31, 45, 61, 0.1);
+    border: 2px solid #eadfd2;
+    box-shadow: 0 3px 10px rgba(73, 52, 34, 0.1);
 }
 
 .comment:hover .image {
@@ -1028,7 +1036,7 @@ html {
 
 .comment h3 {
     margin: 0 0 2px;
-    color: #26343f;
+    color: #3b3129;
     font-size: 16px;
 }
 
@@ -1037,16 +1045,17 @@ html {
 }
 
 .comment .text {
-    color: #3f4b55;
+    color: #50453b;
     overflow-wrap: anywhere;
 }
 
 .comment.nested-comment {
     margin: 14px 0 0 24px;
     padding: 16px;
-    border: 1px solid #e5eef0;
-    border-left: 3px solid var(--comment-accent);
-    background: #f8fbfb;
+    border: 1px solid #dfd1bf;
+    border-left: 4px solid var(--comment-accent);
+    border-radius: 12px;
+    background: #f3eadf;
     box-shadow: none;
 }
 
@@ -1058,7 +1067,7 @@ html {
 .comment-actions-list {
     gap: 6px;
     padding-top: 6px;
-    border-top: 1px solid #f0f2f4;
+    border-top: 1px solid #e7dccf;
 }
 
 .comment-actions-list a {
@@ -1078,9 +1087,54 @@ html {
 .comment-markdown ul,
 .comment-markdown ol,
 .comment-markdown blockquote,
-.comment-markdown pre {
+.comment-markdown pre,
+.comment-markdown table {
     margin-top: 0;
     margin-bottom: 12px;
+}
+
+.comment-markdown table {
+    display: block;
+    width: max-content;
+    min-width: min(100%, 420px);
+    max-width: 100%;
+    overflow-x: auto;
+    border: 1px solid #d4c3ae;
+    border-collapse: separate;
+    border-spacing: 0;
+    border-radius: 9px;
+    background: #fbf7f0;
+    font-size: 14px;
+    line-height: 1.55;
+}
+
+.comment-markdown th,
+.comment-markdown td {
+    min-width: 100px;
+    padding: 9px 12px;
+    border-right: 1px solid #ded0bf;
+    border-bottom: 1px solid #ded0bf;
+    text-align: left;
+    vertical-align: top;
+}
+
+.comment-markdown th {
+    background: #eadfd1;
+    color: #4b3b2e;
+    font-weight: 700;
+}
+
+.comment-markdown tr:last-child td {
+    border-bottom: 0;
+}
+
+.comment-markdown th:last-child,
+.comment-markdown td:last-child {
+    border-right: 0;
+}
+
+.comment-markdown tbody tr:nth-child(even) td {
+    background: #f4ece2;
 }
 
 .comment-markdown strong {
@@ -1124,15 +1178,15 @@ html {
 
 .comment .text blockquote {
     border-left-color: var(--comment-accent);
-    background: #f2f8f9;
-    color: #52616c;
+    background: #f0e6d9;
+    color: #66584c;
     font-style: normal;
 }
 
 .comment .text code,
 .comment-markdown-help code {
-    border: 1px solid #dce4e8;
-    background: #f3f6f8;
+    border: 1px solid #dacbbb;
+    background: #eee4d8;
     color: #b23c4b;
 }
 
@@ -1158,12 +1212,14 @@ html {
 .edit-comment-form {
     border-color: var(--comment-border);
     border-radius: 12px;
-    box-shadow: 0 8px 24px rgba(31, 45, 61, 0.08);
+    background: #fbf7f0;
+    box-shadow: 0 8px 24px rgba(73, 52, 34, 0.08);
 }
 
 .comment-reply-form .form-control,
 .edit-comment-form .edit-textarea {
-    border-color: #ccd6dc;
+    border-color: #d5c4af;
+    background: #fffaf3;
     border-radius: 0 0 8px 8px;
     line-height: 1.6;
 }
@@ -1175,15 +1231,16 @@ html {
 }
 
 .comment-markdown-toolbar {
+    position: relative;
     display: flex;
     align-items: center;
     flex-wrap: wrap;
     gap: 5px;
     padding: 7px;
-    border: 1px solid #ccd6dc;
+    border: 1px solid #d5c4af;
     border-bottom: 0;
     border-radius: 8px 8px 0 0;
-    background: #f6f8f9;
+    background: #eee4d8;
 }
 
 .comment-markdown-toolbar button {
@@ -1201,14 +1258,47 @@ html {
 
 .comment-markdown-toolbar button:hover,
 .comment-markdown-toolbar button:focus-visible {
-    border-color: #c8d6dc;
-    background: #fff;
+    border-color: #cfb89e;
+    background: #fbf4ea;
     color: var(--comment-accent-dark);
 }
 
 .comment-markdown-toolbar button:focus-visible {
     outline: 2px solid rgba(76, 161, 175, 0.35);
     outline-offset: 1px;
+}
+
+.comment-markdown-toolbar .comment-emoji-toggle {
+    font-size: 17px;
+    line-height: 1;
+}
+
+.comment-emoji-picker {
+    position: absolute;
+    z-index: 30;
+    top: calc(100% + 7px);
+    right: 6px;
+    display: grid;
+    grid-template-columns: repeat(6, 38px);
+    gap: 4px;
+    padding: 8px;
+    border: 1px solid #d1bda6;
+    border-radius: 10px;
+    background: #fbf7f0;
+    box-shadow: 0 12px 30px rgba(73, 52, 34, 0.18);
+}
+
+.comment-emoji-picker[hidden] {
+    display: none;
+}
+
+.comment-emoji-picker button {
+    width: 38px;
+    min-width: 38px;
+    height: 36px;
+    padding: 0;
+    border-radius: 7px;
+    font-size: 21px;
 }
 
 .comment-markdown-help {
@@ -1244,8 +1334,13 @@ html {
     }
 
     .comment-markdown-toolbar {
-        max-height: 78px;
-        overflow-y: auto;
+        max-height: none;
+    }
+
+    .comment-emoji-picker {
+        right: auto;
+        left: 6px;
+        grid-template-columns: repeat(4, 38px);
     }
 
     .comment-reply-form .author-image {

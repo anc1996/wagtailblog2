@@ -30,7 +30,11 @@
                 {% if reply.replied_to_user %}
                     <span class="replied-to-user">@{{ reply.replied_to_user.username }} </span>
                 {% endif %}
-                {{ reply.content|render_markdown }} {# 应用 render_markdown 过滤器 #}
+                {% if reply.replied_to_user %}
+                    {{ reply.content|render_reply_markdown:reply.replied_to_user.username }}
+                {% else %}
+                    {{ reply.content|render_markdown }}
+                {% endif %}
             </div>
 
             {# 评论操作 #}

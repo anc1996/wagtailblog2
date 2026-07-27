@@ -11,6 +11,7 @@ from markdown_it.renderer import RendererHTML
 _ALLOWED_TAGS = {
     "p", "br", "strong", "em", "del", "u", "mark",
     "ul", "ol", "li", "blockquote", "code", "pre", "a", "hr",
+    "table", "thead", "tbody", "tr", "th", "td",
 }
 _ALLOWED_ATTRIBUTES = {
     "a": ["href", "title", "rel", "target"],
@@ -54,7 +55,7 @@ def _build_renderer() -> MarkdownIt:
             "typographer": False,
             "breaks": True,
         },
-    ).enable("strikethrough")
+    ).enable(["strikethrough", "table"])
     md.renderer.rules["text"] = _render_text
     md.renderer.rules["link_open"] = _render_link_open
     md.renderer.rules["s_open"] = lambda tokens, index, options, env: "<del>"
@@ -79,3 +80,23 @@ def render_comment_markdown(value: str | None) -> str:
         strip=True,
         strip_comments=True,
     )
+
+
+def render_reply_markdown(value: object, replied_to_username: object) -> str:
+    """Render a reply without duplicating its structured leading @mention.
+
+    Older reply rows include ``@username`` in ``content`` because the browser
+    used to prefill it. Templates already render the replied-to user separately,
+    so remove only an exact mention at the start for display. Stored content is
+    deliberately left unchanged for editing and audit purposes.
+    """
+    source = str(value or "")
+    username = str(replied_to_username or "").strip()
+    prefix = f"@{username}"
+
+    if username and source.startswith(prefix):
+        remainder = source[len(prefix):]
+        if not remainder or remainder[0].isspace():
+            source = remainder.lstrip()
+
+    return render_comment_markdown(source)

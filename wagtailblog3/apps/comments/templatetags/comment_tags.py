@@ -5,7 +5,7 @@ from django.utils.html import conditional_escape
 from comments.models import BlogPageComment, CommentReaction
 from django.core.paginator import Paginator
 
-from comments.markdown import render_comment_markdown
+from comments.markdown import render_comment_markdown, render_reply_markdown as render_reply
 
 register = template.Library()
 
@@ -58,6 +58,12 @@ def render_comments(context, page):
 def render_markdown(value):
 	"""Render the restricted, sanitized Markdown dialect used by comments."""
 	return mark_safe(render_comment_markdown(value))
+
+
+@register.filter(name='render_reply_markdown')
+def render_reply_markdown(value, replied_to_username):
+	"""Render reply content while its structured @mention is shown separately."""
+	return mark_safe(render_reply(value, replied_to_username))
 
 
 @register.filter(name='escape_attr')

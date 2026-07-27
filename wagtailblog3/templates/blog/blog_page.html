@@ -4,7 +4,7 @@
 
 {% block extra_css %}
     {{ block.super }}
-    <link rel="stylesheet" href="{% static 'blog/css/blog.css' %}?v=20260726-1">
+    <link rel="stylesheet" href="{% static 'blog/css/blog.css' %}?v=20260727-4">
     <link rel="stylesheet" href="{% static 'blog/css/blog-resize.css' %}">
     {% if has_image or has_gallery %}<link rel="stylesheet" href="{% static 'blog/css/lightbox/lightbox.css' %}">{% endif %}
 
@@ -22,18 +22,30 @@
     {% if has_embed %}<link rel="stylesheet" href="{% static 'blog/css/embed_blocks.css' %}">{% endif %}
     {% if has_table %}<link rel="stylesheet" href="{% static 'blog/css/table_blocks.css' %}">{% endif %}
     {% if has_mermaid %}{% include "includes/content/mermaid_css.html" %}{% endif %}
-    <link rel="stylesheet" href="{% static 'comments/css/comments.css' %}?v=20260726-2">
+    <link rel="stylesheet" href="{% static 'comments/css/comments.css' %}?v=20260727-2">
 
 {% endblock %}
 
 {% block content %}
 <div class="blog-page-wrapper">
-    <section class="blog-hero">
+    <section class="blog-hero {% if page.featured_image %}blog-hero--with-image{% else %}blog-hero--default{% endif %}">
         {% if page.featured_image %}
             {% image page.featured_image original class="blog-featured-image" %}
         {% endif %}
         <div class="blog-container hero-container">
             <div class="blog-hero-content">
+                <div class="blog-hero-eyebrow">
+                    <i class="fa fa-bookmark" aria-hidden="true"></i>
+                    <span>博客文章</span>
+                    {% if page.get_parent.get_parent.title %}
+                        <span class="blog-hero-eyebrow-separator" aria-hidden="true">·</span>
+                        <span>{{ page.get_parent.get_parent.title }}</span>
+                    {% endif %}
+                    {% if page.get_parent.title %}
+                        <span class="blog-hero-eyebrow-separator" aria-hidden="true">·</span>
+                        <span>{{ page.get_parent.title }}</span>
+                    {% endif %}
+                </div>
                 <h1 class="blog-title">{{ page.title }}</h1>
                 {% if page.intro %}
                     <div class="blog-intro" data-blog-intro>
@@ -51,17 +63,6 @@
                     </div>
                 {% endif %}
                 <div class="blog-meta">
-                    {% if page.authors.all %}
-                        <div class="blog-meta-item">
-                            <i class="fa fa-user"></i>
-                            <span>
-                                {% for author in page.authors.all %}
-                                    {{ author.name }}{% if not forloop.last %}, {% endif %}
-                                {% endfor %}
-                            </span>
-                        </div>
-
-                    {% endif %}
                     <div class="blog-meta-item">
                         <i class="fa fa-calendar"></i>
                         <span>{{ page.date|date:"Y年m月d日" }}</span>
@@ -72,24 +73,36 @@
                         <span>今日 {{ vc.today }} 次 · 共 {{ vc.total }} 次浏览</span>
                     </div>
                     {% endwith %}
-                    {% with tags=page.tags.all %}
-                        {% if tags %}
-                            <div class="blog-meta-item">
-                                <i class="fa fa-tags"></i>
+                    {% with authors=page.authors.all %}
+                        {% if authors %}
+                            <div class="blog-meta-item blog-meta-author">
+                                <i class="fa fa-pencil" aria-hidden="true"></i>
                                 <span>
-                                    {% for tag in tags %}
-                                        {% if blog_tag_index_page %}
-                                            <a href="{% pageurl blog_tag_index_page %}?tag={{ tag.slug }}"
-                                               style="color: inherit; text-decoration: underline;">{{ tag.name }}</a>{% if not forloop.last %}, {% endif %}
-                                        {% else %}
-                                            {{ tag.name }}{% if not forloop.last %}, {% endif %}
-                                        {% endif %}
+                                    {% for author in authors %}
+                                        {{ author.name }}{% if not forloop.last %}、{% endif %}
                                     {% endfor %}
                                 </span>
                             </div>
                         {% endif %}
                     {% endwith %}
                 </div>
+                {% with tags=page.tags.all %}
+                    {% if tags %}
+                        <div class="blog-hero-tags" aria-label="文章标签">
+                            <i class="fa fa-tags blog-hero-tags-icon" aria-hidden="true"></i>
+                            <div class="blog-hero-tags-list">
+                                {% for tag in tags %}
+                                    {% if blog_tag_index_page %}
+                                        <a class="blog-meta-tag" href="{% pageurl blog_tag_index_page %}?tag={{ tag.slug|urlencode }}">{{ tag.name }}</a>
+                                    {% else %}
+                                        <span class="blog-meta-tag blog-meta-tag--text">{{ tag.name }}</span>
+                                    {% endif %}
+                                    {% if not forloop.last %}<span class="blog-meta-separator" aria-hidden="true">●</span>{% endif %}
+                                {% endfor %}
+                            </div>
+                        </div>
+                    {% endif %}
+                {% endwith %}
             </div>
         </div>
     </section>
@@ -301,7 +314,7 @@
 {% block extra_js %}
     {{ block.super }}
     <!-- 使用 ES6 模块 -->
-    <script type="module" src="{% static 'comments/js/comments.js' %}?v=20260726-2"></script>
+    <script type="module" src="{% static 'comments/js/comments.js' %}?v=20260727-2"></script>
 
     <script src="{% static 'blog/js/blog_page.js' %}?v=20260726-1" defer></script>
 

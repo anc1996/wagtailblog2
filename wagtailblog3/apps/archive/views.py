@@ -4,7 +4,7 @@ from django.shortcuts import render
 from django.db.models import Count
 from django.db.models.functions import TruncYear, TruncMonth
 from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
-from blog.models import BlogPage
+from blog.models import BlogPage, BlogTagIndexPage
 import datetime
 import logging
 
@@ -117,6 +117,7 @@ def year_archive(request, year):
 
 	# 获取归档数据用于侧边栏
 	archive_data = get_archive_data()
+	blog_tag_index_page = BlogTagIndexPage.objects.live().public().first()
 	
 	# 返回数据到模板
 	return render(request, 'archive/year_archive.html', {
@@ -124,6 +125,7 @@ def year_archive(request, year):
 		'pages': paginated_pages,
 		'pagination_range': pagination_range,
 		'archive_data': archive_data,
+		'blog_tag_index_page': blog_tag_index_page,
 		'search_query': search_query,
 		'total_count': pages_queryset.count()
 	})
@@ -174,6 +176,7 @@ def month_archive(request, year, month):
 
 	# 获取归档数据用于侧边栏
 	archive_data = get_archive_data()
+	blog_tag_index_page = BlogTagIndexPage.objects.live().public().first()
 	
 	# 获取月份名称
 	month_name = datetime.date(year, month, 1).strftime('%B')
@@ -186,6 +189,7 @@ def month_archive(request, year, month):
 		'pages': paginated_pages,
 		'pagination_range': pagination_range,
 		'archive_data': archive_data,
+		'blog_tag_index_page': blog_tag_index_page,
 		'search_query': search_query,
 		'total_count': pages_queryset.count()
 	})

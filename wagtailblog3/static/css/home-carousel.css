@@ -1,4 +1,4 @@
-/* 首页顶部轮播：统一为数据库上传图原有的 800:400 响应式比例。 */
+/* 首页顶部轮播：纯比例响应，不使用固定像素高度。 */
 .home-featured-carousel,
 .home-featured-carousel .owl-stage-outer,
 .home-featured-carousel .owl-stage,
@@ -8,7 +8,7 @@
 }
 
 .home-featured-carousel .slide {
-    aspect-ratio: 800 / 400;
+    aspect-ratio: 16 / 5;
     overflow: hidden;
     background: #111;
 }
@@ -27,6 +27,18 @@
     display: block;
     object-fit: cover;
     object-position: center;
+}
+
+@media (max-width: 991px) {
+    .home-featured-carousel .slide {
+        aspect-ratio: 16 / 6;
+    }
+}
+
+@media (max-width: 575px) {
+    .home-featured-carousel .slide {
+        aspect-ratio: 4 / 3;
+    }
 }
 
 /* 首页热门阅读：访问量与反应统计保持紧凑并列。 */
@@ -81,5 +93,221 @@
 
     .home-page .post-stats .reaction-stats {
         gap: 8px;
+    }
+}
+
+/* 首页暖色主题：与标签索引页共用柔和的暖灰米色视觉基底。 */
+.home-page {
+    --home-page-bg: #f7f5f2;
+    --home-card-bg: #ffffff;
+    --home-card-soft: #fbf3ec;
+    --home-border: #ece5de;
+    --home-border-strong: #ddd3ca;
+    --home-ink: #332f2c;
+    --home-muted: #716b66;
+    --home-accent: #ba6d3c;
+    background: var(--home-page-bg);
+    color: var(--home-ink);
+}
+
+.home-page .main-slider,
+.home-page .sidebar-page-container {
+    background: var(--home-page-bg);
+}
+
+.home-page .main-slider {
+    padding-top: 28px;
+}
+
+.home-page .home-featured-carousel {
+    overflow: hidden;
+    border: 1px solid var(--home-border);
+    border-radius: 18px;
+    background: var(--home-card-bg);
+    box-shadow: 0 14px 42px rgba(72, 54, 43, 0.08);
+}
+
+.home-page .home-featured-carousel .slide,
+.home-page .home-featured-carousel .slide .image,
+.home-page .home-featured-carousel .slide .image img {
+    border-radius: inherit;
+}
+
+.home-page .home-featured-carousel .slide .overlay-box {
+    border-radius: inherit;
+    background: linear-gradient(90deg, rgba(38, 28, 22, 0.72), rgba(38, 28, 22, 0.28));
+}
+
+.home-page .sidebar-page-container {
+    padding-top: 64px;
+}
+
+.home-page .sec-title h2,
+.home-page .sec-title h2 a,
+.home-page .news-block-two .inner-box .lower-content h2,
+.home-page .news-block-two .inner-box .lower-content h2 a,
+.home-page .sidebar-widget h2,
+.home-page .sidebar-widget h2 a {
+    color: var(--home-ink);
+}
+
+.home-page .sec-title .post-date,
+.home-page .news-block-two .inner-box .lower-content .post-date,
+.home-page .news-block-two .inner-box .lower-content .text,
+.home-page .about-widget .inner-box .text {
+    color: var(--home-muted);
+}
+
+.home-page .sec-title .post-date::before,
+.home-page .sec-title .post-date::after,
+.home-page .news-block-two .inner-box .lower-content .post-date::before,
+.home-page .news-block-two .inner-box .lower-content .post-date::after {
+    background-color: var(--home-border-strong);
+}
+
+.home-page .news-detail > .inner-box {
+    overflow: hidden;
+    margin-bottom: 58px;
+    padding: 24px;
+    border: 1px solid var(--home-border);
+    border-radius: 18px;
+    background: linear-gradient(135deg, var(--home-card-bg) 0%, var(--home-card-soft) 100%);
+    box-shadow: 0 14px 42px rgba(72, 54, 43, 0.07);
+}
+
+.home-page .news-detail .inner-box .image,
+.home-page .news-detail .inner-box .image img {
+    border-radius: 12px;
+}
+
+.home-page .news-detail .fullwidth-content {
+    color: var(--home-muted);
+}
+
+.home-page .news-detail .fullwidth-content blockquote {
+    border-color: var(--home-border-strong);
+    color: var(--home-ink);
+}
+
+.home-page .news-detail .fullwidth-content blockquote::before,
+.home-page .news-detail .fullwidth-content blockquote::after {
+    background-color: var(--home-border-strong);
+}
+
+.home-page .news-block-two {
+    margin-bottom: 30px;
+}
+
+.home-page .news-block-two > .inner-box {
+    height: 100%;
+    overflow: hidden;
+    border: 1px solid var(--home-border);
+    border-radius: 16px;
+    background: var(--home-card-bg);
+    box-shadow: 0 8px 30px rgba(70, 52, 42, 0.055);
+    transition: transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease;
+}
+
+.home-page .news-block-two > .inner-box:hover {
+    border-color: rgba(186, 109, 60, 0.28);
+    box-shadow: 0 14px 34px rgba(70, 52, 42, 0.095);
+    transform: translateY(-2px);
+}
+
+.home-page .news-block-two .inner-box .image,
+.home-page .news-block-two .inner-box .image img {
+    border-radius: 15px 15px 0 0;
+}
+
+.home-page .news-block-two .inner-box .lower-content {
+    padding: 25px 24px 24px;
+}
+
+.home-page .post-stats {
+    border-top-color: var(--home-border);
+    color: var(--home-muted);
+}
+
+.home-page .post-stats .view-count strong {
+    color: #514a45;
+}
+
+.home-page .sidebar-side .sidebar-widget {
+    margin-bottom: 24px;
+    padding: 24px;
+    border: 1px solid var(--home-border);
+    border-radius: 16px;
+    background: var(--home-card-bg);
+    box-shadow: 0 9px 30px rgba(72, 54, 43, 0.06);
+}
+
+.home-page .sidebar-side .sidebar-widget:last-child {
+    margin-bottom: 0;
+    border: 1px solid var(--home-border);
+}
+
+.home-page .sidebar-widget h2 {
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--home-border);
+}
+
+.home-page .about-widget .inner-box .image,
+.home-page .about-widget .inner-box .image img {
+    border-radius: 11px;
+}
+
+.home-page .category-widget .cat-list li {
+    border-bottom-color: var(--home-border);
+}
+
+.home-page .category-widget .cat-list li a {
+    color: #5d5752;
+}
+
+.home-page .category-widget .cat-list li a:hover,
+.home-page .category-widget .cat-list li a:focus,
+.home-page .sidebar-widget h2 a:hover,
+.home-page .sidebar-widget h2 a:focus {
+    color: var(--home-accent);
+}
+
+@media (max-width: 991px) {
+    .home-page .main-slider {
+        padding-top: 18px;
+    }
+
+    .home-page .sidebar-page-container {
+        padding-top: 48px;
+    }
+
+    .home-page .sidebar-page-container .content-side .content-inner {
+        margin-right: 0;
+    }
+
+    .home-page .sidebar-page-container .sidebar-side .sidebar {
+        padding-left: 0;
+    }
+}
+
+@media (max-width: 575px) {
+    .home-page .main-slider .auto-container {
+        padding-right: 12px;
+        padding-left: 12px;
+    }
+
+    .home-page .home-featured-carousel,
+    .home-page .news-detail > .inner-box,
+    .home-page .news-block-two > .inner-box,
+    .home-page .sidebar-side .sidebar-widget {
+        border-radius: 13px;
+    }
+
+    .home-page .news-detail > .inner-box,
+    .home-page .sidebar-side .sidebar-widget {
+        padding: 17px;
+    }
+
+    .home-page .news-block-two .inner-box .lower-content {
+        padding: 22px 18px 20px;
     }
 }

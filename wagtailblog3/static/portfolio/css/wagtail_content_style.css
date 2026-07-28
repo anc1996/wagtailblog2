@@ -1,103 +1,519 @@
-/*
-    文件路径: static/portfolio/css/wagtail_content_style.css
-    作用: 为通过 Wagtail StreamField 渲染的内容提供一套独立的、
-          模仿 Wagtail 后台编辑器的样式，以确保内容的可读性，
-          且不受 Gretzia 主题文字风格的影响。
-*/
-
-.wagtail-content-render {
-    /* 基础排版 */
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
-    font-size: 16px;
-    line-height: 1.7;
-    color: #212529; /* 标准的深灰色文字 */
+/* Portfolio page: warm editorial palette shared with the refined blog index. */
+.portfolio-page {
+    --portfolio-bg: #f7f5f2;
+    --portfolio-card: #ffffff;
+    --portfolio-soft: #fbf3ec;
+    --portfolio-soft-strong: #f3e7dd;
+    --portfolio-border: #ece5de;
+    --portfolio-border-strong: #ddd3ca;
+    --portfolio-ink: #332f2c;
+    --portfolio-muted: #716b66;
+    --portfolio-accent: #ba6d3c;
+    --portfolio-accent-dark: #8d4d29;
+    background: var(--portfolio-bg);
+    color: var(--portfolio-ink);
 }
 
-/* 标题 */
-.wagtail-content-render h1,
-.wagtail-content-render h2,
-.wagtail-content-render h3,
-.wagtail-content-render h4,
-.wagtail-content-render h5,
-.wagtail-content-render h6 {
-    font-family: inherit; /* 使用与基础排版相同的字体 */
+.portfolio-page .portfolio-shell {
+    overflow: hidden;
+    background:
+        radial-gradient(circle at 8% 15%, rgba(186, 109, 60, 0.08), transparent 25rem),
+        radial-gradient(circle at 94% 62%, rgba(141, 77, 41, 0.055), transparent 28rem),
+        var(--portfolio-bg);
+}
+
+.portfolio-page .portfolio-hero {
+    position: relative;
+    isolation: isolate;
+    min-height: 320px;
+    overflow: hidden;
+    background:
+        linear-gradient(120deg, rgba(49, 40, 35, 0.96), rgba(91, 57, 39, 0.91)),
+        url('/static/gretzia/images/resource/banner-1.jpg') center / cover no-repeat;
+    color: #fff;
+}
+
+.portfolio-page .portfolio-hero::after {
+    position: absolute;
+    inset: auto 0 0;
+    height: 5px;
+    background: linear-gradient(90deg, transparent, var(--portfolio-accent), transparent);
+    content: '';
+}
+
+.portfolio-page .portfolio-hero-pattern {
+    position: absolute;
+    z-index: -1;
+    inset: 0;
+    opacity: 0.16;
+    background-image:
+        linear-gradient(rgba(255,255,255,.16) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,.16) 1px, transparent 1px);
+    background-size: 42px 42px;
+    mask-image: linear-gradient(90deg, #000, transparent 76%);
+}
+
+.portfolio-page .portfolio-hero-inner {
+    display: flex;
+    min-height: 320px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 48px;
+    padding-top: 58px;
+    padding-bottom: 58px;
+}
+
+.portfolio-page .portfolio-hero-copy {
+    max-width: 760px;
+}
+
+.portfolio-page .portfolio-eyebrow,
+.portfolio-page .portfolio-section-label {
+    display: block;
+    margin-bottom: 10px;
+    color: #e4a77e;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: .18em;
+    line-height: 1.2;
+}
+
+.portfolio-page .portfolio-hero h1 {
+    margin: 0 0 16px;
+    color: #fff;
+    font-family: 'Playfair Display', serif;
+    font-size: clamp(42px, 6vw, 68px);
     font-weight: 600;
-    line-height: 1.3;
-    color: #121212; /* 标题颜色更深一些 */
-    margin-top: 1.5em;
-    margin-bottom: 0.75em;
+    line-height: 1.08;
+    text-shadow: 0 7px 30px rgba(0, 0, 0, .25);
 }
 
-.wagtail-content-render h1 { font-size: 2.25em; }
-.wagtail-content-render h2 { font-size: 1.8em; }
-.wagtail-content-render h3 { font-size: 1.5em; }
-.wagtail-content-render h4 { font-size: 1.25em; }
-.wagtail-content-render h5 { font-size: 1.1em; }
-.wagtail-content-render h6 { font-size: 1em; }
-
-
-/* 段落 */
-.wagtail-content-render p {
-    margin-bottom: 1.25em;
+.portfolio-page .portfolio-hero p {
+    max-width: 660px;
+    margin: 0;
+    color: rgba(255,255,255,.78);
+    font-size: 17px;
+    line-height: 1.8;
 }
 
-/* 链接 */
-.wagtail-content-render a {
-    color: #007bff; /* 标准蓝色链接 */
-    text-decoration: none;
-    transition: all 0.2s ease-in-out;
+.portfolio-page .portfolio-hero-mark {
+    display: grid;
+    flex: 0 0 118px;
+    width: 118px;
+    height: 118px;
+    place-items: center;
+    border: 1px solid rgba(255,255,255,.24);
+    border-radius: 34px;
+    background: rgba(255,255,255,.08);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.12), 0 24px 60px rgba(0,0,0,.2);
+    color: #efb58d;
+    font-size: 46px;
+    transform: rotate(4deg);
+    backdrop-filter: blur(8px);
 }
 
-.wagtail-content-render a:hover {
-    color: #0056b3;
-    text-decoration: underline;
+.portfolio-page .portfolio-content-section {
+    padding: 64px 0 86px;
 }
 
-/* 列表 */
-.wagtail-content-render ul,
-.wagtail-content-render ol {
-    margin-bottom: 1.25em;
-    padding-left: 2em;
+.portfolio-page .portfolio-content {
+    max-width: 1120px;
+    margin: 0 auto;
+    color: var(--portfolio-ink);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif;
+    font-size: 16px;
+    line-height: 1.82;
 }
 
-.wagtail-content-render li {
-    margin-bottom: 0.5em;
+.portfolio-page .portfolio-stream-block {
+    margin-bottom: 34px;
 }
 
-/* 引用块 */
-.wagtail-content-render blockquote {
-    font-size: 1.1em;
-    padding: 10px 20px;
-    margin: 0 0 20px;
-    border-left: 5px solid #e9ecef; /* 浅灰色左边框 */
-    color: #6c757d; /* 柔和的文字颜色 */
-    background-color: #f8f9fa; /* 非常浅的背景色 */
-}
-
-.wagtail-content-render blockquote p {
+.portfolio-page .portfolio-stream-block:last-child {
     margin-bottom: 0;
 }
 
-/* 水平分割线 */
-.wagtail-content-render hr {
-    margin: 2em 0;
-    border: 0;
-    border-top: 1px solid #dee2e6; /* 标准浅灰色分割线 */
+/* Standalone heading and rich-text blocks from BaseStreamBlock. */
+.portfolio-page .portfolio-stream-block--heading_block,
+.portfolio-page .portfolio-stream-block--paragraph_block,
+.portfolio-page .portfolio-stream-block--image_block,
+.portfolio-page .portfolio-stream-block--embed_block {
+    padding: 30px 34px;
+    border: 1px solid var(--portfolio-border);
+    border-radius: 20px;
+    background: rgba(255,255,255,.92);
+    box-shadow: 0 13px 38px rgba(72, 54, 43, .065);
 }
 
-/* 行内代码 */
-.wagtail-content-render p > code,
-.wagtail-content-render li > code {
-    padding: .2em .4em;
+.portfolio-page .portfolio-stream-block--heading_block {
+    margin-bottom: 18px;
+    padding-bottom: 21px;
+    border-left: 4px solid var(--portfolio-accent);
+    background: linear-gradient(105deg, #fff, var(--portfolio-soft));
+}
+
+.portfolio-page .portfolio-stream-block--heading_block h2,
+.portfolio-page .portfolio-stream-block--heading_block h3,
+.portfolio-page .portfolio-stream-block--heading_block h4 {
     margin: 0;
-    font-size: 85%;
-    background-color: rgba(27,31,35,.05);
-    border-radius: 3px;
-    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
+    color: var(--portfolio-ink);
+    font-family: 'Playfair Display', serif;
+    font-weight: 600;
+    line-height: 1.25;
 }
 
-/*
-    注意: 对于 <pre> 中的代码块 (例如来自 MarkdownBlock)，
-    其样式应由您的语法高亮主题 (如 highlighting.css) 单独处理。
-    这可以确保我们不会覆盖语法高亮的主题。
-*/
+.portfolio-page .portfolio-stream-block--heading_block h2 { font-size: clamp(28px, 4vw, 38px); }
+.portfolio-page .portfolio-stream-block--heading_block h3 { font-size: 27px; }
+.portfolio-page .portfolio-stream-block--heading_block h4 { font-size: 23px; }
+
+.portfolio-page .portfolio-stream-block--paragraph_block {
+    margin-top: -4px;
+}
+
+.portfolio-page .wagtail-content-render p,
+.portfolio-page .portfolio-richtext p {
+    margin: 0 0 1.15em;
+}
+
+.portfolio-page .wagtail-content-render p:last-child,
+.portfolio-page .portfolio-richtext p:last-child {
+    margin-bottom: 0;
+}
+
+.portfolio-page .wagtail-content-render h2,
+.portfolio-page .wagtail-content-render h3,
+.portfolio-page .wagtail-content-render h4,
+.portfolio-page .portfolio-richtext h2,
+.portfolio-page .portfolio-richtext h3,
+.portfolio-page .portfolio-richtext h4 {
+    margin: 1.45em 0 .65em;
+    color: var(--portfolio-ink);
+    font-weight: 700;
+    line-height: 1.35;
+}
+
+.portfolio-page .wagtail-content-render ul,
+.portfolio-page .wagtail-content-render ol,
+.portfolio-page .portfolio-richtext ul,
+.portfolio-page .portfolio-richtext ol {
+    margin: 0 0 1.25em;
+    padding-left: 1.45em;
+}
+
+.portfolio-page .wagtail-content-render li,
+.portfolio-page .portfolio-richtext li {
+    margin-bottom: .45em;
+}
+
+.portfolio-page .wagtail-content-render a,
+.portfolio-page .portfolio-richtext a {
+    color: var(--portfolio-accent-dark);
+    text-decoration: underline;
+    text-decoration-color: rgba(141,77,41,.28);
+    text-underline-offset: 3px;
+}
+
+.portfolio-page .wagtail-content-render blockquote,
+.portfolio-page .portfolio-richtext blockquote {
+    margin: 1.4em 0;
+    padding: 16px 20px;
+    border-left: 4px solid var(--portfolio-accent);
+    border-radius: 0 12px 12px 0;
+    background: var(--portfolio-soft);
+    color: #5f5852;
+}
+
+/* Project card block. */
+.portfolio-page .portfolio-project-card,
+.portfolio-page .portfolio-featured {
+    overflow: hidden;
+    border: 1px solid var(--portfolio-border);
+    border-radius: 22px;
+    background: var(--portfolio-card);
+    box-shadow: 0 16px 46px rgba(72, 54, 43, .08);
+}
+
+.portfolio-page .portfolio-project-grid {
+    display: grid;
+    grid-template-columns: minmax(320px, .92fr) minmax(0, 1.08fr);
+    min-height: 360px;
+}
+
+.portfolio-page .portfolio-project-grid--text-only {
+    grid-template-columns: 1fr;
+    min-height: 0;
+}
+
+.portfolio-page .portfolio-project-media {
+    position: relative;
+    min-height: 360px;
+    margin: 0;
+    overflow: hidden;
+    background: var(--portfolio-soft-strong);
+}
+
+.portfolio-page .portfolio-project-media::after {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent 72%, rgba(255,255,255,.16));
+    content: '';
+    pointer-events: none;
+}
+
+.portfolio-page .portfolio-project-media img {
+    width: 100%;
+    height: 100%;
+    min-height: 360px;
+    object-fit: cover;
+    transition: transform .5s ease;
+}
+
+.portfolio-page .portfolio-project-card:hover .portfolio-project-media img {
+    transform: scale(1.025);
+}
+
+.portfolio-page .portfolio-project-copy {
+    align-self: center;
+    padding: 44px 46px;
+}
+
+.portfolio-page .portfolio-project-copy .portfolio-section-label,
+.portfolio-page .portfolio-section-heading .portfolio-section-label {
+    color: var(--portfolio-accent);
+}
+
+.portfolio-page .portfolio-project-copy h2,
+.portfolio-page .portfolio-section-heading h2 {
+    margin: 0;
+    color: var(--portfolio-ink);
+    font-family: 'Playfair Display', serif;
+    font-size: clamp(28px, 3.2vw, 38px);
+    font-weight: 600;
+    line-height: 1.24;
+}
+
+.portfolio-page .portfolio-project-copy .portfolio-richtext {
+    margin-top: 22px;
+    color: #57514c;
+}
+
+/* Featured BlogPage selections. */
+.portfolio-page .portfolio-featured {
+    padding: 38px;
+    background: linear-gradient(145deg, #fff 0%, #fdfaf7 100%);
+}
+
+.portfolio-page .portfolio-section-heading {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 24px;
+    margin-bottom: 20px;
+    padding-bottom: 22px;
+    border-bottom: 1px solid var(--portfolio-border);
+}
+
+.portfolio-page .portfolio-section-count {
+    flex: 0 0 auto;
+    padding: 7px 12px;
+    border: 1px solid rgba(186,109,60,.22);
+    border-radius: 999px;
+    background: rgba(186,109,60,.07);
+    color: var(--portfolio-accent-dark);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.portfolio-page .portfolio-section-intro {
+    max-width: 850px;
+    margin-bottom: 28px;
+    color: #5c554f;
+}
+
+.portfolio-page .portfolio-post-list {
+    display: grid;
+    gap: 22px;
+}
+
+.portfolio-page .portfolio-post-card {
+    display: grid;
+    grid-template-columns: minmax(230px, 31%) minmax(0, 1fr);
+    overflow: hidden;
+    border: 1px solid var(--portfolio-border);
+    border-radius: 18px;
+    background: #fff;
+    box-shadow: 0 9px 28px rgba(72,54,43,.055);
+    transition: transform .25s ease, border-color .25s ease, box-shadow .25s ease;
+}
+
+.portfolio-page .portfolio-post-card:hover {
+    transform: translateY(-3px);
+    border-color: rgba(186,109,60,.36);
+    box-shadow: 0 16px 38px rgba(72,54,43,.1);
+}
+
+.portfolio-page .portfolio-post-media {
+    display: block;
+    min-height: 240px;
+    overflow: hidden;
+    background: var(--portfolio-soft-strong);
+}
+
+.portfolio-page .portfolio-post-media img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    min-height: 240px;
+    object-fit: cover;
+    transition: transform .45s ease;
+}
+
+.portfolio-page .portfolio-post-card:hover .portfolio-post-media img {
+    transform: scale(1.035);
+}
+
+.portfolio-page .portfolio-post-media--fallback {
+    background:
+        radial-gradient(circle at 25% 22%, rgba(255,255,255,.68), transparent 30%),
+        linear-gradient(145deg, #ead9cc, #c88a61);
+}
+
+.portfolio-page .portfolio-post-placeholder {
+    display: grid;
+    width: 100%;
+    height: 100%;
+    min-height: 240px;
+    place-items: center;
+    color: rgba(96,54,31,.68);
+    font-size: 52px;
+}
+
+.portfolio-page .portfolio-post-content {
+    align-self: center;
+    padding: 30px 34px;
+}
+
+.portfolio-page .portfolio-post-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 18px;
+    margin-bottom: 13px;
+    color: var(--portfolio-muted);
+    font-size: 12px;
+}
+
+.portfolio-page .portfolio-post-meta span,
+.portfolio-page .portfolio-post-meta time {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+}
+
+.portfolio-page .portfolio-post-meta i {
+    color: var(--portfolio-accent);
+}
+
+.portfolio-page .portfolio-post-content h3 {
+    margin: 0 0 13px;
+    color: var(--portfolio-ink);
+    font-family: 'Playfair Display', serif;
+    font-size: clamp(23px, 2.5vw, 30px);
+    font-weight: 600;
+    line-height: 1.3;
+}
+
+.portfolio-page .portfolio-post-content h3 a {
+    color: inherit;
+    text-decoration: none;
+}
+
+.portfolio-page .portfolio-post-content h3 a:hover,
+.portfolio-page .portfolio-post-content h3 a:focus {
+    color: var(--portfolio-accent-dark);
+}
+
+.portfolio-page .portfolio-post-intro {
+    color: #625b55;
+    font-size: 15px;
+    line-height: 1.75;
+}
+
+.portfolio-page .portfolio-post-intro p {
+    margin-bottom: .75em;
+}
+
+.portfolio-page .portfolio-read-more {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    margin-top: 15px;
+    color: var(--portfolio-accent-dark) !important;
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: .03em;
+    text-decoration: none !important;
+}
+
+.portfolio-page .portfolio-read-more span {
+    transition: transform .2s ease;
+}
+
+.portfolio-page .portfolio-read-more:hover span,
+.portfolio-page .portfolio-read-more:focus span {
+    transform: translateX(4px);
+}
+
+.portfolio-page .portfolio-empty-state {
+    padding: 44px 28px;
+    border: 1px dashed var(--portfolio-border-strong);
+    border-radius: 16px;
+    background: var(--portfolio-soft);
+    color: var(--portfolio-muted);
+    text-align: center;
+}
+
+.portfolio-page .portfolio-empty-state i {
+    display: block;
+    margin-bottom: 12px;
+    color: var(--portfolio-accent);
+    font-size: 34px;
+}
+
+@media (max-width: 991px) {
+    .portfolio-page .portfolio-hero-inner { min-height: 280px; }
+    .portfolio-page .portfolio-hero-mark { display: none; }
+    .portfolio-page .portfolio-project-grid { grid-template-columns: 1fr; }
+    .portfolio-page .portfolio-project-media,
+    .portfolio-page .portfolio-project-media img { min-height: 300px; max-height: 430px; }
+    .portfolio-page .portfolio-post-card { grid-template-columns: minmax(210px, 36%) minmax(0, 1fr); }
+}
+
+@media (max-width: 767px) {
+    .portfolio-page .portfolio-hero,
+    .portfolio-page .portfolio-hero-inner { min-height: 250px; }
+    .portfolio-page .portfolio-hero-inner { padding-top: 44px; padding-bottom: 44px; }
+    .portfolio-page .portfolio-hero h1 { font-size: 40px; }
+    .portfolio-page .portfolio-hero p { font-size: 15px; }
+    .portfolio-page .portfolio-content-section { padding: 42px 0 60px; }
+    .portfolio-page .portfolio-stream-block--heading_block,
+    .portfolio-page .portfolio-stream-block--paragraph_block,
+    .portfolio-page .portfolio-stream-block--image_block,
+    .portfolio-page .portfolio-stream-block--embed_block { padding: 24px; border-radius: 16px; }
+    .portfolio-page .portfolio-project-card,
+    .portfolio-page .portfolio-featured { border-radius: 18px; }
+    .portfolio-page .portfolio-project-copy { padding: 30px 25px; }
+    .portfolio-page .portfolio-featured { padding: 26px 20px; }
+    .portfolio-page .portfolio-section-heading { align-items: flex-start; flex-direction: column; gap: 13px; }
+    .portfolio-page .portfolio-post-card { grid-template-columns: 1fr; }
+    .portfolio-page .portfolio-post-media,
+    .portfolio-page .portfolio-post-media img,
+    .portfolio-page .portfolio-post-placeholder { min-height: 220px; max-height: 330px; }
+    .portfolio-page .portfolio-post-content { padding: 25px 23px 28px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .portfolio-page .portfolio-project-media img,
+    .portfolio-page .portfolio-post-card,
+    .portfolio-page .portfolio-post-media img,
+    .portfolio-page .portfolio-read-more span { transition: none; }
+}

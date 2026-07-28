@@ -1,15 +1,69 @@
-/* Shared code-block presentation for any module using Highlight.js. */
+/* Shared GitHub-dark code-block presentation and accessible controls. */
+.code-block-shell {
+    --code-font-size: 14px;
+    --code-line-height: 1.5;
+    position: relative;
+    margin: 0 0 16px;
+    overflow: hidden;
+    border: 1px solid #30363d;
+    border-radius: 9px;
+    background: #0d1117;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.14);
+}
+
+.code-block-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 40px;
+    padding: 6px 8px 6px 14px;
+    border-bottom: 1px solid #30363d;
+    background: #161b22;
+    color: #8b949e;
+}
+
+.code-block-meta,
+.code-block-actions,
+.code-copy-btn,
+.code-toggle-btn {
+    display: inline-flex;
+    align-items: center;
+}
+
+.code-block-meta {
+    min-width: 0;
+    gap: 9px;
+    font-size: 12px;
+    line-height: 1.35;
+}
+
+.code-language {
+    overflow: hidden;
+    color: #c9d1d9;
+    font-weight: 650;
+    letter-spacing: 0.02em;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.code-line-count::before {
+    content: '·';
+    margin-right: 9px;
+    color: #484f58;
+}
+
 .code-highlight-container {
     position: relative;
     display: flex !important;
     flex-direction: row !important;
-    margin-bottom: 16px !important;
+    margin: 0 !important;
     padding: 0 !important;
     overflow: hidden !important;
-    border: 1px solid #30363d !important;
-    border-radius: 8px !important;
+    border: 0 !important;
+    border-radius: 0 !important;
     background: #0d1117 !important;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.14) !important;
+    box-shadow: none !important;
 }
 
 .code-highlight-container .hljs-line-numbers {
@@ -18,7 +72,7 @@
     border-right: 1px solid #30363d;
     background: #0d1117;
     color: #6e7681;
-    font: 14px/1.5 Consolas, "Courier New", monospace;
+    font: var(--code-font-size)/var(--code-line-height) Consolas, "Courier New", monospace;
     text-align: right;
     white-space: pre;
     user-select: none;
@@ -31,48 +85,179 @@
     margin: 0 !important;
     padding: 16px !important;
     overflow-x: auto;
+    overflow-y: hidden !important;
+    max-height: none !important;
+    scrollbar-width: thin;
+    scrollbar-color: #6e7681 #161b22;
     border: 0 !important;
     border-radius: 0 !important;
     background: transparent !important;
-    font: 14px/1.5 Consolas, "Courier New", monospace !important;
+    font: var(--code-font-size)/var(--code-line-height) Consolas, "Courier New", monospace !important;
     text-shadow: none !important;
 }
 
-.code-copy-btn {
-    position: absolute;
-    z-index: 10;
-    top: 8px;
-    right: 8px;
-    padding: 4px 8px;
+/* The inner code scrollbar is the only visible vertical scrollbar. */
+.code-block-shell.is-collapsed .code-highlight-container > code.hljs::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+.code-highlight-container > code.hljs::-webkit-scrollbar-track,
+.code-block-shell.is-collapsed .code-highlight-container::-webkit-scrollbar-track {
+    background: #161b22;
+    border-radius: 999px;
+}
+
+.code-highlight-container > code.hljs::-webkit-scrollbar-thumb,
+.code-block-shell.is-collapsed .code-highlight-container::-webkit-scrollbar-thumb {
+    min-width: 34px;
+    min-height: 34px;
+    border: 2px solid #161b22;
+    border-radius: 999px;
+    background: #6e7681;
+}
+
+.code-highlight-container > code.hljs::-webkit-scrollbar-thumb:hover,
+.code-block-shell.is-collapsed .code-highlight-container::-webkit-scrollbar-thumb:hover {
+    background: #8b949e;
+}
+
+.code-highlight-container > code.hljs::-webkit-scrollbar-thumb:active,
+.code-block-shell.is-collapsed .code-highlight-container::-webkit-scrollbar-thumb:active {
+    background: #b1bac4;
+}
+
+.code-highlight-container > code.hljs::-webkit-scrollbar-corner,
+.code-block-shell.is-collapsed .code-highlight-container::-webkit-scrollbar-corner {
+    background: #161b22;
+}
+
+.code-copy-btn,
+.code-toggle-btn {
+    justify-content: center;
+    gap: 6px;
     border: 1px solid #30363d;
+    color: #b1bac4;
+    font: inherit;
+    cursor: pointer;
+    transition: color 0.18s ease, background-color 0.18s ease, border-color 0.18s ease;
+}
+
+.code-copy-btn {
+    min-height: 30px;
+    padding: 4px 9px;
     border-radius: 6px;
     background: #21262d;
-    color: #8b949e;
     font-size: 12px;
-    cursor: pointer;
-    opacity: 0.82;
-    transition: opacity 0.2s ease, border-color 0.2s ease;
 }
 
 .code-copy-btn:hover,
-.code-copy-btn:focus-visible {
-    border-color: #8b949e;
-    opacity: 1;
+.code-copy-btn:focus-visible,
+.code-toggle-btn:hover,
+.code-toggle-btn:focus-visible {
+    border-color: #6e7681;
+    background: #30363d;
+    color: #f0f6fc;
 }
 
-.code-copy-btn:focus-visible {
+.code-copy-btn:focus-visible,
+.code-toggle-btn:focus-visible {
     outline: 2px solid #58a6ff;
     outline-offset: 2px;
 }
 
+/* Keep horizontal scrolling on code, and vertical scrolling on the code element only. */
+.code-block-shell.is-collapsed .code-highlight-container > code.hljs {
+    max-height: 242px !important;
+    overflow-y: auto !important;
+}
+
+.code-block-shell.is-collapsed .code-highlight-container {
+    /* The outer pre clips the inner scroller and must never create a second bar. */
+    max-height: 242px;
+    overflow: hidden !important;
+    overscroll-behavior: contain;
+}
+
+.code-collapse-fade {
+    display: none;
+    position: absolute;
+    z-index: 3;
+    right: 0;
+    bottom: 39px;
+    left: 0;
+    height: 68px;
+    pointer-events: none;
+    background: linear-gradient(to bottom, rgba(13, 17, 23, 0), #0d1117 88%);
+}
+
+.code-block-shell.is-collapsed .code-collapse-fade {
+    display: block;
+    right: 10px;
+}
+
+.code-toggle-btn {
+    position: relative;
+    z-index: 4;
+    width: 100%;
+    min-height: 40px;
+    padding: 7px 14px;
+    border-width: 1px 0 0;
+    border-radius: 0;
+    background: #161b22;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.code-block-shell.is-expanded .code-toggle-btn {
+    color: #8b949e;
+}
+
 @media (max-width: 768px) {
+    .code-block-shell {
+        --code-font-size: 12px;
+    }
+
+    .code-block-toolbar {
+        min-height: 42px;
+        padding-left: 10px;
+    }
+
     .code-highlight-container .hljs-line-numbers {
         padding: 13px 8px 13px 10px;
-        font-size: 12px;
     }
 
     .code-highlight-container > code.hljs {
         padding: 13px !important;
-        font-size: 12px !important;
+    }
+
+    .code-copy-btn {
+        min-height: 34px;
+    }
+
+    .code-block-shell.is-collapsed .code-highlight-container {
+        /* 10 visible lines × 12px × 1.5 line-height, plus vertical padding. */
+        max-height: 206px;
+    }
+
+    .code-highlight-container > code.hljs::-webkit-scrollbar,
+    .code-block-shell.is-collapsed .code-highlight-container::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+    }
+
+    .code-block-shell.is-collapsed .code-collapse-fade {
+        right: 8px;
+    }
+
+    .code-toggle-btn {
+        min-height: 44px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .code-copy-btn,
+    .code-toggle-btn {
+        transition: none;
     }
 }

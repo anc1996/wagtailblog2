@@ -1,36 +1,44 @@
 {% extends "base.html" %}
 {% load wagtailcore_tags wagtailimages_tags static %}
 
+{% block body_class %}portfolio-page{% endblock %}
+
 {% block extra_css %}
-    {# 引用我们之前创建的 wagtail 内容样式文件 #}
-    <link rel="stylesheet" href="{% static 'portfolio/css/wagtail_content_style.css' %}">
+    {{ block.super }}
+    <link rel="stylesheet" href="{% static 'portfolio/css/wagtail_content_style.css' %}?v=20260727-2">
 {% endblock %}
 
 {% block content %}
-<!--页面标题-->
-<section class="page-title" style="background-image:url({% static 'gretzia/images/resource/banner-1.jpg' %})">
-    <div class="auto-container">
-
-    </div>
-</section>
-<!--页面标题结束-->
-
-<!--主要内容区-->
-<div class="sidebar-page-container">
-    <div class="auto-container">
-
-        <div class="row clearfix">
-            <h1>{{ page.title }}</h1>
-            <!--内容区-->
-            <div class="content-side col-lg-12 col-md-12 col-sm-12">
-                <div class="wagtail-content-render">
-                    {% for block in page.body %}
-                        {% include_block block %}
-                    {% endfor %}
-                </div>
+<main class="portfolio-shell">
+    <section class="portfolio-hero" aria-labelledby="portfolio-title">
+        <div class="portfolio-hero-pattern" aria-hidden="true"></div>
+        <div class="auto-container portfolio-hero-inner">
+            <div class="portfolio-hero-copy">
+                <span class="portfolio-eyebrow">SELECTED WORK</span>
+                <h1 id="portfolio-title">{{ page.title }}</h1>
+                <p>项目实践、技术方案与持续沉淀，在这里组成一份可阅读的作品档案。</p>
             </div>
-
+            <div class="portfolio-hero-mark" aria-hidden="true">
+                <i class="fa fa-briefcase"></i>
+            </div>
         </div>
-    </div>
-</div>
+    </section>
+
+    <section class="portfolio-content-section" aria-label="作品集内容">
+        <div class="auto-container">
+            <div class="portfolio-content wagtail-content-render">
+                {% for block in page.body %}
+                    <div class="portfolio-stream-block portfolio-stream-block--{{ block.block_type }}">
+                        {% include_block block %}
+                    </div>
+                {% empty %}
+                    <div class="portfolio-empty-state">
+                        <i class="fa fa-folder-open-o" aria-hidden="true"></i>
+                        <p>作品内容正在整理中。</p>
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+    </section>
+</main>
 {% endblock %}

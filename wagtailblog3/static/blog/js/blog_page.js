@@ -153,10 +153,10 @@ $(function() {
     function initTOC() {
         const tocContainer = document.getElementById('toc-content');
         // ★ 获取文章独立滚动容器
-        const articleScrollBox = document.getElementById('article-inner-container');
+        const articleScrollBox = document.getElementById('article-scroll-container');
 
-        // 仅在 PC 端且容器存在时启用容器监听
-        const isContainerMode = (window.innerWidth >= 992 && articleScrollBox);
+        // 仅在三栏桌面布局中使用正文独立滚动；较窄窗口继续使用页面滚动
+        const isContainerMode = (window.innerWidth >= 1280 && articleScrollBox);
 
         // 内容上下文
         const contentContext = document.querySelector('.article-body-content');

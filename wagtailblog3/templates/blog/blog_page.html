@@ -4,7 +4,7 @@
 
 {% block extra_css %}
     {{ block.super }}
-    <link rel="stylesheet" href="{% static 'blog/css/blog.css' %}?v=20260728-6">
+    <link rel="stylesheet" href="{% static 'blog/css/blog.css' %}?v=20260728-7">
     <link rel="stylesheet" href="{% static 'blog/css/blog-resize.css' %}">
     {% if has_image or has_gallery %}<link rel="stylesheet" href="{% static 'blog/css/lightbox/lightbox.css' %}">{% endif %}
 
@@ -318,7 +318,7 @@
     <!-- 使用 ES6 模块 -->
     <script type="module" src="{% static 'comments/js/comments.js' %}?v=20260727-2"></script>
 
-    <script src="{% static 'blog/js/blog_page.js' %}?v=20260728-2" defer></script>
+    <script src="{% static 'blog/js/blog_page.js' %}?v=20260728-3" defer></script>
 
     <!-- 🆕 添加拖动布局JS -->
     <script src="{% static 'blog/js/resize-manager.js' %}"></script>

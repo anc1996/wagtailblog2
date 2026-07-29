@@ -1,46 +1,54 @@
-# blog/management/commands/view_logs.py
+"""Inspect registered project log files without duplicating path metadata."""
 
-from django.core.management.base import BaseCommand
-import os
+from collections import deque
+from pathlib import Path
+
 from django.conf import settings
+from django.core.management.base import BaseCommand, CommandError
+
+from wagtailblog3.observability.registry import LOG_FILE_CATALOG
 
 
 class Command(BaseCommand):
-	help = '查看应用日志'
-	
+	help = "查看已注册日志域的活动或错误日志"
+
 	def add_arguments(self, parser):
-		parser.add_argument('--module', type=str,
-		                    choices=['blog', 'comments', 'search', 'archive', 'system', 'wagtail'],
-		                    default='system', help='要查看的模块日志')
-		parser.add_argument('--lines', type=int, default=50,
-		                    help='要显示的行数')
-	
+		parser.add_argument(
+			"--module",
+			choices=sorted(LOG_FILE_CATALOG),
+			default="system",
+			help="日志域",
+		)
+		parser.add_argument(
+			"--kind",
+			choices=("activity", "error"),
+			default="error",
+			help="日志类型，默认 error",
+		)
+		parser.add_argument("--lines", type=int, default=50, help="显示最后 N 行")
+
 	def handle(self, *args, **options):
-		module = options['module']
-		lines = options['lines']
-		
-		log_dir = settings.LOG_DIR
-		
-		# 确定日志文件路径
-		if module == 'wagtail':
-			log_file = os.path.join(log_dir, 'system/wagtail_error.log')
-		elif module == 'system':
-			log_file = os.path.join(log_dir, 'system/error.log')
-		else:
-			log_file = os.path.join(log_dir, f'{module}/{module}_error.log')
-		
-		if not os.path.exists(log_file):
-			self.stderr.write(f"日志文件不存在: {log_file}")
+		module = options["module"]
+		kind = options["kind"]
+		lines = options["lines"]
+		if lines < 1:
+			raise CommandError("--lines 必须大于 0")
+
+		relative_path = LOG_FILE_CATALOG[module][kind]
+		if relative_path is None:
+			raise CommandError(f"{module} 没有 {kind} 日志")
+
+		log_file = Path(settings.LOG_DIR) / relative_path
+		if not log_file.exists():
+			self.stderr.write(f"日志尚未生成: {log_file}")
 			return
-		
-		# 使用tail读取最后N行
+
 		try:
-			from collections import deque
-			with open(log_file, 'r') as f:
-				last_lines = deque(f, lines)
-			
-			self.stdout.write(f"=== {module} 最新 {lines} 行日志 ===\n")
-			for line in last_lines:
-				self.stdout.write(line, ending='')
-		except Exception as e:
-			self.stderr.write(f"读取日志失败: {e}")
+			with log_file.open("r", encoding="utf-8", errors="replace") as stream:
+				last_lines = deque(stream, lines)
+		except OSError as exc:
+			raise CommandError(f"读取日志失败: {exc}") from exc
+
+		self.stdout.write(f"=== {module}/{kind} 最新 {lines} 行 ===")
+		for line in last_lines:
+			self.stdout.write(line, ending="")

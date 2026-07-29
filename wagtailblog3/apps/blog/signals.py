@@ -37,8 +37,7 @@ def delete_blog_content_from_mongodb(sender, instance, **kwargs):
 					f"天网防线成功拦截：跟随页面物理销毁，同步从 MongoDB 中连坐擦除了该页面的 {deleted_snapshots} 条草稿快照。")
 	
 	except Exception as e:
-		import traceback
-		logger.error(f"信号清理异构集群残留遭遇致命异常: {e}, {traceback.format_exc()}")
+		logger.error(f"信号清理异构集群残留遭遇致命异常: {e}", exc_info=True)
 
 
 # =============================================================================
@@ -63,7 +62,7 @@ def cascade_delete_single_mongo_revision(sender, instance, **kwargs):
 				logger.info(f"单体拦截成功：跟随 MySQL 历史行，同步清剿了 MongoDB 的历史快照实体 [{pointer}]")
 	
 	except Exception as e:
-		logger.error(f"信号防线清理单体 Revision 失败: {e}")
+		logger.error(f"信号防线清理单体 Revision 失败: {e}", exc_info=True)
 
 
 # =============================================================================

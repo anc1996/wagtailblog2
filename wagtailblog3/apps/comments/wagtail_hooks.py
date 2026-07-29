@@ -158,7 +158,7 @@ class CommentAdmin(ModelAdmin):
 				comment.real_delete()
 				count += 1
 			except Exception as e:
-				logger.error(f"批量删除评论时出错: ID={comment.id}, 错误={e}")
+				logger.error(f"批量删除评论时出错: ID={comment.id}, 错误={e}", exc_info=True)
 
 		messages.success(request, _("已批量永久删除 {} 条评论").format(count))
 
@@ -309,7 +309,7 @@ def register_comment_actions_urls():
 		except BlogPageComment.DoesNotExist:
 			messages.error(request, _("评论 #{} 不存在").format(pk))
 		except Exception as e:
-			logger.error(f"审核评论失败: ID={pk}, 错误={e}")
+			logger.error(f"审核评论失败: ID={pk}, 错误={e}", exc_info=True)
 			messages.error(request, _("审核评论 #{} 时发生错误").format(pk))
 
 		# 使用绝对URL而不是命名空间
@@ -326,7 +326,7 @@ def register_comment_actions_urls():
 		except BlogPageComment.DoesNotExist:
 			messages.error(request, _("评论 #{} 不存在").format(pk))
 		except Exception as e:
-			logger.error(f"软删除评论失败: ID={pk}, 错误={e}")
+			logger.error(f"软删除评论失败: ID={pk}, 错误={e}", exc_info=True)
 			messages.error(request, _("软删除评论 #{} 时发生错误").format(pk))
 		# 使用绝对URL而不是命名空间
 		return redirect('/admin/comments/blogpagecomment/')
@@ -343,7 +343,7 @@ def register_comment_actions_urls():
 		except BlogPageComment.DoesNotExist:
 			messages.error(request, _("评论 #{} 不存在").format(pk))
 		except Exception as e:
-			logger.error(f"真删除评论失败: ID={pk}, 错误={e}")
+			logger.error(f"真删除评论失败: ID={pk}, 错误={e}", exc_info=True)
 			messages.error(request, _("永久删除评论 #{} 时发生错误").format(pk))
 
 		# 使用绝对URL而不是命名空间

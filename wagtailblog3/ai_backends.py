@@ -1,7 +1,11 @@
 # wagtailblog3/ai_backends.py
+import logging
 from dataclasses import dataclass
 from typing import Any, Self
 from wagtail_ai.ai.openai import OpenAIBackend, OpenAIBackendConfig, OpenAIResponse
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(kw_only=True)
@@ -23,16 +27,12 @@ class FlexibleOpenAIBackend(OpenAIBackend):
     def chat_completions(self, messages: list[dict[str, Any]]) -> OpenAIResponse:
         import requests
 
-        # =========================================================
-        # 🚨 极客调试输出区（会在控制台终端打印）
-        # =========================================================
-        print("\n" + "="*50)
-        print("🚀 [Wagtail-AI BACKENDS 引擎] 成功拦截请求！")
-        print(f"🤖 目标模型 (MODEL_ID): {self.config.model_id}")
-        print(f"🌐 目标网关 (API_BASE): {self.config.api_base}")
-        print(f"🔑 使用 Token: {self.get_openai_api_key()[:8]}...[隐藏]")
-        print(f"🌡️ 温度参数 (TEMP): {self.config.temperature}")
-        print("="*50 + "\n")
+        logger.info(
+            "Wagtail AI request: model=%s api_base=%s temperature=%s",
+            self.config.model_id,
+            self.config.api_base,
+            self.config.temperature,
+        )
 
         headers = {
             "Content-Type": "application/json",

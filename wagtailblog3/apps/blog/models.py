@@ -383,7 +383,7 @@ class BlogPageForm(WagtailAdminPageForm):
 								# 去 MongoDB 专属草稿快照集合定点捞取大文本
 								content = mongo_manager.get_blog_revision_body(draft_pointer)
 					except Exception as e:
-						logger.error(f"BlogPageForm 穿透解析历史快照遭遇异常: {e}")
+						logger.error(f"BlogPageForm 穿透解析历史快照遭遇异常: {e}", exc_info=True)
 				
 				# 【第二阶段】：如果快照没捞到（例如全新发布后清空了历史，或者老数据迁移残留），直接降级穿透到 Mongo 线上 Live 主表
 				if (not content or 'body' not in content) and getattr(instance, 'mongo_content_id', None):
@@ -558,7 +558,7 @@ class BlogPage(Page):
 		try:
 			return MongoDBStreamFieldAdapter.from_mongodb(body_data, self.body.stream_block)
 		except Exception as e:
-			logger.error(f"StreamField 反序列化降级: {e}")
+			logger.error(f"StreamField 反序列化降级: {e}", exc_info=True)
 			return StreamValue(self.body.stream_block, body_data, is_lazy=True)
 	
 	# =========================================================================
@@ -660,7 +660,7 @@ class BlogPage(Page):
 				content_id = mongo_manager.save_blog_content(content_data, getattr(self, 'mongo_content_id', None))
 				self.mongo_content_id = content_id
 			except Exception as e:
-				logger.error(f"保存线上主内容至 MongoDB 失败: {e}")
+				logger.error(f"保存线上主内容至 MongoDB 失败: {e}", exc_info=True)
 		
 		# 黄金障眼法：永远清空 body 后再存入 MySQL，保持 blog_blogpage 表的绝对轻量
 		real_body = self.body
@@ -708,7 +708,7 @@ class BlogPage(Page):
 				mongo_manager.delete_page_revisions(page_id)
 		
 		except Exception as e:
-			logger.error(f"级联清理 MongoDB 关联数据时遭遇异常: {e}")
+			logger.error(f"级联清理 MongoDB 关联数据时遭遇异常: {e}", exc_info=True)
 	
 	# =========================================================================
 	# 网关 4：前台数据读取网关 (用于博客详情页 serve 渲染时提取真实数据)
@@ -812,9 +812,7 @@ class BlogPage(Page):
 			return body_data
 		
 		except Exception as e:
-			import traceback
-			logger.error(f"渲染Markdown时出错: {e}")
-			logger.error(traceback.format_exc())
+			logger.error(f"渲染Markdown时出错: {e}", exc_info=True)
 			return body_data
 	
 	@staticmethod
@@ -900,7 +898,7 @@ class BlogPage(Page):
 				self.body = MongoDBStreamFieldAdapter.from_mongodb(rendered_body_data, self.body.stream_block)
 			except Exception as e:
 				from wagtail.blocks.stream_block import StreamValue
-				logger.error(f"使用适配器创建StreamValue失败: {e}")
+				logger.error(f"使用适配器创建StreamValue失败: {e}", exc_info=True)
 				self.body = StreamValue(self.body.stream_block, rendered_body_data, is_lazy=True)
 		
 		# 4. 调用父类的serve方法，使用我们准备好的body内容去渲染模板

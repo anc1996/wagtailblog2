@@ -5,7 +5,6 @@ import uuid
 from django.core.serializers.json import DjangoJSONEncoder
 from wagtail.blocks.stream_block import StreamValue
 import logging
-import traceback
 
 # 设置日志记录器
 logger = logging.getLogger(__name__)
@@ -48,8 +47,7 @@ class MongoDBStreamFieldAdapter:
 				logger.debug(f"成功转换{len(blocks)}个块")
 				return blocks
 			except Exception as e:
-				logger.error(f"转换StreamField数据出错: {e}")
-				logger.error(traceback.format_exc())
+				logger.error(f"转换StreamField数据出错: {e}", exc_info=True)
 				# 安全返回空列表
 				return []
 		
@@ -82,7 +80,7 @@ class MongoDBStreamFieldAdapter:
 			result = json.loads(json.dumps(stream_value, cls=DjangoJSONEncoder))
 			return result
 		except Exception as e:
-			logger.error(f"JSON转换失败: {e}")
+			logger.error(f"JSON转换失败: {e}", exc_info=True)
 			return []
 	
 	@staticmethod
@@ -152,7 +150,7 @@ class MongoDBStreamFieldAdapter:
 				else:
 					return str(value)
 		except Exception as e:
-			logger.error(f"处理块值时出错: {e}, 块类型: {block_type}")
+			logger.error(f"处理块值时出错: {e}, 块类型: {block_type}", exc_info=True)
 			# 安全返回None
 			return None
 	
@@ -174,7 +172,7 @@ class MongoDBStreamFieldAdapter:
 				else:
 					data = []
 			except:
-				logger.error("无法将数据转换为列表")
+				logger.error("无法将数据转换为列表", exc_info=True)
 				data = []
 		
 		try:
@@ -237,7 +235,6 @@ class MongoDBStreamFieldAdapter:
 			return stream_value
 		
 		except Exception as e:
-			logger.error(f"从MongoDB创建StreamValue失败: {e}")
-			logger.error(traceback.format_exc())
+			logger.error(f"从MongoDB创建StreamValue失败: {e}", exc_info=True)
 			# 返回空的StreamValue
 			return StreamValue(stream_block, [], is_lazy=True)

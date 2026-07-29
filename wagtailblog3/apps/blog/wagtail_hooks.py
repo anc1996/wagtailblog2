@@ -142,9 +142,7 @@ def after_edit_page(request, page):
 			if page.id:
 				type(page).objects.filter(id=page.id).update(body=[])
 		except Exception as e:
-			import traceback
-			logger.error(f"清空页面body字段时出错: {e}")
-			logger.error(traceback.format_exc())
+			logger.error(f"清空页面body字段时出错: {e}", exc_info=True)
 
 
 # 页面统计报告

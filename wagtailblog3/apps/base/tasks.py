@@ -158,7 +158,7 @@ def send_admin_notification_email(self, form_data: Dict[str, Any], admin_config:
 					logger.warning(f"管理员通知邮件发送失败: {admin_email}")
 			
 			except Exception as e:
-				logger.error(f"发送管理员通知邮件失败 {admin_email}: {str(e)}")
+				logger.error(f"发送管理员通知邮件失败 {admin_email}: {str(e)}", exc_info=True)
 		
 		return {
 			'status': 'success' if sent_count > 0 else 'partial_failure',
@@ -219,7 +219,7 @@ def send_bulk_email(email_list: List[str], subject: str, message: str, html_mess
 			
 			except Exception as e:
 				failed_emails.append(email)
-				logger.error(f"发送邮件失败 {email}: {str(e)}")
+				logger.error(f"发送邮件失败 {email}: {str(e)}", exc_info=True)
 		
 		return {
 			'status': 'completed',
@@ -247,7 +247,7 @@ def cleanup_email_logs():
 		logger.info("执行邮件日志清理任务")
 		return {'status': 'success', 'message': '邮件日志清理完成'}
 	except Exception as exc:
-		logger.error(f"清理邮件日志时发生异常: {str(exc)}")
+		logger.error(f"清理邮件日志时发生异常: {str(exc)}", exc_info=True)
 		return {'status': 'error', 'message': f'邮件日志清理失败: {str(exc)}'}
 
 

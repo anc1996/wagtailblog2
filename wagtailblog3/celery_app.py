@@ -1,8 +1,13 @@
 # wagtailblog3/celery.py
 # 必须放在第一行！
 from __future__ import absolute_import, unicode_literals
+import logging
 import os
 from celery import Celery
+
+
+task_logger = logging.getLogger('celery.task')
+worker_logger = logging.getLogger('celery.worker')
 
 """
 Celery 配置说明：
@@ -74,7 +79,7 @@ def debug_task(self):
 		from wagtailblog3.celery import debug_task
 		debug_task.delay()
 	"""
-	print(f'Request: {self.request!r}')
+	task_logger.info('Debug task request: %r', self.request)
 	return f'Debug task executed successfully'
 
 
@@ -114,6 +119,7 @@ def test_redis_connection():
 		else:
 			return "Redis connection test failed: value mismatch"
 	except Exception as e:
+		task_logger.exception("Redis connection test failed")
 		return f"Redis connection test failed: {str(e)}"
 
 
@@ -155,7 +161,7 @@ def on_worker_ready(sender, **kwargs):
 	- 清理过期的任务结果
 	- 发送通知等
 	"""
-	print("=" * 60)
-	print("Celery Worker started successfully!")
-	print("Queues:", sender.app.conf.task_queues)
-	print("=" * 60)
+	worker_logger.info(
+		"Celery Worker started successfully; queues=%s",
+		sender.app.conf.task_queues,
+	)

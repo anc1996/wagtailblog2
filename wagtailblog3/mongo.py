@@ -45,7 +45,7 @@ class MongoManager:
 			self._ensure_indexes()
 			logger.info("MongoDB连接成功（已剥离 jieba 搜索包袱）")
 		except Exception as e:
-			logger.error(f"MongoDB连接失败: {e}")
+			logger.error(f"MongoDB连接失败: {e}", exc_info=True)
 			raise
 	
 	def _ensure_indexes(self):
@@ -58,7 +58,7 @@ class MongoManager:
 			except pymongo.errors.OperationFailure:
 				pass  # 如果不存在就忽略
 		except Exception as e:
-			logger.error(f"MongoDB索引创建失败: {e}")
+			logger.error(f"MongoDB索引创建失败: {e}", exc_info=True)
 	
 	def inspect_indexes(self):
 		try:
@@ -70,7 +70,7 @@ class MongoManager:
 			
 			return indexes
 		except Exception as e:
-			logger.error(f"检查索引时出错: {e}")
+			logger.error(f"检查索引时出错: {e}", exc_info=True)
 			return []
 	
 	def _prepare_for_mongo(self, data):
@@ -132,14 +132,14 @@ class MongoManager:
 				result = self.blog_content.insert_one(prepared_data)
 				return str(result.inserted_id)
 		except Exception as e:
-			logger.error(f"MongoDB保存内容错误: {e}")
+			logger.error(f"MongoDB保存内容错误: {e}", exc_info=True)
 			try:
 				json_str = json.dumps(prepared_data, default=json_util.default) # 使用 json_util 处理 ObjectId
 				clean_data = json.loads(json_str)
 				result = self.blog_content.insert_one(clean_data)
 				return str(result.inserted_id)
 			except Exception as e2:
-				logger.error(f"MongoDB二次尝试保存内容错误: {e2}")
+				logger.error(f"MongoDB二次尝试保存内容错误: {e2}", exc_info=True)
 				raise
 	
 	def _generate_body_hash(self, prepared_body):
@@ -152,7 +152,7 @@ class MongoManager:
 			hash_str = json.dumps(prepared_body, sort_keys=True)
 			return hashlib.md5(hash_str.encode('utf-8')).hexdigest()
 		except Exception as e:
-			logger.error(f"Hash 计算失败: {e}")
+			logger.error(f"Hash 计算失败: {e}", exc_info=True)
 			return None
 	
 	# =============================================================================
@@ -202,7 +202,7 @@ class MongoManager:
 			logger.info(f"MongoDB 历史草稿落盘成功，生成快照指针 OID: {result.inserted_id}")
 			return str(result.inserted_id)
 		except Exception as e:
-			logger.error(f"MongoDB 持久化历史草稿错误: {e}")
+			logger.error(f"MongoDB 持久化历史草稿错误: {e}", exc_info=True)
 			raise
 	
 	def get_blog_revision_body(self, content_id):
@@ -219,7 +219,7 @@ class MongoManager:
 				logger.warning(f"MongoDB 草稿集合中未找到指定的指针 ID: {content_id}")
 				return None
 		except Exception as e:
-			logger.error(f"MongoDB 读取历史草稿失败: {e}")
+			logger.error(f"MongoDB 读取历史草稿失败: {e}", exc_info=True)
 			return None
 	
 	def delete_single_revision(self, pointer_id):
@@ -232,7 +232,7 @@ class MongoManager:
 			result = self.blog_revisions.delete_one({'_id': pointer_id})
 			return result.deleted_count > 0
 		except Exception as e:
-			logger.error(f"MongoDB删除单条快照错误: {e}")
+			logger.error(f"MongoDB删除单条快照错误: {e}", exc_info=True)
 			return False
 	
 	# =============================================================================
@@ -267,7 +267,7 @@ class MongoManager:
 			logger.info(f"🔧 运维操作：成功强制写入/恢复历史快照，指定 OID [{pointer_id}]")
 			return True
 		except Exception as e:
-			logger.error(f"🔧 运维操作：强制保存历史快照失败，指定 OID [{pointer_id}]: {e}")
+			logger.error(f"🔧 运维操作：强制保存历史快照失败，指定 OID [{pointer_id}]: {e}", exc_info=True)
 			return False
 	
 	def get_blog_content(self, content_id):
@@ -281,7 +281,7 @@ class MongoManager:
 				return content
 			return None
 		except Exception as e:
-			logger.error(f"MongoDB获取内容错误: {e}")
+			logger.error(f"MongoDB获取内容错误: {e}", exc_info=True)
 			return None
 	
 	def delete_blog_content(self, content_id):
@@ -292,7 +292,7 @@ class MongoManager:
 			result = self.blog_content.delete_one({'_id': mongo_id})
 			return result.deleted_count > 0
 		except Exception as e:
-			logger.error(f"MongoDB删除内容错误: {e}")
+			logger.error(f"MongoDB删除内容错误: {e}", exc_info=True)
 			return False
 	
 	def delete_page_revisions(self, page_id):
@@ -302,5 +302,5 @@ class MongoManager:
 			result = self.blog_revisions.delete_many({'page_id': page_id})
 			return result.deleted_count
 		except Exception as e:
-			logger.error(f"MongoDB批量删除历史快照错误: {e}")
+			logger.error(f"MongoDB批量删除历史快照错误: {e}", exc_info=True)
 			return 0

@@ -10,7 +10,7 @@ def main():
 	# 添加命令行参数解析
 	import argparse
 	parser = argparse.ArgumentParser(add_help=False)
-	parser.add_argument('--log-level', choices=['WARNING', 'ERROR', 'CRITICAL'],
+	parser.add_argument('--log-level', choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
 	                    help='设置控制台日志级别')
 	parser.add_argument('--log-module', help='仅显示指定模块的日志')
 	
@@ -24,6 +24,9 @@ def main():
 	# 设置日志模块过滤
 	if args.log_module:
 		os.environ['DJANGO_LOG_MODULE'] = args.log_module
+
+	# 自定义日志参数不能继续传给 Django 命令解析器。
+	sys.argv = [sys.argv[0], *remaining]
 	
 	# 继续Django命令处理
 	from django.core.management import execute_from_command_line

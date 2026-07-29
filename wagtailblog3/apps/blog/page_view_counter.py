@@ -91,7 +91,7 @@ class PageViewCounter:
             return True
 
         except Exception as e:
-            logger.error(f"[PageViewCounter] record 失败 page={self.page_id}: {e}")
+            logger.error(f"[PageViewCounter] record 失败 page={self.page_id}: {e}", exc_info=True)
             return False
 
     def _increment_count(self, PageViewCount):
@@ -110,7 +110,7 @@ class PageViewCounter:
                     unique_count = F('unique_count') + 1,
                 )
         except Exception as e:
-            logger.error(f"[PageViewCounter] PageViewCount 更新失败 page={self.page_id}: {e}")
+            logger.error(f"[PageViewCounter] PageViewCount 更新失败 page={self.page_id}: {e}", exc_info=True)
 
     def get(self) -> dict:
         """
@@ -147,5 +147,5 @@ class PageViewCounter:
             }
 
         except Exception as e:
-            logger.error(f"[PageViewCounter] get 失败 page={self.page_id}: {e}")
+            logger.error(f"[PageViewCounter] get 失败 page={self.page_id}: {e}", exc_info=True)
             return {'today': 0, 'today_unique': 0, 'total': 0, 'total_unique': 0}

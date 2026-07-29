@@ -45,7 +45,7 @@ class Command(BaseCommand):
 			else:
 				self.stdout.write('没有需要删除的旧访问记录')
 		except Exception as e:
-			logger.error(f"删除旧记录时出错: {e}")
+			logger.error(f"删除旧记录时出错: {e}", exc_info=True)
 	
 	def _ensure_aggregations(self, cutoff_date):
 		"""确保所有要删除的数据都有对应的聚合记录"""
@@ -104,4 +104,4 @@ class Command(BaseCommand):
 		except PageView.DoesNotExist:
 			self.stdout.write('没有需要聚合的旧记录')
 		except Exception as e:
-			logger.error(f"聚合数据时出错: {e}")
+			logger.error(f"聚合数据时出错: {e}", exc_info=True)

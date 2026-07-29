@@ -70,7 +70,7 @@ class Command(BaseCommand):
 				)
 			
 			except Exception as e:
-				logger.error(f"同步页面 {page_id} 访问数据出错: {e}")
+				logger.error(f"同步页面 {page_id} 访问数据出错: {e}", exc_info=True)
 				continue
 		
 		self.stdout.write(self.style.SUCCESS(f'成功同步 {synced_count} 个页面的访问数据'))

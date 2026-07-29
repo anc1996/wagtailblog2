@@ -11,7 +11,6 @@
 """
 import re
 import logging
-import traceback
 from datetime import datetime
 
 from django.db.models import Count, Case, When, Subquery
@@ -120,7 +119,7 @@ class ESLazyResults:
 					index=self.index, body=body
 				)["count"]
 			except Exception as e:
-				logger.error(f"ES _count 失败: {e}")
+				logger.error(f"ES _count 失败: {e}", exc_info=True)
 				self._count_cache = 0
 		return self._count_cache
 
@@ -148,7 +147,7 @@ class ESLazyResults:
 		try:
 			hits = self.es.search(index=self.index, body=body)["hits"]["hits"]
 		except Exception as e:
-			logger.error(f"ES search 失败: {e}\n{traceback.format_exc()}")
+			logger.error(f"ES search 失败: {e}", exc_info=True)
 			return []
 
 		page_ids = []
@@ -312,7 +311,7 @@ def perform_search(query_string, search_type='all', start_date=None, end_date=No
 			Query.get(query_string).add_hit()
 			return results
 		except Exception as e:
-			logger.error(f"时间排序搜索失败，降级到原始 QS: {e}")
+			logger.error(f"时间排序搜索失败，降级到原始 QS: {e}", exc_info=True)
 			return qs
 
 	try:
@@ -328,13 +327,13 @@ def perform_search(query_string, search_type='all', start_date=None, end_date=No
 		return ESLazyResults(es, index_name, dsl_query, dsl_filter)
 
 	except Exception as e:
-		logger.error(f"ES 原生 DSL 检索失败，降级到 Wagtail 抽象层: {e}\n{traceback.format_exc()}")
+		logger.error(f"ES 原生 DSL 检索失败，降级到 Wagtail 抽象层: {e}", exc_info=True)
 		qs = _build_base_qs(search_type, parsed_start, parsed_end, order_by)
 		try:
 			results = qs.search(clean_query, operator='or', order_by_relevance=True)
 			return results
 		except Exception as e2:
-			logger.error(f"降级搜索也失败: {e2}")
+			logger.error(f"降级搜索也失败: {e2}", exc_info=True)
 			return qs.none() if hasattr(qs, 'none') else []
 
 
@@ -366,7 +365,7 @@ def format_search_results_for_api(search_results):
 					data['categories'] = [cat.name for cat in specific_page.categories.all()]
 			results_data.append(data)
 	except Exception as e:
-		logger.error(f"格式化搜索结果非预期异常: {e}\n{traceback.format_exc()}")
+		logger.error(f"格式化搜索结果非预期异常: {e}", exc_info=True)
 	return results_data
 
 
@@ -389,5 +388,5 @@ def get_search_suggestions(query_string, limit=5):
 			for item in suggestions
 		]
 	except Exception as e:
-		logger.error(f"获取搜索建议时出错: {e}\n{traceback.format_exc()}")
+		logger.error(f"获取搜索建议时出错: {e}", exc_info=True)
 		return []

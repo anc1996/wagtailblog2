@@ -81,7 +81,7 @@ def search_api(request):
 		
 		return Response(data)
 	except Exception as e:
-		logger.error(f"API搜索网关层发生故障: {e}")
+		logger.error(f"API搜索网关层发生故障: {e}", exc_info=True)
 		return Response({'error': '搜索服务由于异构切换产生短暂毛刺，请稍后再试'}, status=500)
 
 
@@ -102,5 +102,5 @@ def search_suggestions_api(request):
 		suggestions = get_search_suggestions(query)
 		return Response({'suggestions': suggestions})
 	except Exception as e:
-		logger.error(f"获取搜索建议时发生错误: {e}")
+		logger.error(f"获取搜索建议时发生错误: {e}", exc_info=True)
 		return Response({'suggestions': []})

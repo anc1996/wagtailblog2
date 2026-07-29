@@ -1,7 +1,12 @@
 # wagtailblog3/apps/blog/templatetags/debug_tags.py
+import json
+import logging
+
 from django import template
 from django.conf import settings
-import json
+
+
+logger = logging.getLogger(__name__)
 
 register = template.Library()
 
@@ -11,18 +16,13 @@ def debug_markdown_settings():
     这个标签会获取当前运行的 WAGTAILMARKDOWN 配置，
     并以易于阅读的格式打印出来，用于调试。
     """
-    print("--- DEBUG: WAGTAILMARKDOWN SETTINGS ---")
     try:
         # 尝试获取配置
         current_config = getattr(settings, 'WAGTAILMARKDOWN', {})
-        # 格式化后打印到运行服务器的控制台
+        # 格式化后写入 blog 活动日志。
         pretty_config = json.dumps(current_config, indent=2)
-        print(pretty_config)
-        print("--- END DEBUG ---")
-        # 你也可以选择在页面上显示，但打印到控制台更干净
-        # from django.utils.safestring import mark_safe
-        # return mark_safe(f"<pre>{pretty_config}</pre>")
+        logger.debug("WAGTAILMARKDOWN settings:\n%s", pretty_config)
     except Exception as e:
-        print(f"Error getting WAGTAILMARKDOWN settings: {e}")
+        logger.exception("Error getting WAGTAILMARKDOWN settings: %s", e)
 
     return "" # 不在页面上输出任何东西

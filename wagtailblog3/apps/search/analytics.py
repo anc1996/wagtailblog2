@@ -73,4 +73,4 @@ class SearchAnalytics:
             # 这里可以扩展记录更多信息
             logger.info(f"搜索: '{query}' - 类型: {search_type} - 结果数: {results_count}")
         except Exception as e:
-            logger.error(f"记录搜索失败: {e}")
+            logger.error(f"记录搜索失败: {e}", exc_info=True)

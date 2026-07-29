@@ -266,7 +266,7 @@ class FormPage(AbstractEmailForm):
 			try:
 				validate_email(user_email)
 			except ValidationError as e:
-				logger.error(f"FormPage {self.id}: 邮箱格式无效 - {user_email}: {e}")
+				logger.error(f"FormPage {self.id}: 邮箱格式无效 - {user_email}: {e}", exc_info=True)
 				return None
 			
 			# 准备邮件配置，与原有逻辑完全一致
@@ -303,7 +303,7 @@ class FormPage(AbstractEmailForm):
 			return task_result.id
 		
 		except ImportError as e:
-			logger.error(f"FormPage {self.id}: 无法导入邮件任务模块: {str(e)}")
+			logger.error(f"FormPage {self.id}: 无法导入邮件任务模块: {str(e)}", exc_info=True)
 			return None
 		except Exception as e:
 			logger.error(f"FormPage {self.id}: 提交确认邮件任务失败: {str(e)}", exc_info=True)

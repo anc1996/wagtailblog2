@@ -56,12 +56,8 @@ SIMPLE_JWT = {
 
 import os
 
-LOG_DIR = os.path.join(BASE_DIR, 'logs')
-
-# 引入更新后的日志配置
-from wagtailblog3.logging_config import get_logging_config, get_email_debug_config
-
-LOGGING = get_logging_config()
+# 开发环境在基础配置上追加调试能力，文件路由仍由 observability 统一管理。
+from wagtailblog3.observability import get_logging_config, get_email_debug_config
 
 # 从环境变量获取日志级别和模块
 log_level = os.environ.get('DJANGO_LOG_LEVEL', 'WARNING')
@@ -71,9 +67,8 @@ log_module = os.environ.get('DJANGO_LOG_MODULE', '')
 if log_module:
 	LOGGING = get_logging_config(modules_filter=[log_module])
 
-# 如果指定了日志级别，更新控制台处理器
-if log_level != 'WARNING':
-	LOGGING['handlers']['console']['level'] = log_level
+# 控制台级别始终以环境变量为准，文件路由不受此项影响。
+LOGGING['handlers']['console']['level'] = log_level
 
 # MongoDB调试信息
 MONGO_DEBUG = True  # 在MongoDB适配器中使用此设置来控制详细日志输出
@@ -98,27 +93,23 @@ if DEBUG and EMAIL_DEBUG_ENABLED:
 			# 如果日志记录器已存在，合并处理器
 			existing_handlers = LOGGING['loggers'][logger_name].get('handlers', [])
 			new_handlers = logger_config.get('handlers', [])
-			LOGGING['loggers'][logger_name]['handlers'] = list(set(existing_handlers + new_handlers))
+			LOGGING['loggers'][logger_name]['handlers'] = list(
+				dict.fromkeys(existing_handlers + new_handlers)
+			)
 			# 设置更详细的日志级别
 			LOGGING['loggers'][logger_name]['level'] = 'DEBUG'
+			LOGGING['loggers'][logger_name]['propagate'] = False
 		else:
 			# 新增日志记录器
 			LOGGING['loggers'][logger_name] = logger_config
 
 # 表单调试设置 - 增强版
 if DEBUG:
-	# 启用详细的表单提交日志
-	LOGGING['loggers']['wagtail.contrib.forms'] = {
-		'handlers': ['console', 'email_operations_file'],
-		'level': 'DEBUG',
-		'propagate': True,
-	}
-	
-	# 启用Django邮件后端的详细日志
+	# 保留中央配置中的文件路由，仅提高开发环境日志级别。
+	LOGGING['loggers']['wagtail.contrib.forms']['level'] = 'DEBUG'
 	LOGGING['loggers']['django.core.mail.backends'] = {
-		'handlers': ['console', 'email_operations_file'],
+		**LOGGING['loggers']['django.core.mail'],
 		'level': 'DEBUG',
-		'propagate': False,
 	}
 
 # ===========================================================
@@ -143,11 +134,7 @@ CELERY_TASK_EAGER_PROPAGATES = True
 
 # 开发环境启用更详细的任务日志
 if DEBUG:
-	LOGGING['loggers']['celery.task'] = {
-		'handlers': ['console', 'email_tasks_file'],
-		'level': 'DEBUG',
-		'propagate': False,
-	}
+	LOGGING['loggers']['celery.task']['level'] = 'DEBUG'
 
 # ===========================================================
 # 开发环境监控和调试工具
@@ -164,7 +151,7 @@ if DEBUG:
 PERFORMANCE_MONITORING_ENABLED = os.environ.get('PERFORMANCE_MONITORING', 'False').lower() == 'true'
 
 if PERFORMANCE_MONITORING_ENABLED:
-	from wagtailblog3.logging_config import get_performance_logging_config
+	from wagtailblog3.observability import get_performance_logging_config
 	
 	performance_config = get_performance_logging_config()
 	LOGGING['handlers'].update(performance_config['handlers'])

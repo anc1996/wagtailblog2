@@ -72,7 +72,7 @@ def search(request):
 	try:
 		popular_search_terms_list = SearchAnalytics.get_popular_searches(days=30, limit=10)
 	except Exception as e:
-		logger.error(f"获取热门搜索词失败: {e}")
+		logger.error(f"获取热门搜索词失败: {e}", exc_info=True)
 		popular_search_terms_list = []
 	
 	# 记录搜索分析 (只有在实际执行搜索时)
@@ -84,7 +84,7 @@ def search(request):
 				search_type=search_type
 			)
 		except Exception as e:
-			logger.error(f"记录搜索分析错误: {e}")
+			logger.error(f"记录搜索分析错误: {e}", exc_info=True)
 	
 	# 确保传递给模板的值是清理过的，避免显示None
 	context = {
@@ -131,7 +131,7 @@ def search_ajax(request, search_results, search_query, search_type=None, start_d
 		}
 		return JsonResponse(response_data)
 	except Exception as e:
-		logger.error(f"AJAX搜索响应错误: {e}")
+		logger.error(f"AJAX搜索响应错误: {e}", exc_info=True)
 		return JsonResponse({
 			'error': f"搜索处理错误: {str(e)}",
 			'query': search_query or "",
@@ -160,5 +160,5 @@ def search_suggestions(request):
 	
 	except Exception as e:
 		# 4. 优雅降级：记录日志，但对前端保持静默，绝不抛出 500 破坏 UI 体验
-		logger.error(f"传统 AJAX 获取搜索建议时发生错误: {e}")
+		logger.error(f"传统 AJAX 获取搜索建议时发生错误: {e}", exc_info=True)
 		return JsonResponse({'suggestions': []})

@@ -1268,6 +1268,130 @@ html {
     outline-offset: 1px;
 }
 
+.comment-markdown-toolbar .comment-toolbar-divider {
+    width: 1px;
+    height: 22px;
+    margin: 0 2px;
+    background: #d1bda6;
+}
+
+.comment-markdown-toolbar .comment-formula-toggle {
+    min-width: 38px;
+    padding: 0 7px;
+    color: #2f6f78;
+    font-family: Georgia, 'Times New Roman', serif;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.comment-markdown-toolbar .comment-formula-toggle:hover,
+.comment-markdown-toolbar .comment-formula-toggle:focus-visible,
+.comment-markdown-toolbar .comment-formula-toggle[aria-expanded="true"] {
+    background: #e3f1ef;
+    color: #1e5962;
+}
+
+.comment-formula-picker {
+    position: absolute;
+    z-index: 40;
+    top: calc(100% + 7px);
+    left: 116px;
+    width: min(360px, calc(100vw - 32px));
+    padding: 8px;
+    max-height: min(520px, calc(100vh - 110px));
+    overflow-y: auto;
+    border: 1px solid #d1bda6;
+    border-radius: 10px;
+    background: #fbf7f0;
+    box-shadow: 0 12px 30px rgba(73, 52, 34, 0.2);
+}
+
+.comment-formula-picker[hidden] {
+    display: none;
+}
+
+.comment-formula-tabs {
+    display: flex;
+    gap: 3px;
+    margin-bottom: 8px;
+    overflow-x: auto;
+}
+
+.comment-markdown-toolbar .comment-formula-tabs button {
+    min-width: auto;
+    height: 28px;
+    padding: 0 9px;
+    color: #6d6257;
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.comment-markdown-toolbar .comment-formula-tabs button[aria-selected="true"] {
+    border-color: #b9d8d4;
+    background: #e3f1ef;
+    color: #1e5962;
+    font-weight: 700;
+}
+
+.comment-formula-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 5px;
+}
+
+.comment-greek-grid {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.comment-formula-tabs {
+    flex-wrap: wrap;
+}
+
+.comment-formula-grid[data-formula-panel="arrows"],
+.comment-formula-grid[data-formula-panel="geometry"] {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.comment-formula-grid[hidden] {
+    display: none;
+}
+
+.comment-markdown-toolbar .comment-formula-grid button {
+    display: flex;
+    min-width: 0;
+    height: 58px;
+    padding: 5px 3px;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    border-color: #eadfd2;
+    background: #fffdf9;
+}
+
+.comment-markdown-toolbar .comment-formula-grid button span {
+    color: #3a4b50;
+    font-family: Georgia, 'Times New Roman', serif;
+    font-size: 17px;
+    line-height: 1.1;
+}
+
+.comment-markdown-toolbar .comment-formula-grid button small {
+    overflow: hidden;
+    max-width: 100%;
+    color: #81766c;
+    font-size: 10px;
+    line-height: 1.2;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.comment-markdown-toolbar .comment-formula-grid button:hover,
+.comment-markdown-toolbar .comment-formula-grid button:focus-visible {
+    border-color: #9ccbc5;
+    background: #eaf5f3;
+}
+
 .comment-markdown-toolbar .comment-emoji-toggle {
     font-size: 17px;
     line-height: 1;
@@ -1341,6 +1465,26 @@ html {
         right: auto;
         left: 6px;
         grid-template-columns: repeat(4, 38px);
+    }
+
+    .comment-formula-picker {
+        position: fixed;
+        top: auto;
+        right: 8px;
+        bottom: 8px;
+        left: 8px;
+        width: auto;
+        max-height: min(620px, calc(100vh - 16px));
+        border-radius: 10px;
+    }
+
+    .comment-greek-grid {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .comment-formula-grid[data-formula-panel="arrows"],
+    .comment-formula-grid[data-formula-panel="geometry"] {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
     }
 
     .comment-reply-form .author-image {

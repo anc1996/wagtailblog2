@@ -32,6 +32,194 @@ function promptForColor(editor) {
     }
 }
 
+// --- LaTeX formula palette ---
+var formulaGroups = [
+    {
+        name: "常用",
+        items: [
+            ["x^2", "平方", "$x^2$"],
+            ["x_n", "下标", "$x_n$"],
+            ["\\frac{}{}", "分数", "$\\frac{a}{b}$"],
+            ["\\sqrt{}", "平方根", "$\\sqrt{x}$"],
+            ["\\pm", "正负号", "$\\pm$"],
+            ["\\infty", "无穷大", "$\\infty$"]
+        ]
+    },
+    {
+        name: "基础运算",
+        items: [
+            ["+", "加法", "$a+b$"],
+            ["-", "减法", "$a-b$"],
+            ["\\times", "乘法", "$a\\times b$"],
+            ["\\div", "除法", "$a\\div b$"],
+            ["=", "等于", "$a=b$"],
+            ["\\neq", "不等于", "$a\\neq b$"],
+            ["\\leq", "小于等于", "$a\\leq b$"],
+            ["\\geq", "大于等于", "$a\\geq b$"]
+        ]
+    },
+    {
+        name: "分式与根式",
+        items: [
+            ["\\frac{}{}", "普通分式", "$\\frac{a}{b}$"],
+            ["\\dfrac{}{}", "大分式", "$\\dfrac{a}{b}$"],
+            ["\\sqrt{}", "平方根", "$\\sqrt{x}$"],
+            ["\\sqrt[]{}", "n 次根", "$\\sqrt[n]{x}$"],
+            ["\\frac{d}{dx}", "导数符号", "$\\frac{d}{dx}$"],
+            ["\\left( \\right)", "可伸缩括号", "$\\left( x \\right)$"]
+        ]
+    },
+    {
+        name: "上下标",
+        items: [
+            ["x^{}", "上标", "$x^n$"],
+            ["x_{}", "下标", "$x_n$"],
+            ["x_{}^{}", "上下标", "$x_n^m$"],
+            ["\\vec{}", "向量", "$\\vec{x}$"],
+            ["\\hat{}", "单位向量", "$\\hat{x}$"],
+            ["\\bar{}", "平均值", "$\\bar{x}$"]
+        ]
+    },
+    {
+        name: "求和与积分",
+        items: [
+            ["\\sum_{}^{}", "求和", "$\\sum_{i=1}^{n}$"],
+            ["\\prod_{}^{}", "连乘", "$\\prod_{i=1}^{n}$"],
+            ["\\int_{}^{}", "积分", "$\\int_a^b$"],
+            ["\\iint", "二重积分", "$\\iint$"],
+            ["\\oint", "曲线积分", "$\\oint$"],
+            ["\\lim_{x\\to{}}", "极限", "$\\lim_{x\\to 0}$"]
+        ]
+    },
+    {
+        name: "极限与导数",
+        items: [
+            ["\\lim_{x\\to{}}", "极限", "$\\lim_{x\\to 0}$"],
+            ["\\frac{d}{dx}{}", "一阶导数", "$\\frac{d}{dx}f(x)$"],
+            ["\\frac{d^2}{dx^2}{}", "二阶导数", "$\\frac{d^2}{dx^2}f(x)$"],
+            ["\\partial", "偏导符号", "$\\partial$"],
+            ["\\nabla", "梯度", "$\\nabla f$"],
+            ["\\propto", "正比于", "$a\\propto b$"]
+        ]
+    },
+    {
+        name: "希腊字母",
+        items: [
+            ["\\alpha", "alpha", "$\\alpha$"],
+            ["\\beta", "beta", "$\\beta$"],
+            ["\\gamma", "gamma", "$\\gamma$"],
+            ["\\Delta", "Delta", "$\\Delta$"],
+            ["\\lambda", "lambda", "$\\lambda$"],
+            ["\\mu", "mu", "$\\mu$"],
+            ["\\pi", "pi", "$\\pi$"],
+            ["\\sigma", "sigma", "$\\sigma$"],
+            ["\\omega", "omega", "$\\omega$"]
+        ]
+    }
+];
+
+function formulaPreview(element, source) {
+    if (window.katex && typeof window.katex.render === "function") {
+        try {
+            window.katex.render(source, element, {throwOnError: false});
+            return;
+        } catch (error) {
+            // Keep the raw source visible if a template is not supported.
+        }
+    }
+    element.textContent = source;
+}
+
+function insertFormula(editor, source, displayMode) {
+    var cm = editor.codemirror;
+    var prefix = displayMode ? "$$\n" : "$";
+    var suffix = displayMode ? "\n$$" : "$";
+    var text = prefix + source + suffix;
+    var start = cm.getCursor();
+    cm.replaceSelection(text);
+    var marker = text.indexOf("{}");
+    if (marker !== -1) {
+        var from = CodeMirror.Pos(start.line, start.ch + marker + 1);
+        cm.setSelection(from, from);
+    } else {
+        cm.setCursor(CodeMirror.Pos(start.line, start.ch + text.length));
+    }
+    cm.focus();
+}
+
+function closeFormulaPalette() {
+    var palette = document.querySelector(".mde-formula-palette");
+    if (palette) palette.remove();
+}
+
+function openFormulaPalette(editor, button) {
+    closeFormulaPalette();
+    var palette = document.createElement("div");
+    palette.className = "mde-formula-palette";
+    palette.setAttribute("role", "dialog");
+    palette.setAttribute("aria-label", "公式面板");
+    var tabs = document.createElement("div");
+    tabs.className = "mde-formula-tabs";
+    var body = document.createElement("div");
+    body.className = "mde-formula-body";
+    palette.appendChild(tabs);
+    palette.appendChild(body);
+
+    function renderGroup(index) {
+        tabs.querySelectorAll("button").forEach(function(tab, tabIndex) {
+            tab.classList.toggle("is-active", tabIndex === index);
+        });
+        body.innerHTML = "";
+        formulaGroups[index].items.forEach(function(item) {
+            var cell = document.createElement("button");
+            cell.type = "button";
+            cell.className = "mde-formula-cell";
+            cell.title = item[1] + "：" + item[0];
+            var preview = document.createElement("span");
+            preview.className = "mde-formula-preview";
+            formulaPreview(preview, item[2].replace(/^\$|\$$/g, ""));
+            var label = document.createElement("span");
+            label.className = "mde-formula-label";
+            label.textContent = item[1];
+            cell.appendChild(preview);
+            cell.appendChild(label);
+            cell.addEventListener("click", function(event) {
+                event.preventDefault();
+                insertFormula(editor, item[0], false);
+                closeFormulaPalette();
+            });
+            body.appendChild(cell);
+        });
+    }
+
+    formulaGroups.forEach(function(group, index) {
+        var tab = document.createElement("button");
+        tab.type = "button";
+        tab.textContent = group.name;
+        tab.addEventListener("click", function() { renderGroup(index); });
+        tabs.appendChild(tab);
+    });
+    document.body.appendChild(palette);
+    var rect = button.getBoundingClientRect();
+    palette.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - 560)) + "px";
+    palette.style.top = (rect.bottom + 8) + "px";
+    renderGroup(0);
+    setTimeout(function() {
+        document.addEventListener("click", function outside(event) {
+            if (!palette.contains(event.target) && event.target !== button) {
+                closeFormulaPalette();
+                document.removeEventListener("click", outside);
+            }
+        });
+        document.addEventListener("keydown", function escape(event) {
+            if (event.key === "Escape") {
+                closeFormulaPalette();
+                document.removeEventListener("keydown", escape);
+            }
+        });
+    }, 0);
+}
+
 // --- EasyMDE 全局配置 ---
 
 // 确保全局对象存在
@@ -82,6 +270,16 @@ window.wagtailMarkdown.options.toolbar = [
                 title: "自定义颜色 (RGB/Hex)..."
             }
         ]
+    },
+    {
+        name: "formula",
+        text: "fx",
+        className: "mde-formula-button",
+        title: "插入公式",
+        action: function(editor, event) {
+            var button = event && event.currentTarget ? event.currentTarget : document.querySelector(".mde-formula-button");
+            if (button) openFormulaPalette(editor, button);
+        }
     },
     // ==================================
 

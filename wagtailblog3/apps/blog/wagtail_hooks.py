@@ -65,9 +65,10 @@ def editor_css_easymde():
 	
 	# 1. 动态链接部分：继续使用 format_html 保障安全
 	links = format_html(
-		'<link rel="stylesheet" href="{}">\n<link rel="stylesheet" href="{}">',
+		'<link rel="stylesheet" href="{}">\n<link rel="stylesheet" href="{}">\n<link rel="stylesheet" href="{}">',
 		static('vendor/highlightjs/styles/github.min.css'),
-		static('blog/css/katex/katex.min.css')
+		static('blog/css/katex/katex.min.css'),
+		static('blog/css/formula_palette.css')
 	)
 	
 	# 2. 纯样式部分：使用 mark_safe。

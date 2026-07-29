@@ -131,6 +131,157 @@
                     <button type="button" data-md-action="code" title="行内代码">&lt;/&gt;</button>
                     <button type="button" data-md-action="codeblock" title="代码块">代码框</button>
                     <button type="button" data-md-action="table" title="插入 Markdown 表格">表格</button>
+                    <span class="comment-toolbar-divider" aria-hidden="true"></span>
+                    <button type="button" class="comment-formula-toggle" title="公式工具" aria-label="打开公式工具" aria-expanded="false" aria-haspopup="true"><span aria-hidden="true">fx</span></button>
+                    <div class="comment-formula-picker" role="menu" aria-label="公式工具" hidden>
+                        <div class="comment-formula-tabs" role="tablist" aria-label="公式分类">
+                            <button type="button" role="tab" aria-selected="true" data-formula-category="common">常用</button>
+                            <button type="button" role="tab" aria-selected="false" data-formula-category="calculus">运算</button>
+                            <button type="button" role="tab" aria-selected="false" data-formula-category="structure">结构</button>
+                            <button type="button" role="tab" aria-selected="false" data-formula-category="greek">希腊字母</button>
+                            <button type="button" role="tab" aria-selected="false" data-formula-category="arrows">箭头</button>
+                            <button type="button" role="tab" aria-selected="false" data-formula-category="geometry">几何</button>
+                        </div>
+                        <div class="comment-formula-grid" data-formula-panel="common">
+                            <button type="button" data-md-action="math-inline" title="插入：$E=mc^2$"><span>$x$</span><small>行内</small></button>
+                            <button type="button" data-md-action="math-display" title="插入：$$公式内容$$"><span>$$x$$</span><small>独立公式</small></button>
+                            <button type="button" data-md-action="math-frac" title="插入：$\frac{分子}{分母}$"><span>a/b</span><small>分数</small></button>
+                            <button type="button" data-md-action="math-sqrt" title="插入：$\sqrt{x^2+y^2}$"><span>√x</span><small>根式</small></button>
+                            <button type="button" data-md-action="math-sup" title="插入：$x^{2}$"><span>x²</span><small>上标</small></button>
+                            <button type="button" data-md-action="math-sub" title="插入：$x_{n}$"><span>xₙ</span><small>下标</small></button>
+                            <button type="button" data-md-action="math-matrix" title="插入矩阵：bmatrix"><span>▦</span><small>矩阵</small></button>
+                            <button type="button" data-md-action="math-cases" title="插入分段函数：cases"><span>{ }</span><small>分段</small></button>
+                        </div>
+                        <div class="comment-formula-grid" data-formula-panel="calculus" hidden>
+                            <button type="button" data-md-action="math-sum" title="插入：$$\sum_{i=1}^{n} a_i$$"><span>∑</span><small>求和</small></button>
+                            <button type="button" data-md-action="math-integral" title="插入：$$\int_a^b f(x)\,dx$$"><span>∫</span><small>积分</small></button>
+                            <button type="button" data-md-action="math-limit" title="插入：$$\lim_{x\to 0} f(x)$$"><span>lim</span><small>极限</small></button>
+                            <button type="button" data-md-action="math-inequality" title="插入：$a \le b$"><span>≤ ≥</span><small>不等式</small></button>
+                        </div>
+                        <div class="comment-formula-grid" data-formula-panel="structure" hidden>
+                            <button type="button" data-md-action="math-differential" title="插入：$\partial f / \partial x$"><span>∂ ∇</span><small>微分</small></button>
+                            <button type="button" data-md-action="math-infinity" title="插入：$\infty$"><span>∞</span><small>无穷</small></button>
+                            <button type="button" data-md-action="math-relations" title="插入：$a \ne b$"><span>≈ ≠</span><small>关系</small></button>
+                        </div>
+                        <div class="comment-formula-grid comment-greek-grid" data-formula-panel="greek" hidden>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\alpha" title="插入：$\\alpha$"><span>α</span><small>alpha</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\beta" title="插入：$\\beta$"><span>β</span><small>beta</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\gamma" title="插入：$\\gamma$"><span>γ</span><small>gamma</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\delta" title="插入：$\\delta$"><span>δ</span><small>delta</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\epsilon" title="插入：$\\epsilon$"><span>ϵ</span><small>epsilon</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\varepsilon" title="插入：$\\varepsilon$"><span>ε</span><small>varepsilon</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\zeta" title="插入：$\\zeta$"><span>ζ</span><small>zeta</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\eta" title="插入：$\\eta$"><span>η</span><small>eta</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\theta" title="插入：$\\theta$"><span>θ</span><small>theta</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\vartheta" title="插入：$\\vartheta$"><span>ϑ</span><small>vartheta</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\iota" title="插入：$\\iota$"><span>ι</span><small>iota</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\kappa" title="插入：$\\kappa$"><span>κ</span><small>kappa</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\lambda" title="插入：$\\lambda$"><span>λ</span><small>lambda</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\mu" title="插入：$\\mu$"><span>μ</span><small>mu</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\nu" title="插入：$\\nu$"><span>ν</span><small>nu</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\xi" title="插入：$\\xi$"><span>ξ</span><small>xi</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\pi" title="插入：$\\pi$"><span>π</span><small>pi</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\varpi" title="插入：$\\varpi$"><span>ϖ</span><small>varpi</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\rho" title="插入：$\\rho$"><span>ρ</span><small>rho</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\varrho" title="插入：$\\varrho$"><span>ϱ</span><small>varrho</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\sigma" title="插入：$\\sigma$"><span>σ</span><small>sigma</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\varsigma" title="插入：$\\varsigma$"><span>ς</span><small>varsigma</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\tau" title="插入：$\\tau$"><span>τ</span><small>tau</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\upsilon" title="插入：$\\upsilon$"><span>υ</span><small>upsilon</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\phi" title="插入：$\\phi$"><span>ϕ</span><small>phi</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\varphi" title="插入：$\\varphi$"><span>φ</span><small>varphi</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\chi" title="插入：$\\chi$"><span>χ</span><small>chi</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\psi" title="插入：$\\psi$"><span>ψ</span><small>psi</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\omega" title="插入：$\\omega$"><span>ω</span><small>omega</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\Gamma" title="插入：$\\Gamma$"><span>Γ</span><small>Gamma</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\Delta" title="插入：$\\Delta$"><span>Δ</span><small>Delta</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\Theta" title="插入：$\\Theta$"><span>Θ</span><small>Theta</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\Lambda" title="插入：$\\Lambda$"><span>Λ</span><small>Lambda</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\Xi" title="插入：$\\Xi$"><span>Ξ</span><small>Xi</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\Pi" title="插入：$\\Pi$"><span>Π</span><small>Pi</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\Sigma" title="插入：$\\Sigma$"><span>Σ</span><small>Sigma</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\Upsilon" title="插入：$\\Upsilon$"><span>Υ</span><small>Upsilon</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\Phi" title="插入：$\\Phi$"><span>Φ</span><small>Phi</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\Psi" title="插入：$\\Psi$"><span>Ψ</span><small>Psi</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\Omega" title="插入：$\\Omega$"><span>Ω</span><small>Omega</small></button>
+                        </div>
+                        <div class="comment-formula-grid" data-formula-panel="arrows" hidden>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\to" title="插入：$\\to$"><span>→</span><small>to</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\leftarrow" title="插入：$\\leftarrow$"><span>←</span><small>leftarrow</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\leftrightarrow" title="插入：$\\leftrightarrow$"><span>↔</span><small>leftrightarrow</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\Rightarrow" title="插入：$\\Rightarrow$"><span>⇒</span><small>Rightarrow</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\Leftarrow" title="插入：$\\Leftarrow$"><span>⇐</span><small>Leftarrow</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\Leftrightarrow" title="插入：$\\Leftrightarrow$"><span>⇔</span><small>Leftrightarrow</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\mapsto" title="插入：$\\mapsto$"><span>↦</span><small>mapsto</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\uparrow" title="插入：$\\uparrow$"><span>↑</span><small>uparrow</small></button>
+                        </div>
+                        <div class="comment-formula-grid" data-formula-panel="geometry" hidden>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\angle" title="插入：$\\angle$"><span>∠</span><small>angle</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\triangle" title="插入：$\\triangle$"><span>△</span><small>triangle</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\parallel" title="插入：$\\parallel$"><span>∥</span><small>parallel</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\perp" title="插入：$\\perp$"><span>⊥</span><small>perp</small></button>
+                        </div>
+                        <div class="comment-formula-grid" data-formula-panel="arrows" hidden>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\to" title="插入：$\\to$"><span>→</span><small>to</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\leftarrow" title="插入：$\\leftarrow$"><span>←</span><small>leftarrow</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\leftrightarrow" title="插入：$\\leftrightarrow$"><span>↔</span><small>leftrightarrow</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\Rightarrow" title="插入：$\\Rightarrow$"><span>⇒</span><small>Rightarrow</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\Leftarrow" title="插入：$\\Leftarrow$"><span>⇐</span><small>Leftarrow</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\Leftrightarrow" title="插入：$\\Leftrightarrow$"><span>⇔</span><small>Leftrightarrow</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\mapsto" title="插入：$\\mapsto$"><span>↦</span><small>mapsto</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\uparrow" title="插入：$\\uparrow$"><span>↑</span><small>uparrow</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\downarrow" title="插入：$\\downarrow$"><span>↓</span><small>downarrow</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\nearrow" title="插入：$\\nearrow$"><span>↗</span><small>nearrow</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\searrow" title="插入：$\\searrow$"><span>↘</span><small>searrow</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\implies" title="插入：$\\implies$"><span>⟹</span><small>implies</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\iff" title="插入：$\\iff$"><span>⟺</span><small>iff</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\longrightarrow" title="插入：$\\longrightarrow$"><span>⟶</span><small>longrightarrow</small></button>
+                        </div>
+                        <div class="comment-formula-grid" data-formula-panel="geometry" hidden>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\angle" title="插入：$\\angle$"><span>∠</span><small>angle</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\triangle" title="插入：$\\triangle$"><span>△</span><small>triangle</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\parallel" title="插入：$\\parallel$"><span>∥</span><small>parallel</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\perp" title="插入：$\\perp$"><span>⊥</span><small>perp</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\cong" title="插入：$\\cong$"><span>≅</span><small>cong</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\sim" title="插入：$\\sim$"><span>∼</span><small>sim</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\equiv" title="插入：$\\equiv$"><span>≡</span><small>equiv</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\circ" title="插入：$\\circ$"><span>∘</span><small>circ</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\square" title="插入：$\\square$"><span>□</span><small>square</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\diamond" title="插入：$\\diamond$"><span>◇</span><small>diamond</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="^\\circ" title="插入：$^\\circ$"><span>°</span><small>degree</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\overline{AB}" title="插入：$\\overline{AB}$"><span>AB̅</span><small>overline</small></button>
+                        </div>
+                        <div class="comment-formula-grid" data-formula-panel="arrows" hidden>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\to" title="插入：$\\to$"><span>→</span><small>to</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\leftarrow" title="插入：$\\leftarrow$"><span>←</span><small>leftarrow</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\leftrightarrow" title="插入：$\\leftrightarrow$"><span>↔</span><small>leftrightarrow</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\Rightarrow" title="插入：$\\Rightarrow$"><span>⇒</span><small>Rightarrow</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\Leftarrow" title="插入：$\\Leftarrow$"><span>⇐</span><small>Leftarrow</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\Leftrightarrow" title="插入：$\\Leftrightarrow$"><span>⇔</span><small>Leftrightarrow</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\mapsto" title="插入：$\\mapsto$"><span>↦</span><small>mapsto</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\uparrow" title="插入：$\\uparrow$"><span>↑</span><small>uparrow</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\downarrow" title="插入：$\\downarrow$"><span>↓</span><small>downarrow</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\nearrow" title="插入：$\\nearrow$"><span>↗</span><small>nearrow</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\searrow" title="插入：$\\searrow$"><span>↘</span><small>searrow</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\implies" title="插入：$\\implies$"><span>⟹</span><small>implies</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\iff" title="插入：$\\iff$"><span>⟺</span><small>iff</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\longrightarrow" title="插入：$\\longrightarrow$"><span>⟶</span><small>longrightarrow</small></button>
+                        </div>
+                        <div class="comment-formula-grid" data-formula-panel="geometry" hidden>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\angle" title="插入：$\\angle$"><span>∠</span><small>angle</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\triangle" title="插入：$\\triangle$"><span>△</span><small>triangle</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\parallel" title="插入：$\\parallel$"><span>∥</span><small>parallel</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\perp" title="插入：$\\perp$"><span>⊥</span><small>perp</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\cong" title="插入：$\\cong$"><span>≅</span><small>cong</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\sim" title="插入：$\\sim$"><span>∼</span><small>sim</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\equiv" title="插入：$\\equiv$"><span>≡</span><small>equiv</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\circ" title="插入：$\\circ$"><span>∘</span><small>circ</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\square" title="插入：$\\square$"><span>□</span><small>square</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\diamond" title="插入：$\\diamond$"><span>◇</span><small>diamond</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="^\\circ" title="插入：$^\\circ$"><span>°</span><small>degree</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\overline{AB}" title="插入：$\\overline{AB}$"><span>AB̅</span><small>overline</small></button>
+                        </div>
+                    </div>
                     <button type="button" class="comment-emoji-toggle" title="插入表情" aria-label="打开表情选择器" aria-expanded="false">😊</button>
                     <div class="comment-emoji-picker" role="menu" aria-label="选择表情" hidden>
                         <button type="button" data-emoji="😀" title="开心">😀</button>
@@ -209,6 +360,97 @@
                             <button type="button" data-md-action="code" title="行内代码">&lt;/&gt;</button>
                             <button type="button" data-md-action="codeblock" title="代码块">代码框</button>
                             <button type="button" data-md-action="table" title="插入 Markdown 表格">表格</button>
+                    <span class="comment-toolbar-divider" aria-hidden="true"></span>
+                    <button type="button" class="comment-formula-toggle" title="公式工具" aria-label="打开公式工具" aria-expanded="false" aria-haspopup="true"><span aria-hidden="true">fx</span></button>
+                    <div class="comment-formula-picker" role="menu" aria-label="公式工具" hidden>
+                        <div class="comment-formula-tabs" role="tablist" aria-label="公式分类">
+                            <button type="button" role="tab" aria-selected="true" data-formula-category="common">常用</button>
+                            <button type="button" role="tab" aria-selected="false" data-formula-category="calculus">运算</button>
+                            <button type="button" role="tab" aria-selected="false" data-formula-category="structure">结构</button>
+                            <button type="button" role="tab" aria-selected="false" data-formula-category="greek">希腊字母</button>
+                            <button type="button" role="tab" aria-selected="false" data-formula-category="arrows">箭头</button>
+                            <button type="button" role="tab" aria-selected="false" data-formula-category="geometry">几何</button>
+                        </div>
+                        <div class="comment-formula-grid" data-formula-panel="common">
+                            <button type="button" data-md-action="math-inline" title="插入：$E=mc^2$"><span>$x$</span><small>行内</small></button>
+                            <button type="button" data-md-action="math-display" title="插入：$$公式内容$$"><span>$$x$$</span><small>独立公式</small></button>
+                            <button type="button" data-md-action="math-frac" title="插入：$\frac{分子}{分母}$"><span>a/b</span><small>分数</small></button>
+                            <button type="button" data-md-action="math-sqrt" title="插入：$\sqrt{x^2+y^2}$"><span>√x</span><small>根式</small></button>
+                            <button type="button" data-md-action="math-sup" title="插入：$x^{2}$"><span>x²</span><small>上标</small></button>
+                            <button type="button" data-md-action="math-sub" title="插入：$x_{n}$"><span>xₙ</span><small>下标</small></button>
+                            <button type="button" data-md-action="math-matrix" title="插入矩阵：bmatrix"><span>▦</span><small>矩阵</small></button>
+                            <button type="button" data-md-action="math-cases" title="插入分段函数：cases"><span>{ }</span><small>分段</small></button>
+                        </div>
+                        <div class="comment-formula-grid" data-formula-panel="calculus" hidden>
+                            <button type="button" data-md-action="math-sum" title="插入：$$\sum_{i=1}^{n} a_i$$"><span>∑</span><small>求和</small></button>
+                            <button type="button" data-md-action="math-integral" title="插入：$$\int_a^b f(x)\,dx$$"><span>∫</span><small>积分</small></button>
+                            <button type="button" data-md-action="math-limit" title="插入：$$\lim_{x\to 0} f(x)$$"><span>lim</span><small>极限</small></button>
+                            <button type="button" data-md-action="math-inequality" title="插入：$a \le b$"><span>≤ ≥</span><small>不等式</small></button>
+                        </div>
+                        <div class="comment-formula-grid" data-formula-panel="structure" hidden>
+                            <button type="button" data-md-action="math-differential" title="插入：$\partial f / \partial x$"><span>∂ ∇</span><small>微分</small></button>
+                            <button type="button" data-md-action="math-infinity" title="插入：$\infty$"><span>∞</span><small>无穷</small></button>
+                            <button type="button" data-md-action="math-relations" title="插入：$a \ne b$"><span>≈ ≠</span><small>关系</small></button>
+                        </div>
+                        <div class="comment-formula-grid comment-greek-grid" data-formula-panel="greek" hidden>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\alpha" title="插入：$\\alpha$"><span>α</span><small>alpha</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\beta" title="插入：$\\beta$"><span>β</span><small>beta</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\gamma" title="插入：$\\gamma$"><span>γ</span><small>gamma</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\delta" title="插入：$\\delta$"><span>δ</span><small>delta</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\epsilon" title="插入：$\\epsilon$"><span>ϵ</span><small>epsilon</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\varepsilon" title="插入：$\\varepsilon$"><span>ε</span><small>varepsilon</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\zeta" title="插入：$\\zeta$"><span>ζ</span><small>zeta</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\eta" title="插入：$\\eta$"><span>η</span><small>eta</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\theta" title="插入：$\\theta$"><span>θ</span><small>theta</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\vartheta" title="插入：$\\vartheta$"><span>ϑ</span><small>vartheta</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\iota" title="插入：$\\iota$"><span>ι</span><small>iota</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\kappa" title="插入：$\\kappa$"><span>κ</span><small>kappa</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\lambda" title="插入：$\\lambda$"><span>λ</span><small>lambda</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\mu" title="插入：$\\mu$"><span>μ</span><small>mu</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\nu" title="插入：$\\nu$"><span>ν</span><small>nu</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\xi" title="插入：$\\xi$"><span>ξ</span><small>xi</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\pi" title="插入：$\\pi$"><span>π</span><small>pi</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\varpi" title="插入：$\\varpi$"><span>ϖ</span><small>varpi</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\rho" title="插入：$\\rho$"><span>ρ</span><small>rho</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\varrho" title="插入：$\\varrho$"><span>ϱ</span><small>varrho</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\sigma" title="插入：$\\sigma$"><span>σ</span><small>sigma</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\varsigma" title="插入：$\\varsigma$"><span>ς</span><small>varsigma</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\tau" title="插入：$\\tau$"><span>τ</span><small>tau</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\upsilon" title="插入：$\\upsilon$"><span>υ</span><small>upsilon</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\phi" title="插入：$\\phi$"><span>ϕ</span><small>phi</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\varphi" title="插入：$\\varphi$"><span>φ</span><small>varphi</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\chi" title="插入：$\\chi$"><span>χ</span><small>chi</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\psi" title="插入：$\\psi$"><span>ψ</span><small>psi</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\omega" title="插入：$\\omega$"><span>ω</span><small>omega</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\Gamma" title="插入：$\\Gamma$"><span>Γ</span><small>Gamma</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\Delta" title="插入：$\\Delta$"><span>Δ</span><small>Delta</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\Theta" title="插入：$\\Theta$"><span>Θ</span><small>Theta</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\Lambda" title="插入：$\\Lambda$"><span>Λ</span><small>Lambda</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\Xi" title="插入：$\\Xi$"><span>Ξ</span><small>Xi</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\Pi" title="插入：$\\Pi$"><span>Π</span><small>Pi</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\Sigma" title="插入：$\\Sigma$"><span>Σ</span><small>Sigma</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\Upsilon" title="插入：$\\Upsilon$"><span>Υ</span><small>Upsilon</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\Phi" title="插入：$\\Phi$"><span>Φ</span><small>Phi</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\Psi" title="插入：$\\Psi$"><span>Ψ</span><small>Psi</small></button>
+                            <button type="button" data-md-action="math-symbol" data-math-symbol="\\Omega" title="插入：$\\Omega$"><span>Ω</span><small>Omega</small></button>
+                        </div>
+                    <div class="comment-formula-grid" data-formula-panel="arrows" hidden>
+                        <button type="button" data-md-action="math-symbol" data-math-symbol="\\to" title="插入：$\\to$"><span>→</span><small>to</small></button>
+                        <button type="button" data-md-action="math-symbol" data-math-symbol="\\leftarrow" title="插入：$\\leftarrow$"><span>←</span><small>leftarrow</small></button>
+                        <button type="button" data-md-action="math-symbol" data-math-symbol="\\leftrightarrow" title="插入：$\\leftrightarrow$"><span>↔</span><small>leftrightarrow</small></button>
+                        <button type="button" data-md-action="math-symbol" data-math-symbol="\\Rightarrow" title="插入：$\\Rightarrow$"><span>⇒</span><small>Rightarrow</small></button>
+                        <button type="button" data-md-action="math-symbol" data-math-symbol="\\Leftarrow" title="插入：$\\Leftarrow$"><span>⇐</span><small>Leftarrow</small></button>
+                        <button type="button" data-md-action="math-symbol" data-math-symbol="\\Leftrightarrow" title="插入：$\\Leftrightarrow$"><span>⇔</span><small>Leftrightarrow</small></button>
+                        <button type="button" data-md-action="math-symbol" data-math-symbol="\\mapsto" title="插入：$\\mapsto$"><span>↦</span><small>mapsto</small></button>
+                        <button type="button" data-md-action="math-symbol" data-math-symbol="\\uparrow" title="插入：$\\uparrow$"><span>↑</span><small>uparrow</small></button>
+                    </div>
+                    <div class="comment-formula-grid" data-formula-panel="geometry" hidden>
+                        <button type="button" data-md-action="math-symbol" data-math-symbol="\\angle" title="插入：$\\angle$"><span>∠</span><small>angle</small></button>
+                        <button type="button" data-md-action="math-symbol" data-math-symbol="\\triangle" title="插入：$\\triangle$"><span>△</span><small>triangle</small></button>
+                        <button type="button" data-md-action="math-symbol" data-math-symbol="\\parallel" title="插入：$\\parallel$"><span>∥</span><small>parallel</small></button>
+                        <button type="button" data-md-action="math-symbol" data-math-symbol="\\perp" title="插入：$\\perp$"><span>⊥</span><small>perp</small></button>
+                    </div>
+                    </div>
                             <button type="button" class="comment-emoji-toggle" title="插入表情" aria-label="打开表情选择器" aria-expanded="false">😊</button>
                             <div class="comment-emoji-picker" role="menu" aria-label="选择表情" hidden>
                                 <button type="button" data-emoji="😀" title="开心">😀</button>

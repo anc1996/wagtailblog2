@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="{% static 'blog/css/github-markdown.min.css' %}">
     <link rel="stylesheet" href="{% static 'blog/css/markdown-theme.css' %}">
 
-    {% if has_katex %}<link rel="stylesheet" href="{% static 'blog/css/katex/katex.min.css' %}">{% endif %}
+    <link rel="stylesheet" href="{% static 'vendor/katex/katex.min.css' %}?v=20260728-1">
 
     {# 评论支持代码围栏，因此评论区存在时也按需启用公共代码高亮能力。 #}
     {% include "includes/content/code_highlighting_css.html" %}
@@ -22,7 +22,7 @@
     {% if has_embed %}<link rel="stylesheet" href="{% static 'blog/css/embed_blocks.css' %}">{% endif %}
     {% if has_table %}<link rel="stylesheet" href="{% static 'blog/css/table_blocks.css' %}">{% endif %}
     {% if has_mermaid %}{% include "includes/content/mermaid_css.html" %}{% endif %}
-    <link rel="stylesheet" href="{% static 'comments/css/comments.css' %}?v=20260727-2">
+    <link rel="stylesheet" href="{% static 'comments/css/comments.css' %}?v=20260729-5">
 
 {% endblock %}
 
@@ -315,18 +315,18 @@
 
 {% block extra_js %}
     {{ block.super }}
+    <script src="{% static 'vendor/katex/katex.min.js' %}?v=20260728-1" defer></script>
+    <script src="{% static 'vendor/katex/auto-render.min.js' %}?v=20260728-1" defer></script>
+    <script src="{% static 'vendor/katex/render.js' %}?v=20260728-1" defer></script>
+
     <!-- 使用 ES6 模块 -->
-    <script type="module" src="{% static 'comments/js/comments.js' %}?v=20260727-2"></script>
+    <script type="module" src="{% static 'comments/js/comments.js' %}?v=20260729-5"></script>
 
     <script src="{% static 'blog/js/blog_page.js' %}?v=20260728-3" defer></script>
 
     <!-- 🆕 添加拖动布局JS -->
     <script src="{% static 'blog/js/resize-manager.js' %}"></script>
 
-    {% if has_katex %}
-    <script src="{% static 'blog/css/katex/katex.js' %}" defer></script>
-    <script src="{% static 'blog/js/katex/auto-render.min.js' %}" defer></script>
-    {% endif %}
     {% if has_image or has_gallery %}<script src="{% static 'blog/js/lightbox/lightbox.js' %}" defer></script>{% endif %}
     {% if has_gallery %}<script src="{% static 'blog/js/blog-gallery.js' %}?v=20260726-1" defer></script>{% endif %}
     {% if has_image %}<script src="{% static 'blog/js/image_blocks.js' %}" defer></script>{% endif %}

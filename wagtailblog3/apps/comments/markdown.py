@@ -22,6 +22,7 @@ _STRONG_RE = re.compile(r"\*\*(?=\S)(.+?\S)\*\*")
 _EM_RE = re.compile(r"(?<!\*)\*(?=\S)(.+?\S)\*(?!\*)")
 _MARK_RE = re.compile(r"==(?=\S)(.+?\S)==")
 _UNDERLINE_RE = re.compile(r"\+\+(?=\S)(.+?\S)\+\+")
+_DISPLAY_MATH_RE = re.compile(r"\$\$(.+?)\$\$", re.DOTALL)
 
 
 def _render_text(tokens, index, options, env):
@@ -66,12 +67,21 @@ def _build_renderer() -> MarkdownIt:
 _MARKDOWN = _build_renderer()
 
 
+def _normalise_display_math(value: str) -> str:
+    """Keep ``$$...$$`` in one Markdown text node for KaTeX auto-rendering."""
+    def collapse(match: re.Match[str]) -> str:
+        body = re.sub(r"\s+", " ", match.group(1)).strip()
+        return f"$${body}$$"
+
+    return _DISPLAY_MATH_RE.sub(collapse, value)
+
+
 def render_comment_markdown(value: str | None) -> str:
     """Render Markdown and sanitize the result for untrusted comments."""
     if not value:
         return ""
 
-    rendered = _MARKDOWN.render(str(value).strip())
+    rendered = _MARKDOWN.render(_normalise_display_math(str(value).strip()))
     return bleach.clean(
         rendered,
         tags=_ALLOWED_TAGS,

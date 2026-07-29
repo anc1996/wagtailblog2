@@ -486,6 +486,7 @@ const CommentSystem = (function() {
             if ($repliesContainer.is(':visible') && $repliesContainer.html().trim() !== '') {
                 const $newHtml = $(data.html).addClass('nested-comment');
                 $repliesContainer.append($newHtml);
+                if (window.renderBlogMath) window.renderBlogMath($newHtml[0]);
                 Utils.log('新回复已追加');
 
                 if ($showRepliesBtn.length) {
@@ -513,6 +514,7 @@ const CommentSystem = (function() {
             const $commentsList = $(Config.selectors.commentsList);
             $commentsList.find('.no-comments').remove();
             $commentsList.prepend(data.html);
+            if (window.renderBlogMath) window.renderBlogMath($commentsList[0]);
             $form[0].reset();
             $form.find('.comment-error-message').remove();
 
@@ -554,6 +556,47 @@ const CommentSystem = (function() {
             codeblock: { prefix: '```\n', suffix: '\n```', placeholder: '在这里输入代码' },
             table: {
                 template: '| 表头 1 | 表头 2 |\n| --- | --- |\n| 内容 1 | 内容 2 |'
+            },
+            'math-inline': { prefix: '$', suffix: '$', placeholder: 'E=mc^2' },
+            'math-frac': { prefix: '$\\frac{', suffix: '}{分母}$', placeholder: '分子' },
+            'math-sqrt': { prefix: '$\\sqrt{', suffix: '}$', placeholder: 'x^2+y^2' },
+            'math-sup': { prefix: '$x^{', suffix: '}$', placeholder: '2' },
+            'math-sub': { prefix: '$x_{', suffix: '}$', placeholder: 'n' },
+            'math-display': {
+                template: '$$\n公式内容\n$$'
+            },
+            'math-matrix': {
+                template: '$$\n\\begin{bmatrix}\n1 & 0 \\\n0 & 1\n\\end{bmatrix}\n$$'
+            },
+            'math-cases': {
+                template: '$$\nf(x)=\n\\begin{cases}\nx^2, & x\\ge 0 \\\n-x, & x<0\n\\end{cases}\n$$'
+            },
+            'math-sum': {
+                template: '$$\n\\sum_{i=1}^{n} a_i\n$$'
+            },
+            'math-integral': {
+                template: '$$\n\\int_a^b f(x)\\,dx\n$$'
+            },
+            'math-limit': {
+                template: '$$\n\\lim_{x\\to 0} f(x)\n$$'
+            },
+            'math-inequality': {
+                prefix: '$', suffix: '$', placeholder: 'a \\le b'
+            },
+            'math-greek': {
+                prefix: '$', suffix: '$', placeholder: '\\alpha'
+            },
+            'math-differential': {
+                prefix: '$', suffix: '$', placeholder: '\\partial f / \\partial x'
+            },
+            'math-infinity': {
+                prefix: '$', suffix: '$', placeholder: '\\infty'
+            },
+            'math-relations': {
+                prefix: '$', suffix: '$', placeholder: 'a \\ne b'
+            },
+            'math-symbol': {
+                prefix: '$', suffix: '$', placeholder: 'x'
             }
         },
 
@@ -583,16 +626,20 @@ const CommentSystem = (function() {
                 const replacement = before + config.template + after;
                 textarea.setRangeText(replacement, start, end, 'end');
                 $textarea.trigger('input').focus();
+                this.closeFormulaPickers();
                 return;
             }
 
-            const content = selected || config.placeholder;
+            const content = action === 'math-symbol'
+                ? ($button.attr('data-math-symbol') || config.placeholder)
+                : (selected || config.placeholder);
             const replacement = config.prefix + content + config.suffix;
             textarea.setRangeText(replacement, start, end, 'select');
             if (!selected) {
                 textarea.setSelectionRange(start + config.prefix.length, start + config.prefix.length + content.length);
             }
             $textarea.trigger('input').focus();
+            this.closeFormulaPickers();
         },
 
         applyLinePrefix(textarea, action, start, end) {
@@ -638,6 +685,31 @@ const CommentSystem = (function() {
             }
         },
 
+        toggleFormulaPicker($toggle) {
+            const $picker = $toggle.siblings('.comment-formula-picker').first();
+            const willOpen = $picker.prop('hidden');
+            this.closeEmojiPickers();
+            this.closeFormulaPickers();
+            if (willOpen) {
+                $picker.prop('hidden', false);
+                $toggle.attr('aria-expanded', 'true');
+            }
+        },
+
+        selectFormulaCategory($tab) {
+            const $picker = $tab.closest('.comment-formula-picker');
+            const category = $tab.attr('data-formula-category');
+            $picker.find('[data-formula-category]').attr('aria-selected', 'false');
+            $tab.attr('aria-selected', 'true');
+            $picker.find('[data-formula-panel]').prop('hidden', true);
+            $picker.find(`[data-formula-panel="${category}"]`).prop('hidden', false);
+        },
+
+        closeFormulaPickers() {
+            $('.comment-formula-picker').prop('hidden', true);
+            $('.comment-formula-toggle').attr('aria-expanded', 'false');
+        },
+
         closeEmojiPickers() {
             $('.comment-emoji-picker').prop('hidden', true);
             $('.comment-emoji-toggle').attr('aria-expanded', 'false');
@@ -666,6 +738,7 @@ const CommentSystem = (function() {
                     }
 
                     $commentsList.append(data.html);
+                    if (window.renderBlogMath) window.renderBlogMath($commentsList[0]);
                     this.handleEmptyState(data, pageNumber);
 
                     if (data.has_next) {
@@ -725,7 +798,9 @@ const CommentSystem = (function() {
             return AjaxManager.get(`${Config.urls.loadReplies}${commentId}/`)
                 .done((data) => {
                     if (data.status === 'success') {
-                        $repliesContainer.html(data.html).slideDown(Config.timing.slideAnimationDuration);
+                        $repliesContainer.html(data.html);
+                        if (window.renderBlogMath) window.renderBlogMath($repliesContainer[0]);
+                        $repliesContainer.slideDown(Config.timing.slideAnimationDuration);
                         if ($btn.length) {
                             $btn.text(Utils.template(Config.text.hideReplies, { count: data.reply_count }));
                         }
@@ -851,6 +926,7 @@ const CommentSystem = (function() {
                         'aria-hidden': 'true'
                     }).val(newContent);
                     $commentText.empty().append(rawSource).append(repliedToHtml).append(data.content);
+                    if (window.renderBlogMath) window.renderBlogMath($commentText[0]);
                     $actions.show();
 
                     TemplateManager.showSuccess(Config.text.editSuccess, $comment);
@@ -928,10 +1004,46 @@ const CommentSystem = (function() {
                 return;
             }
 
+            // Older cached/template variants may contain duplicate formula tabs or panels.
+            // Normalize each picker so every form exposes one consistent toolbar.
+            $container.find('.comment-formula-picker').each(function() {
+                const $picker = $(this);
+                const seenCategories = new Set();
+                $picker.find('.comment-formula-tabs [data-formula-category]').each(function() {
+                    const category = $(this).attr('data-formula-category');
+                    if (seenCategories.has(category)) {
+                        $(this).remove();
+                    } else {
+                        seenCategories.add(category);
+                    }
+                });
+                const seenPanels = new Set();
+                $picker.find('[data-formula-panel]').each(function() {
+                    const category = $(this).attr('data-formula-panel');
+                    if (seenPanels.has(category)) {
+                        $(this).remove();
+                    } else {
+                        seenPanels.add(category);
+                    }
+                });
+            });
+
             // Markdown 工具栏（主评论、回复和编辑表单共用）
             $container.on('click', '.comment-markdown-toolbar button[data-md-action]', function(e) {
                 e.preventDefault();
                 MarkdownToolbar.apply($(this));
+            });
+
+            $container.on('click', '.comment-formula-toggle', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                MarkdownToolbar.toggleFormulaPicker($(this));
+            });
+
+            $container.on('click', '.comment-formula-tabs [data-formula-category]', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                MarkdownToolbar.selectFormulaCategory($(this));
             });
 
             $container.on('click', '.comment-emoji-toggle', function(e) {
@@ -950,6 +1062,16 @@ const CommentSystem = (function() {
                 if (!$(e.target).closest('.comment-emoji-picker, .comment-emoji-toggle').length) {
                     MarkdownToolbar.closeEmojiPickers();
                 }
+            });
+
+            $(document).on('click.commentFormulaPicker', function(e) {
+                if (!$(e.target).closest('.comment-formula-picker, .comment-formula-toggle').length) {
+                    MarkdownToolbar.closeFormulaPickers();
+                }
+            });
+
+            $(document).on('keydown.commentFormulaPicker', function(e) {
+                if (e.key === 'Escape') MarkdownToolbar.closeFormulaPickers();
             });
 
             // 登录按钮

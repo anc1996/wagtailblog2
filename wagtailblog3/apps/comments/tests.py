@@ -19,6 +19,21 @@ class CommentMarkdownTests(SimpleTestCase):
         self.assertIn("😄", rendered)
         self.assertNotIn("<script", rendered)
 
+    def test_keeps_multiline_display_math_in_one_text_node(self):
+        rendered = render_comment_markdown(
+            "$$" + chr(10) + r"\alpha = \frac{\sqrt{a^2+b^2}}{1+\mathrm{e}^{-\beta}}" + chr(10) + "$$"
+        )
+
+        self.assertIn(
+            r"<p>$$\alpha = \frac{\sqrt{a^2+b^2}}{1+\mathrm{e}^{-\beta}}$$</p>",
+            rendered,
+        )
+
+    def test_keeps_compact_display_math_delimiters(self):
+        rendered = render_comment_markdown("$$x^2+y^2=z^2$$")
+
+        self.assertEqual(rendered, "<p>$$x^2+y^2=z^2$$</p>" + chr(10))
+
     def test_reply_renderer_removes_only_matching_leading_mention(self):
         rendered = render_reply_markdown("@root 怎么回事", "root")
         different_user = render_reply_markdown("@other 怎么回事", "root")

@@ -1,4 +1,4 @@
-"""Django logging configuration built from the domain registry."""
+"""Django logging configuration built only from the file catalog."""
 
 from __future__ import annotations
 
@@ -6,11 +6,17 @@ import os
 from pathlib import Path
 from typing import Iterable
 
-from .registry import LOG_DIRECTORIES, LOG_DOMAINS, handler_name
+from .registry import (
+    LOG_DIRECTORIES,
+    LOG_DOMAINS,
+    LOG_FILE_BY_KEY,
+    LogFileSpec,
+    handler_name,
+)
 
 
-MAX_BYTES = 10 * 1024 * 1024
-FILTER_MODULE = "wagtailblog3.observability.filters"
+FILTER_MODULE = "observability.filters"
+SANITIZER_MODULE = "observability.sanitizer"
 
 
 def _resolve_log_dir(log_dir: str | os.PathLike[str] | None = None) -> Path:
@@ -28,7 +34,7 @@ def _resolve_log_dir(log_dir: str | os.PathLike[str] | None = None) -> Path:
 
 
 def ensure_log_dirs(log_dir: str | os.PathLike[str] | None = None) -> str:
-    """Create all registered log directories and return the absolute root."""
+    """Create all catalog directories and return the absolute root."""
     root = _resolve_log_dir(log_dir)
     root.mkdir(parents=True, exist_ok=True)
     for directory in LOG_DIRECTORIES:
@@ -36,29 +42,47 @@ def ensure_log_dirs(log_dir: str | os.PathLike[str] | None = None) -> str:
     return str(root)
 
 
+def _handler_filters(filters: list[str] | None = None) -> list[str]:
+    return list(dict.fromkeys(["project_relative_path", "sensitive_data", *(filters or [])]))
+
+
 def _rotating_handler(
-    filename: Path,
+    root: Path,
+    spec: LogFileSpec,
     *,
     level: str,
     formatter: str = "verbose",
-    backup_count: int = 5,
-    max_bytes: int = MAX_BYTES,
     filters: list[str] | None = None,
 ) -> dict:
-    """Build a process-safe local rotating file handler."""
-    handler = {
+    """Build a process-safe handler from catalog metadata only."""
+    return {
         "class": "concurrent_log_handler.ConcurrentRotatingFileHandler",
         "level": level,
-        "filename": str(filename),
-        "maxBytes": max_bytes,
-        "backupCount": backup_count,
+        "filename": str(root / spec.relative_path),
+        "maxBytes": spec.max_bytes,
+        "backupCount": spec.backup_count,
         "encoding": "utf-8",
         "delay": True,
         "formatter": formatter,
+        "filters": _handler_filters(filters),
     }
-    if filters:
-        handler["filters"] = filters
-    return handler
+
+
+def _catalog_handler(
+    root: Path,
+    key: str,
+    *,
+    level: str,
+    formatter: str = "verbose",
+    filters: list[str] | None = None,
+) -> dict:
+    return _rotating_handler(
+        root,
+        LOG_FILE_BY_KEY[key],
+        level=level,
+        formatter=formatter,
+        filters=filters,
+    )
 
 
 def _domain_logger(activity_handler: str, error_handler: str) -> dict:
@@ -71,17 +95,14 @@ def _domain_logger(activity_handler: str, error_handler: str) -> dict:
 
 def _install_domain_routes(root: Path, handlers: dict, loggers: dict) -> None:
     for domain in LOG_DOMAINS:
+        activity_key = f"{domain.key}_activity"
+        error_key = f"{domain.key}_error"
         activity_handler = handler_name(domain, "activity")
         error_handler = handler_name(domain, "error")
-        handlers[activity_handler] = _rotating_handler(
-            root / domain.directory / domain.activity_file,
-            level="INFO",
-            filters=["max_warning"],
+        handlers[activity_handler] = _catalog_handler(
+            root, activity_key, level="INFO", filters=["max_warning"]
         )
-        handlers[error_handler] = _rotating_handler(
-            root / domain.directory / domain.error_file,
-            level="ERROR",
-        )
+        handlers[error_handler] = _catalog_handler(root, error_key, level="ERROR")
         for logger_name in domain.logger_names:
             loggers[logger_name] = _domain_logger(activity_handler, error_handler)
 
@@ -91,97 +112,72 @@ def get_logging_config(
     *,
     log_dir: str | os.PathLike[str] | None = None,
 ) -> dict:
-    """Build the complete project logging dictionary.
-
-    Each registered domain has one activity file (INFO through WARNING) and
-    one error file (ERROR and CRITICAL).  Infrastructure domains are isolated,
-    and the root handler is only an error fallback for unregistered loggers.
-    """
+    """Build the complete project logging dictionary."""
     root = Path(ensure_log_dirs(log_dir))
     filters: dict[str, dict] = {
+        "project_relative_path": {
+            "()": f"{FILTER_MODULE}.ProjectRelativePathFilter",
+        },
+        "sensitive_data": {
+            "()": f"{SANITIZER_MODULE}.SensitiveDataFilter",
+        },
         "max_warning": {
             "()": f"{FILTER_MODULE}.MaxLevelFilter",
             "max_level": "WARNING",
-        }
+        },
     }
     handlers: dict[str, dict] = {
         "console": {
             "class": "logging.StreamHandler",
             "level": "WARNING",
             "formatter": "colored",
+            "filters": _handler_filters(),
         },
-        "fallback_error_file": _rotating_handler(
-            root / "system/error.log", level="ERROR"
+        "fallback_error_file": _catalog_handler(root, "system_error", level="ERROR"),
+        "django_warning_file": _catalog_handler(
+            root, "django_warning", level="WARNING", filters=["max_warning"]
         ),
-        "django_warning_file": _rotating_handler(
-            root / "system/django_warning.log",
-            level="WARNING",
-            filters=["max_warning"],
+        "django_error_file": _catalog_handler(root, "django_error", level="ERROR"),
+        "wagtail_warning_file": _catalog_handler(
+            root, "wagtail_warning", level="WARNING", filters=["max_warning"]
         ),
-        "django_error_file": _rotating_handler(
-            root / "system/django_error.log", level="ERROR"
+        "wagtail_error_file": _catalog_handler(root, "wagtail_error", level="ERROR"),
+        "project_activity_file": _catalog_handler(
+            root, "project_activity", level="INFO", filters=["max_warning"]
         ),
-        "wagtail_warning_file": _rotating_handler(
-            root / "system/wagtail_warning.log",
-            level="WARNING",
-            filters=["max_warning"],
+        "project_error_file": _catalog_handler(root, "project_error", level="ERROR"),
+        "email_operations_file": _catalog_handler(
+            root, "email_operations", level="INFO", formatter="email_verbose", filters=["max_warning"]
         ),
-        "wagtail_error_file": _rotating_handler(
-            root / "system/wagtail_error.log", level="ERROR"
+        "email_rate_limit_file": _catalog_handler(
+            root, "email_rate_limit", level="INFO", formatter="email_verbose", filters=["max_warning"]
         ),
-        "project_activity_file": _rotating_handler(
-            root / "system/application.log",
-            level="INFO",
-            filters=["max_warning"],
+        "email_tasks_file": _catalog_handler(
+            root, "email_tasks", level="INFO", formatter="email_verbose", filters=["max_warning"]
         ),
-        "project_error_file": _rotating_handler(
-            root / "system/application_error.log", level="ERROR"
+        "email_error_file": _catalog_handler(
+            root, "email_error", level="ERROR", formatter="email_verbose"
         ),
-        "email_operations_file": _rotating_handler(
-            root / "email/email_operations.log",
-            level="INFO",
-            formatter="email_verbose",
-            filters=["max_warning"],
+        "celery_worker_file": _catalog_handler(
+            root, "celery_worker", level="INFO", filters=["max_warning"]
         ),
-        "email_rate_limit_file": _rotating_handler(
-            root / "email/rate_limit.log",
-            level="INFO",
-            formatter="email_verbose",
-            backup_count=3,
-            max_bytes=5 * 1024 * 1024,
-            filters=["max_warning"],
+        "celery_beat_file": _catalog_handler(
+            root, "celery_beat", level="INFO", filters=["max_warning"]
         ),
-        "email_tasks_file": _rotating_handler(
-            root / "email/email_tasks.log",
-            level="INFO",
-            formatter="email_verbose",
-            filters=["max_warning"],
-        ),
-        "email_error_file": _rotating_handler(
-            root / "email/email_error.log",
-            level="ERROR",
-            formatter="email_verbose",
-        ),
-        "celery_worker_file": _rotating_handler(
-            root / "celery/celery_worker.log",
-            level="INFO",
-            filters=["max_warning"],
-        ),
-        "celery_beat_file": _rotating_handler(
-            root / "celery/celery_beat.log",
-            level="INFO",
-            backup_count=3,
-            max_bytes=5 * 1024 * 1024,
-            filters=["max_warning"],
-        ),
-        "celery_error_file": _rotating_handler(
-            root / "celery/celery_error.log", level="ERROR"
+        "celery_error_file": _catalog_handler(root, "celery_error", level="ERROR"),
+        "runtime_runserver_file": _catalog_handler(
+            root, "runtime_runserver", level="INFO"
         ),
     }
     loggers: dict[str, dict] = {
         "django": {
             "handlers": ["console", "django_warning_file", "django_error_file"],
             "level": "WARNING",
+            "propagate": False,
+        },
+        "django.server": {
+            "handlers": ["console", "runtime_runserver_file"],
+            "level": "INFO",
             "propagate": False,
         },
         "wagtail": {
@@ -220,20 +216,16 @@ def get_logging_config(
             "propagate": False,
         },
         "celery.task": {
-            "handlers": [
-                "console",
-                "celery_worker_file",
-                "celery_error_file",
-                "email_tasks_file",
-            ],
+            "handlers": ["console", "celery_worker_file", "celery_error_file", "email_tasks_file"],
             "level": "INFO",
             "propagate": False,
         },
     }
     _install_domain_routes(root, handlers, loggers)
 
-    base_activity = handler_name(next(d for d in LOG_DOMAINS if d.key == "base"), "activity")
-    base_error = handler_name(next(d for d in LOG_DOMAINS if d.key == "base"), "error")
+    base_domain = next(domain for domain in LOG_DOMAINS if domain.key == "base")
+    base_activity = handler_name(base_domain, "activity")
+    base_error = handler_name(base_domain, "error")
     email_routes = {
         "base.models": "email_operations_file",
         "base.tasks": "email_tasks_file",
@@ -259,7 +251,7 @@ def get_logging_config(
             "()": f"{FILTER_MODULE}.ModuleFilter",
             "modules": selected_modules,
         }
-        handlers["console"]["filters"] = ["module_filter"]
+        handlers["console"]["filters"].append("module_filter")
 
     return {
         "version": 1,
@@ -267,15 +259,17 @@ def get_logging_config(
         "filters": filters,
         "formatters": {
             "verbose": {
+                "()": f"{SANITIZER_MODULE}.RedactingFormatter",
                 "format": (
-                    "[{asctime}] {levelname} [{name}:{funcName}:{lineno}] "
+                    "[{asctime}] {levelname} "
+                    "[{name}|{relative_path}:{funcName}:{lineno}] "
                     "[pid={process} thread={threadName}] {message}"
                 ),
                 "style": "{",
                 "datefmt": "%Y-%m-%d %H:%M:%S",
             },
             "colored": {
-                "()": "colorlog.ColoredFormatter",
+                "()": f"{SANITIZER_MODULE}.RedactingColoredFormatter",
                 "format": "%(log_color)s[%(levelname)s] %(name)s: %(message)s",
                 "log_colors": {
                     "DEBUG": "cyan",
@@ -286,8 +280,10 @@ def get_logging_config(
                 },
             },
             "email_verbose": {
+                "()": f"{SANITIZER_MODULE}.RedactingFormatter",
                 "format": (
-                    "[{asctime}] {levelname} [{name}] "
+                    "[{asctime}] {levelname} "
+                    "[{name}|{relative_path}:{funcName}:{lineno}] "
                     "[pid={process} thread={threadName}] {message}"
                 ),
                 "style": "{",
@@ -307,18 +303,19 @@ def get_email_debug_config(
     *, log_dir: str | os.PathLike[str] | None = None
 ) -> dict:
     root = Path(ensure_log_dirs(log_dir))
+    spec = LOG_FILE_BY_KEY["email_debug"]
     return {
         "handlers": {
-            "email_debug_file": _rotating_handler(
-                root / "email/email_debug.log",
-                level="DEBUG",
-                formatter="email_verbose",
-                backup_count=2,
-                max_bytes=5 * 1024 * 1024,
+            spec.handler: _rotating_handler(
+                root, spec, level="DEBUG", formatter="email_verbose"
             )
         },
         "loggers": {
-            logger_name: {"handlers": ["email_debug_file"], "level": "DEBUG"}
+            logger_name: {
+                "handlers": [spec.handler],
+                "level": "DEBUG",
+                "propagate": False,
+            }
             for logger_name in (
                 "base.models",
                 "base.tasks",
@@ -333,15 +330,14 @@ def get_performance_logging_config(
     *, log_dir: str | os.PathLike[str] | None = None
 ) -> dict:
     root = Path(ensure_log_dirs(log_dir))
+    spec = LOG_FILE_BY_KEY["performance"]
     return {
         "handlers": {
-            "performance_file": _rotating_handler(
-                root / "system/performance.log", level="INFO", backup_count=3
-            )
+            spec.handler: _rotating_handler(root, spec, level="INFO")
         },
         "loggers": {
             "performance": {
-                "handlers": ["performance_file"],
+                "handlers": [spec.handler],
                 "level": "INFO",
                 "propagate": False,
             }

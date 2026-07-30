@@ -5,9 +5,10 @@ Django settings for wagtailblog3 project.
 """
 
 # 在项目中构建路径，如下所示： os.path.join（BASE_DIR， ...）
-import os,sys
+import os
+import sys
+
 from django.contrib import messages
-from wagtailblog3.observability import get_logging_config
 
 
 # 当前文件的目录,/xxx/xx/wagtailblog3/wagtailblog3
@@ -16,19 +17,22 @@ PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # 项目的根目录:/xx/xx/wagtailblog3
 BASE_DIR = os.path.dirname(PROJECT_DIR)
 
+# Django 应用统一放在项目包的 apps 目录中。
+APPS_DIR = os.path.join(PROJECT_DIR, "apps")
+if APPS_DIR not in sys.path:
+    sys.path.insert(0, APPS_DIR)
+
+from observability import get_logging_config
+
 # 日志目录必须基于项目根目录解析，不能依赖进程当前工作目录。
 LOG_DIR = os.path.join(BASE_DIR, "logs")
 
 # 所有环境共享同一套路由；环境 settings 只能调整级别，不能重建另一套框架。
 LOGGING = get_logging_config(log_dir=LOG_DIR)
 
-# ===== 新增：将 apps 目录添加到 Python 路径 =====
-# 这样 Django 就能找到移动到 apps 目录下的应用
-sys.path.insert(0, os.path.join(PROJECT_DIR, 'apps'))
-# ===============================================
-
 # 应用定义
 INSTALLED_APPS = [
+    "observability",  # Wagtail 后台系统日志中心和清理审计
     "home",  # 首页应用
     "search",  # 搜索应用
     "blog",  # 添加博客应用

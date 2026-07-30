@@ -1,0 +1,37 @@
+{% load wagtailadmin_tags %}
+<button type="button" id="log-clear-dialog-trigger" hidden data-a11y-dialog-show="log-clear-dialog">打开清理确认</button>
+{% dialog id="log-clear-dialog" icon_name="warning" title="确认清理日志" message_status="warning" message_heading="此操作会修改运行中的日志文件" %}
+  <div class="log-dialog" data-log-dialog>
+    <p class="error-message" hidden data-preview-error></p>
+    <form method="post" action="{% url 'observability:clear' %}" data-preview-url="{% url 'observability:clear_preview' %}" data-log-dialog-form>
+      {% csrf_token %}
+      <input type="hidden" name="target_type">
+      <input type="hidden" name="target">
+      <input type="hidden" name="idempotency_key">
+      <input type="hidden" name="preview_token">
+
+      <dl class="log-preview-grid">
+        <div><dt>清理目标</dt><dd data-preview-target>正在加载…</dd></div>
+        <div><dt>日志类型</dt><dd><select name="kind"><option value="">全部</option><option value="activity">活动日志</option><option value="error">错误日志</option></select></dd></div>
+        <div><dt>清理范围</dt><dd><select name="scope"><option value="current">仅当前文件</option><option value="rotated">仅轮转历史</option><option value="all">当前及轮转历史</option></select></dd></div>
+        <div><dt>当前文件</dt><dd><span data-preview-current-count>0</span> 个 / <span data-preview-current-size>0 B</span></dd></div>
+        <div><dt>轮转文件</dt><dd><span data-preview-rotated-count>0</span> 个 / <span data-preview-rotated-size>0 B</span></dd></div>
+        <div><dt>预计清理</dt><dd><span data-preview-total-count>0</span> 个 / <span data-preview-total-size>0 B</span></dd></div>
+      </dl>
+      <table class="listing log-rotation-preview">
+        <thead><tr><th>轮转编号</th><th>文件数量</th><th>占用空间</th></tr></thead>
+        <tbody data-preview-rotations></tbody>
+      </table>
+      <p class="log-danger-text"><strong>危险操作：</strong>当前文件原地截断，允许的轮转文件永久删除；不会删除锁文件或数据库审计记录。</p>
+      <div class="field">
+        <label for="log-dialog-confirmation">加强确认文本</label>
+        <input id="log-dialog-confirmation" name="confirmation" required autocomplete="off">
+        <p class="help">请输入：<strong data-preview-confirmation>确认清理日志</strong></p>
+      </div>
+      <div class="log-dialog-actions">
+        <button type="submit" class="button no" data-log-submit disabled>确认执行清理</button>
+        <button type="button" class="button button-secondary" data-action="w-dialog#hide">取消</button>
+      </div>
+    </form>
+  </div>
+{% enddialog %}

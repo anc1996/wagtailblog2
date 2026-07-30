@@ -5,7 +5,7 @@
 - 业务代码只使用 `logger = logging.getLogger(__name__)`。
 - 日志域、logger 命名空间和文件路径只在 `registry.py` 注册。
 - Django `LOGGING` 只由 `config.py` 生成。
-- 旧的 `wagtailblog3.logging_*` 模块仅为兼容入口，新代码不要继续引用。
+- Wagtail 后台日志中心、读取器、清理服务和审计均位于本应用中。
 
 ## 文件规则
 
@@ -51,7 +51,15 @@ python manage.py view_logs --module blog --kind error --lines 100
 python manage.py view_logs --module mongo --kind activity --lines 50
 ```
 
-可用模块由 `registry.LOG_FILE_CATALOG` 自动生成，不在管理命令中重复维护。
+可用模块由 `registry.LOG_DOMAIN_KEYS` 和 `registry.LOG_FILE_SPECS` 自动生成，不在管理命令中重复维护。
+
+## 后台权限与清理
+
+- `observability.view_logs`：查看日志概览、记录和清理审计；
+- `observability.manage_logs`：预览和执行受控清理；
+- “全部运行日志”额外要求超级管理员身份。
+
+清理目标只接受 `registry.py` 注册项。当前文件使用原地截断以保留 writer 的文件描述符，轮转历史按 catalog 范围删除；服务会验证普通文件、符号链接、设备号和 inode，并把逐文件结果写入 `LogClearAudit.details`。执行 POST 必须携带短时签名预览和唯一幂等键。
 
 ## 轮转
 

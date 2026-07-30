@@ -1,0 +1,81 @@
+{% extends "observability/admin/base.html" %}
+
+{% block log_content %}
+  <form method="get" class="log-filter-form">
+    {% for field in filter_form.visible_fields %}
+      <div class="field{% if field.name == 'include_rotated' %} log-checkbox-field{% endif %}">
+        {% if field.name == 'include_rotated' %}
+          <label class="log-checkbox-option" for="{{ field.id_for_label }}">
+            {{ field }}
+            <span>{{ field.label }}</span>
+          </label>
+        {% else %}
+          <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+          {{ field }}
+        {% endif %}
+        {% for error in field.errors %}<p class="error-message">{{ error }}</p>{% endfor %}
+      </div>
+    {% endfor %}
+    <div class="log-filter-actions">
+      <button type="submit" class="button">筛选</button>
+      <a class="button button-secondary" href="{% url 'observability:records' %}">重置</a>
+    </div>
+  </form>
+  {% for error in filter_form.non_field_errors %}<p class="error-message">{{ error }}</p>{% endfor %}
+
+  <p class="help-block">本次限额读取 {{ bytes_read|filesizeformat }}；日志按时间从新到旧排列。分页使用文件游标和短期索引，不会把全部日志载入内存，也不使用深层 OFFSET。</p>
+
+  <div class="listing log-listing">
+    <table class="listing">
+      <thead><tr><th>时间</th><th>级别</th><th>模块 / 来源</th><th>logger / 文件</th><th>消息</th></tr></thead>
+      <tbody>
+        {% for record in records %}
+          <tr class="log-level-{{ record.level|lower }}">
+            <td class="log-time">{{ record.timestamp|date:"Y-m-d H:i:s"|default:"未解析" }}</td>
+            <td><span class="log-level">{{ record.level }}</span></td>
+            <td>{{ record.source_label }}<small>{{ record.source_path }}{% if record.rotation %}.{{ record.rotation }}{% endif %}</small></td>
+            <td>
+              <code>{{ record.logger|default:"-" }}</code>
+              {% if record.relative_path %}<small>{{ record.relative_path }}</small>{% endif %}
+            </td>
+            <td>
+              <details>
+                <summary>{{ record.message|truncatechars:160 }}</summary>
+                <div class="log-detail-meta">
+                  文件：{{ record.relative_path|default:"-" }} ·
+                  函数：{{ record.function|default:"-" }} ·
+                  代码行：{{ record.line|default:"-" }} ·
+                  PID：{{ record.pid|default:"-" }} ·
+                  线程：{{ record.thread|default:"-" }}
+                </div>
+                <pre class="log-raw">{{ record.raw }}</pre>
+                <button type="button" class="button button-small button-secondary log-copy">复制完整记录</button>
+                {% if record.has_traceback %}<button type="button" class="button button-small button-secondary log-copy-trace">复制 Traceback</button><pre class="log-traceback">{{ record.traceback }}</pre>{% endif %}
+              </details>
+            </td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="5">当前筛选条件下没有日志记录。</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if log_page %}
+    <nav class="log-pagination" aria-label="日志记录分页">
+      <div class="log-pagination__buttons">
+        {% if log_page.has_previous %}<a class="button button-secondary" href="?{% if base_query %}{{ base_query }}&amp;{% endif %}page={{ log_page.previous_page }}&amp;page_session={{ log_page.session_token|urlencode }}">上一页</a>{% else %}<span class="button button-secondary disabled" aria-disabled="true">上一页</span>{% endif %}
+        <span>第 {{ log_page.page }} 页{% if log_page.total_pages %} / 共 {{ log_page.total_pages }} 页{% else %} · 已建立到第 {{ log_page.indexed_through }} 页索引{% endif %}</span>
+        {% if log_page.has_next %}<a class="button button-secondary" href="?{% if base_query %}{{ base_query }}&amp;{% endif %}page={{ log_page.next_page }}&amp;page_session={{ log_page.session_token|urlencode }}">下一页</a>{% else %}<span class="button button-secondary disabled" aria-disabled="true">下一页</span>{% endif %}
+      </div>
+      <form method="get" class="log-page-jump">
+        {% for key, value in request.GET.items %}{% if key != 'page' and key != 'page_session' %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endif %}{% endfor %}
+        <input type="hidden" name="page_session" value="{{ log_page.session_token }}">
+        <label for="log-page-number">跳转到</label>
+        <input id="log-page-number" type="number" name="page" min="1" max="1000000" value="{{ log_page.requested_page }}" inputmode="numeric">
+        <button class="button button-secondary" type="submit">跳转</button>
+      </form>
+    </nav>
+    {% if log_page.jump_pending %}<p class="help-block log-pagination-notice">目标页较深，本次已安全建立到第 {{ log_page.page }} 页；再次点击“跳转”会从当前检查点继续，不会从头扫描。</p>{% endif %}
+  {% endif %}
+{% endblock %}

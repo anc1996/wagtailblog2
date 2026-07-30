@@ -1,0 +1,26 @@
+{% extends "wagtailadmin/base.html" %}
+{% load static wagtailadmin_tags %}
+
+{% block titletag %}{{ page_title }}{% endblock %}
+
+{% block extra_css %}
+  {{ block.super }}
+  <link rel="stylesheet" href="{% static 'observability/css/log_center.css' %}">
+{% endblock %}
+
+{% block content %}
+  {% include "wagtailadmin/shared/header.html" with title=page_title icon="warning" %}
+  <div class="nice-padding log-center">
+    <nav class="log-tabs" aria-label="系统日志页面">
+      <a href="{% url 'observability:overview' %}"{% if request.resolver_match.url_name == 'overview' %} aria-current="page"{% endif %}>日志概览</a>
+      <a href="{% url 'observability:records' %}"{% if request.resolver_match.url_name == 'records' %} aria-current="page"{% endif %}>日志记录</a>
+      <a href="{% url 'observability:audits' %}"{% if request.resolver_match.url_name == 'audits' %} aria-current="page"{% endif %}>清理记录</a>
+    </nav>
+    {% block log_content %}{% endblock %}
+  </div>
+{% endblock %}
+
+{% block extra_js %}
+  {{ block.super }}
+  <script src="{% static 'observability/js/log_center.js' %}"></script>
+{% endblock %}

@@ -7,11 +7,19 @@ from unittest.mock import Mock
 
 from django.test import SimpleTestCase
 
-from wagtailblog3.observability import LOG_DOMAINS, get_logging_config
-from wagtailblog3.observability.filters import MaxLevelFilter, ModuleFilter
-from wagtailblog3.observability.helpers import get_context_logger, log_exceptions
-from wagtailblog3.observability.registry import (
+from observability import (
+    LOG_DOMAINS,
+    get_email_debug_config,
+    get_logging_config,
+    get_performance_logging_config,
+)
+from observability.filters import MaxLevelFilter, ModuleFilter, ProjectRelativePathFilter
+from observability.helpers import get_context_logger, log_exceptions
+from observability.registry import (
     LOG_DIRECTORIES,
+    LOG_FILE_BY_KEY,
+    LOG_FILE_CATALOG,
+    LOG_FILE_SPECS,
     handler_name,
     resolve_domain,
 )
@@ -65,7 +73,56 @@ class LoggingConfigTests(SimpleTestCase):
         self.assertIn("django_error_file", django_handlers)
         self.assertEqual(
             self.config["handlers"]["django_warning_file"]["filters"],
-            ["max_warning"],
+            ["project_relative_path", "sensitive_data", "max_warning"],
+        )
+
+    def test_catalog_and_all_file_handlers_are_exactly_consistent(self):
+        handlers = dict(self.config["handlers"])
+        handlers.update(get_email_debug_config(log_dir=self.log_dir)["handlers"])
+        handlers.update(get_performance_logging_config(log_dir=self.log_dir)["handlers"])
+        file_handlers = {
+            name: handler for name, handler in handlers.items() if "filename" in handler
+        }
+
+        self.assertEqual(set(file_handlers), {spec.handler for spec in LOG_FILE_SPECS})
+        self.assertEqual(len(LOG_FILE_CATALOG), len(LOG_FILE_SPECS))
+        self.assertEqual(
+            len({spec.relative_path for spec in LOG_FILE_SPECS}), len(LOG_FILE_SPECS)
+        )
+        for spec in LOG_FILE_SPECS:
+            with self.subTest(spec=spec.key):
+                handler = file_handlers[spec.handler]
+                self.assertEqual(
+                    Path(handler["filename"]).relative_to(self.log_dir).as_posix(),
+                    spec.relative_path,
+                )
+                self.assertEqual(handler["backupCount"], spec.backup_count)
+                self.assertEqual(handler["maxBytes"], spec.max_bytes)
+
+    def test_config_does_not_contain_log_path_literals(self):
+        path = (
+            Path(__file__).resolve().parents[1]
+            / "apps"
+            / "observability"
+            / "config.py"
+        )
+        tree = ast.parse(path.read_bytes())
+        log_path_literals = [
+            node.value
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and node.value.endswith(".log")
+        ]
+        self.assertEqual(log_path_literals, [])
+
+    def test_email_debug_uses_three_rotations_from_catalog(self):
+        handler = get_email_debug_config(log_dir=self.log_dir)["handlers"][
+            "email_debug_file"
+        ]
+        self.assertEqual(handler["backupCount"], 3)
+        self.assertEqual(
+            handler["backupCount"], LOG_FILE_BY_KEY["email_debug"].backup_count
         )
 
     def test_file_handlers_are_process_safe(self):
@@ -137,7 +194,9 @@ class LoggingConfigTests(SimpleTestCase):
                     handler.flush()
 
             for domain in LOG_DOMAINS:
-                error_path = self.log_dir / domain.directory / domain.error_file
+                error_path = self.log_dir / LOG_FILE_BY_KEY[
+                    f"{domain.key}_error"
+                ].relative_path
                 content = error_path.read_text(encoding="utf-8")
                 self.assertIn(markers[domain.key], content)
                 for other_key, other_marker in markers.items():
@@ -183,6 +242,68 @@ class LoggingConfigTests(SimpleTestCase):
         finally:
             logging.shutdown()
 
+    def test_django_server_writes_only_to_runtime_catalog_file(self):
+        self.config["handlers"]["console"]["level"] = "CRITICAL"
+        logging.config.dictConfig(self.config)
+        try:
+            logging.getLogger("django.server").info('"GET /probe/ HTTP/1.1" 200 2')
+            logging.getLogger("django.request").warning("ordinary-django-warning")
+            for logger_name in ("django.server", "django"):
+                for handler in logging.getLogger(logger_name).handlers:
+                    handler.flush()
+
+            runtime = (self.log_dir / "runtime/runserver.log").read_text(encoding="utf-8")
+            warnings = (self.log_dir / "system/django_warning.log").read_text(encoding="utf-8")
+            self.assertIn("GET /probe/", runtime)
+            self.assertNotIn("ordinary-django-warning", runtime)
+            self.assertNotIn("GET /probe/", warnings)
+            self.assertNotIn("runtime_runserver_file", self.config["loggers"]["django"]["handlers"])
+            self.assertNotIn("runtime_runserver_file", self.config["root"]["handlers"])
+        finally:
+            logging.shutdown()
+
+    def test_runtime_handler_keeps_only_five_rotations(self):
+        self.config["handlers"]["console"]["level"] = "CRITICAL"
+        runtime = self.config["handlers"]["runtime_runserver_file"]
+        runtime["maxBytes"] = 256
+        logging.config.dictConfig(self.config)
+        try:
+            logger = logging.getLogger("django.server")
+            for index in range(80):
+                logger.info("runtime-rotation-%03d %s", index, "x" * 80)
+            for handler in logger.handlers:
+                handler.flush()
+        finally:
+            logging.shutdown()
+
+        path = self.log_dir / "runtime/runserver.log"
+        self.assertTrue(path.exists())
+        self.assertTrue(all(Path(f"{path}.{rotation}").exists() for rotation in range(1, 6)))
+        self.assertFalse(Path(f"{path}.6").exists())
+
+    def test_writing_redacts_secrets_and_absolute_project_path(self):
+        self.config["handlers"]["console"]["level"] = "CRITICAL"
+        logging.config.dictConfig(self.config)
+        try:
+            logger = logging.getLogger("blog.security")
+            try:
+                raise RuntimeError("Authorization: Bearer raw-token")
+            except RuntimeError:
+                logger.exception(
+                    "password=hunter2 Cookie=sessionid=abc api_key=plain-key"
+                )
+            for handler in logger.handlers:
+                handler.flush()
+        finally:
+            logging.shutdown()
+
+        content = (self.log_dir / "blog/blog_error.log").read_text(encoding="utf-8")
+        for secret in ("hunter2", "raw-token", "sessionid=abc", "plain-key"):
+            self.assertNotIn(secret, content)
+        self.assertIn("[REDACTED]", content)
+        self.assertNotIn(str(Path(__file__).resolve().parents[2]), content)
+        self.assertIn("wagtailblog3/tests/test_logging.py", content)
+
 
 class LoggingFilterTests(SimpleTestCase):
     def test_module_filter_uses_logger_namespace_boundaries(self):
@@ -203,6 +324,21 @@ class LoggingFilterTests(SimpleTestCase):
         self.assertFalse(
             filter_instance.filter(logging.LogRecord("test", logging.ERROR, "", 0, "", (), None))
         )
+
+    def test_project_path_filter_never_returns_parent_segments(self):
+        root = Path(__file__).resolve().parents[2]
+        filter_instance = ProjectRelativePathFilter(root)
+        project_record = logging.LogRecord(
+            "test", logging.INFO, str(root / "wagtailblog3/apps/blog/views.py"), 1, "", (), None
+        )
+        external_record = logging.LogRecord(
+            "test", logging.INFO, "/usr/lib/python3/site-packages/vendor/client.py", 1, "", (), None
+        )
+        filter_instance.filter(project_record)
+        filter_instance.filter(external_record)
+        self.assertEqual(project_record.relative_path, "wagtailblog3/apps/blog/views.py")
+        self.assertEqual(external_record.relative_path, "client.py")
+        self.assertNotIn("..", project_record.relative_path)
 
 
 class LoggingHelperTests(SimpleTestCase):
@@ -283,3 +419,24 @@ class LoggingConventionTests(SimpleTestCase):
                     ):
                         violations.append(f"{path.relative_to(self.project_root)}:{node.lineno}")
         self.assertEqual(violations, [], f"ERROR 未保留 traceback: {violations}")
+
+    def test_business_logging_does_not_record_post_or_email_bodies(self):
+        forbidden_names = {"plain_message", "html_message", "email_body", "message_body"}
+        violations = []
+        for path in self.project_root.rglob("*.py"):
+            if "tests" in path.parts or "observability" in path.parts:
+                continue
+            tree = ast.parse(path.read_bytes())
+            for node in ast.walk(tree):
+                is_log_call = (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr in {"debug", "info", "warning", "error", "exception", "critical"}
+                )
+                if not is_log_call:
+                    continue
+                names = {child.id for child in ast.walk(node) if isinstance(child, ast.Name)}
+                source = ast.get_source_segment(path.read_text(encoding="utf-8"), node) or ""
+                if names & forbidden_names or "request.POST" in source:
+                    violations.append(f"{path.relative_to(self.project_root)}:{node.lineno}")
+        self.assertEqual(violations, [], f"业务日志记录了 POST 或邮件正文: {violations}")

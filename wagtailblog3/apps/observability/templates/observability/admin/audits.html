@@ -1,0 +1,52 @@
+{% extends "observability/admin/base.html" %}
+
+{% block log_content %}
+  <form method="get" class="log-filter-form">
+    <div class="field"><label for="audit-user">操作人</label><input id="audit-user" name="user" value="{{ audit_filters.user }}"></div>
+    <div class="field"><label for="audit-ip">客户端 IP</label><input id="audit-ip" name="ip" value="{{ audit_filters.ip }}"></div>
+    <div class="field"><label for="audit-start">开始日期</label><input id="audit-start" type="date" name="start" value="{{ audit_filters.start }}"></div>
+    <div class="field"><label for="audit-end">结束日期</label><input id="audit-end" type="date" name="end" value="{{ audit_filters.end }}"></div>
+    <div class="field"><label for="audit-target-type">目标类型</label><select id="audit-target-type" name="target_type"><option value="">全部</option><option value="file"{% if audit_filters.target_type == "file" %} selected{% endif %}>单个文件</option><option value="domain"{% if audit_filters.target_type == "domain" %} selected{% endif %}>单个模块</option><option value="business"{% if audit_filters.target_type == "business" %} selected{% endif %}>业务日志</option><option value="all"{% if audit_filters.target_type == "all" %} selected{% endif %}>运行日志</option><option value="legacy"{% if audit_filters.target_type == "legacy" %} selected{% endif %}>旧记录</option></select></div>
+    <div class="field"><label for="audit-module">日志模块</label><input id="audit-module" name="module" value="{{ audit_filters.module }}" placeholder="例如 blog"></div>
+    <div class="field"><label for="audit-file">单文件目标</label><input id="audit-file" name="file" value="{{ audit_filters.file }}" placeholder="例如 blog_error"></div>
+    <div class="field"><label for="audit-kind">日志类型</label><select id="audit-kind" name="kind"><option value="">全部</option><option value="activity"{% if audit_filters.kind == "activity" %} selected{% endif %}>活动</option><option value="error"{% if audit_filters.kind == "error" %} selected{% endif %}>错误</option></select></div>
+    <div class="field"><label for="audit-scope">清理范围</label><select id="audit-scope" name="scope"><option value="">全部</option><option value="current"{% if audit_filters.scope == "current" %} selected{% endif %}>当前</option><option value="rotated"{% if audit_filters.scope == "rotated" %} selected{% endif %}>轮转</option><option value="all"{% if audit_filters.scope == "all" %} selected{% endif %}>全部范围</option></select></div>
+    <div class="field"><label for="audit-state">状态</label><select id="audit-state" name="state"><option value="">全部</option><option value="completed"{% if audit_filters.state == "completed" %} selected{% endif %}>成功</option><option value="partial"{% if audit_filters.state == "partial" %} selected{% endif %}>部分失败</option><option value="failed"{% if audit_filters.state == "failed" %} selected{% endif %}>失败</option></select></div>
+    <div class="field"><label for="audit-target">目标</label><input id="audit-target" name="target" value="{{ audit_filters.target }}"></div>
+    <div class="field"><label for="audit-q">目标或文件关键字</label><input id="audit-q" name="q" value="{{ audit_filters.q }}"></div>
+    <div class="log-filter-actions"><button type="submit" class="button">筛选</button><a class="button button-secondary" href="{% url 'observability:audits' %}">重置</a></div>
+  </form>
+
+  <div class="listing log-listing">
+    <table class="listing">
+      <thead><tr><th>操作时间</th><th>完成时间</th><th>操作人/IP</th><th>目标类型</th><th>目标</th><th>日志类型</th><th>范围</th><th>文件总数</th><th>成功</th><th>失败</th><th>清理前</th><th>释放</th><th>状态</th></tr></thead>
+      <tbody>
+        {% for audit in audit_page %}
+          <tr>
+            <td>{{ audit.created_at|date:"Y-m-d H:i:s" }}</td>
+            <td>{{ audit.completed_at|date:"Y-m-d H:i:s"|default:"处理中/未知" }}</td>
+            <td>{{ audit.user|default:"已删除用户" }}<small>{{ audit.ip_address|default:"-" }}</small></td>
+            <td>{{ audit.target_type }}</td>
+            <td><code>{{ audit.target }}</code></td>
+            <td>{{ audit.kind|default:"全部" }}</td>
+            <td>{{ audit.scope }}</td>
+            <td>{{ audit.files_before }}</td>
+            <td>{{ audit.succeeded_files }}</td>
+            <td>{{ audit.failed_files }}</td>
+            <td>{{ audit.bytes_before|filesizeformat }}</td>
+            <td>{{ audit.bytes_freed|filesizeformat }}</td>
+            <td>
+              <span class="{% if audit.state == 'completed' %}log-success{% else %}log-failed{% endif %}">{{ audit.state }}</span>
+              <details class="log-audit-details"><summary>查看逐文件明细</summary><pre>{{ audit.details|pprint }}</pre></details>
+            </td>
+          </tr>
+        {% empty %}<tr><td colspan="13">当前筛选条件下没有清理记录。</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if audit_page.has_previous or audit_page.has_next %}<nav class="pagination" aria-label="清理记录分页">
+    {% if audit_page.has_previous %}<a class="button button-secondary" href="?{% if audit_query %}{{ audit_query }}&amp;{% endif %}page={{ audit_page.previous_page_number }}">上一页</a>{% endif %}
+    <span>第 {{ audit_page.number }} / {{ audit_page.paginator.num_pages }} 页</span>
+    {% if audit_page.has_next %}<a class="button button-secondary" href="?{% if audit_query %}{{ audit_query }}&amp;{% endif %}page={{ audit_page.next_page_number }}">下一页</a>{% endif %}
+  </nav>{% endif %}
+{% endblock %}

@@ -1,0 +1,83 @@
+{% extends "observability/admin/base.html" %}
+{% load wagtailadmin_tags %}
+{% block log_content %}
+  <div class="log-toolbar">
+    <div class="log-refresh">
+      <a class="button button-secondary" href="{% url 'observability:overview' %}?refresh=1">刷新</a>
+      <label for="log-auto-refresh">自动刷新</label>
+      <select id="log-auto-refresh" data-current="{{ refresh }}">
+        <option value="0">关闭</option>
+        <option value="30">30 秒</option>
+        <option value="60">60 秒</option>
+      </select>
+    </div>
+    {% if can_manage_logs %}
+      <div class="log-actions">
+        <details class="log-action-menu">
+          <summary class="button button-secondary">清理业务日志</summary>
+          <div class="log-action-menu__items">
+            <a class="js-log-clear" data-target-type="business" data-target="" data-kind="" data-scope="all" href="{% url 'observability:clear' %}?target_type=business&kind=&scope=all">全部类型</a>
+            <a class="js-log-clear" data-target-type="business" data-target="" data-kind="activity" data-scope="all" href="{% url 'observability:clear' %}?target_type=business&kind=activity&scope=all">仅活动日志</a>
+            <a class="js-log-clear" data-target-type="business" data-target="" data-kind="error" data-scope="all" href="{% url 'observability:clear' %}?target_type=business&kind=error&scope=all">仅错误日志</a>
+          </div>
+        </details>
+        {% if request.user.is_superuser %}
+          <details class="log-action-menu">
+            <summary class="button no">清理全部运行日志</summary>
+            <div class="log-action-menu__items">
+              <a class="js-log-clear" data-target-type="all" data-target="" data-kind="" data-scope="all" href="{% url 'observability:clear' %}?target_type=all&kind=&scope=all">全部类型</a>
+              <a class="js-log-clear" data-target-type="all" data-target="" data-kind="activity" data-scope="all" href="{% url 'observability:clear' %}?target_type=all&kind=activity&scope=all">仅活动日志</a>
+              <a class="js-log-clear" data-target-type="all" data-target="" data-kind="error" data-scope="all" href="{% url 'observability:clear' %}?target_type=all&kind=error&scope=all">仅错误日志</a>
+            </div>
+          </details>
+        {% endif %}
+      </div>
+    {% endif %}
+  </div>
+
+  <dl class="log-metrics">
+    <div><dt>最近 1 小时错误</dt><dd>{{ overview.error_count }}</dd></div>
+    <div><dt>最近 1 小时警告</dt><dd>{{ overview.warning_count }}</dd></div>
+    <div><dt>活跃日志模块</dt><dd>{{ overview.active_domains }} / {{ overview.domain_count }}</dd></div>
+    <div><dt>日志总占用</dt><dd>{{ overview.total_bytes|filesizeformat }}</dd></div>
+  </dl>
+
+  <p class="help-block">统计更新时间：{{ overview.refreshed_at|date:"Y-m-d H:i:s" }}。手动刷新会立即重新读取文件；自动刷新按设置工作。</p>
+
+  <div class="listing log-listing">
+    <table class="listing">
+      <thead><tr><th>模块</th><th>活动日志</th><th>错误日志</th><th>轮转文件</th><th>最后写入</th><th>最近 1 小时错误</th><th>操作</th></tr></thead>
+      <tbody>
+        {% for module in overview.modules %}
+          <tr>
+            <td><strong>{{ module.key }}</strong></td>
+            <td>{{ module.activity_bytes|filesizeformat }}</td>
+            <td>{{ module.error_bytes|filesizeformat }}</td>
+            <td>{{ module.rotation_count }}</td>
+            <td>{{ module.last_modified|date:"Y-m-d H:i:s"|default:"尚未生成" }}</td>
+            <td>{{ module.recent_error_count }}</td>
+            <td class="log-row-actions">
+              <a class="button button-small" href="{% url 'observability:records' %}?domain={{ module.key }}&kind=error&period=24h&page_size=100">查看</a>
+              {% if can_manage_logs %}
+                <a class="button button-small button-secondary js-log-clear" data-target-type="domain" data-target="{{ module.key }}" data-kind="" data-scope="all" href="{% url 'observability:clear' %}?target_type=domain&target={{ module.key }}&kind=&scope=all">清理模块</a>
+                <details class="log-action-menu log-action-menu--row">
+                  <summary class="button button-small button-secondary">更多</summary>
+                  <div class="log-action-menu__items">
+                    <a class="js-log-clear" data-target-type="domain" data-target="{{ module.key }}" data-kind="activity" data-scope="all" href="{% url 'observability:clear' %}?target_type=domain&target={{ module.key }}&kind=activity&scope=all">模块活动日志</a>
+                    <a class="js-log-clear" data-target-type="domain" data-target="{{ module.key }}" data-kind="error" data-scope="all" href="{% url 'observability:clear' %}?target_type=domain&target={{ module.key }}&kind=error&scope=all">模块错误日志</a>
+                    {% for file in module.files %}
+                      <a class="js-log-clear" data-target-type="file" data-target="{{ file.key }}" data-kind="{{ file.kind }}" data-scope="all" href="{% url 'observability:clear' %}?target_type=file&target={{ file.key }}&kind={{ file.kind }}&scope=all">{{ file.label }}</a>
+                    {% endfor %}
+                  </div>
+                </details>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if can_manage_logs %}
+    {% include "observability/admin/clear_dialog.html" %}
+  {% endif %}
+{% endblock %}

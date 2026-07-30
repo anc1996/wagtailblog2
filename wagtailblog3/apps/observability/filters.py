@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 
+from .sanitizer import project_relative_path
+
 
 class ModuleFilter(logging.Filter):
     """Allow exact logger namespaces and descendants, never prefix collisions."""
@@ -35,3 +37,18 @@ class MaxLevelFilter(logging.Filter):
 
     def filter(self, record):
         return record.levelno <= self.max_level
+
+
+class ProjectRelativePathFilter(logging.Filter):
+    """为 formatter 提供不会越过项目根目录的 ``relative_path``。"""
+
+    def __init__(self, base_dir=None):
+        super().__init__()
+        self.base_dir = base_dir
+
+    def filter(self, record):
+        record.relative_path = project_relative_path(
+            getattr(record, "pathname", "") or getattr(record, "filename", ""),
+            self.base_dir,
+        )
+        return True

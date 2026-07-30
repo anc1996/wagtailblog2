@@ -6,7 +6,7 @@ from pathlib import Path
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
-from wagtailblog3.observability.registry import LOG_FILE_CATALOG
+from observability.registry import LOG_DOMAIN_KEYS, find_log_file
 
 
 class Command(BaseCommand):
@@ -15,7 +15,7 @@ class Command(BaseCommand):
 	def add_arguments(self, parser):
 		parser.add_argument(
 			"--module",
-			choices=sorted(LOG_FILE_CATALOG),
+			choices=sorted(LOG_DOMAIN_KEYS),
 			default="system",
 			help="日志域",
 		)
@@ -34,11 +34,11 @@ class Command(BaseCommand):
 		if lines < 1:
 			raise CommandError("--lines 必须大于 0")
 
-		relative_path = LOG_FILE_CATALOG[module][kind]
-		if relative_path is None:
+		spec = find_log_file(module, kind)
+		if spec is None:
 			raise CommandError(f"{module} 没有 {kind} 日志")
 
-		log_file = Path(settings.LOG_DIR) / relative_path
+		log_file = Path(settings.LOG_DIR) / spec.relative_path
 		if not log_file.exists():
 			self.stderr.write(f"日志尚未生成: {log_file}")
 			return

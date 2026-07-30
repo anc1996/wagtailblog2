@@ -57,7 +57,7 @@ SIMPLE_JWT = {
 import os
 
 # 开发环境在基础配置上追加调试能力，文件路由仍由 observability 统一管理。
-from wagtailblog3.observability import get_logging_config, get_email_debug_config
+from observability import get_email_debug_config, get_logging_config
 
 # 从环境变量获取日志级别和模块
 log_level = os.environ.get('DJANGO_LOG_LEVEL', 'WARNING')
@@ -151,7 +151,7 @@ if DEBUG:
 PERFORMANCE_MONITORING_ENABLED = os.environ.get('PERFORMANCE_MONITORING', 'False').lower() == 'true'
 
 if PERFORMANCE_MONITORING_ENABLED:
-	from wagtailblog3.observability import get_performance_logging_config
+	from observability import get_performance_logging_config
 	
 	performance_config = get_performance_logging_config()
 	LOGGING['handlers'].update(performance_config['handlers'])

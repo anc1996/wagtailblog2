@@ -1,57 +1,92 @@
 {% if value %}
-    <div class="gretzia-video-preview"
-         data-video-url="{{ value.url }}"
-         data-video-type="video/mp4"  {# 修正：直接提供通用类型，避免属性错误 #}
-         data-video-title="{{ value.title|default:'视频内容' }}"
-         {% if value.width %}data-video-width="{{ value.width }}"{% endif %}
-         {% if value.height %}data-video-height="{{ value.height }}"{% endif %}>
-
-        <div class="gretzia-video-thumbnail">
-            <div class="gretzia-video-background"
+    {% with video_title=value.title|default:'视频内容' %}
+    <article class="blog-video gretzia-video-preview"
+             data-video-player
+             data-video-url="{{ value.url }}"
+             data-video-type="{{ video_type }}"
+             data-video-title="{{ video_title }}"
+             {% if value.thumbnail %}data-video-poster="{{ value.thumbnail.url }}"{% endif %}
+             {% if value.width %}data-video-width="{{ value.width }}"{% endif %}
+             {% if value.height %}data-video-height="{{ value.height }}"{% endif %}
+             aria-label="{{ video_title }}">
+        <div class="blog-video__stage gretzia-video-thumbnail">
+            <div class="blog-video__media gretzia-video-background"
                  {% if value.thumbnail %}style="background-image: url('{{ value.thumbnail.url }}');"{% endif %}>
+                <video class="blog-video__native-preview"
+                       controls
+                       preload="metadata"
+                       muted
+                       playsinline
+                       {% if value.thumbnail %}poster="{{ value.thumbnail.url }}"{% endif %}
+                       aria-label="{{ video_title }}">
+                    <source src="{{ value.url }}"
+                            type="{{ video_type }}">
+                    您的浏览器不支持 HTML5 视频播放。
+                </video>
 
-                {% if not value.thumbnail %}
-                    <video preload="metadata" muted>
-                        {# 修正：统一使用 value.url #}
-                        <source src="{{ value.url }}#t=1" type="video/mp4">
-                    </video>
-                {% endif %}
-
-                <div class="gretzia-video-overlay">
-                    <div class="gretzia-play-button">
+                <div class="blog-video__preview-overlay gretzia-video-overlay">
+                    <div class="blog-video__play gretzia-play-button" aria-hidden="true">
                         <i class="fa fa-play"></i>
                     </div>
 
-                    <div class="gretzia-video-info">
+                    <div class="blog-video__meta gretzia-video-info">
                         {% if value.width and value.height %}
-                            <span class="gretzia-video-resolution">
-                                <i class="fa fa-tv"></i>
+                            <span class="blog-video__resolution gretzia-video-resolution">
+                                <i class="fa fa-tv" aria-hidden="true"></i>
                                 {{ value.width }}×{{ value.height }}
                             </span>
                         {% endif %}
                         {% if value.duration %}
-                            <span class="gretzia-video-duration">
-                                <i class="fa fa-clock-o"></i>
-                                {{ value.duration|floatformat:0 }}s {# 格式化时长为整数秒 #}
+                            <span class="blog-video__duration gretzia-video-duration">
+                                <i class="fa fa-clock-o" aria-hidden="true"></i>
+                                {{ value.duration|floatformat:0 }}s
                             </span>
                         {% endif %}
                     </div>
                 </div>
             </div>
-
-            {% if value.title %}
-                <div class="gretzia-video-caption">
-                    <i class="fa fa-video-camera"></i>
-                    <span>{{ value.title }}</span>
-                </div>
-            {% endif %}
+            <button class="blog-video__expand"
+                    type="button"
+                    data-video-expand
+                    aria-label="放大视频"
+                    title="放大视频">
+                <i class="fa fa-expand" aria-hidden="true"></i>
+            </button>
         </div>
-    </div>
 
+        {% if value.title %}
+            <div class="blog-video__caption gretzia-video-caption">
+                <i class="fa fa-video-camera" aria-hidden="true"></i>
+                <span class="blog-video__caption-title">{{ value.title }}</span>
+                <button class="blog-video__collapse" type="button" data-video-collapse
+                        aria-expanded="true" aria-label="折叠视频" title="折叠视频">
+                    <i class="fa fa-chevron-up" aria-hidden="true"></i>
+                </button>
+            </div>
+        {% else %}
+            <div class="blog-video__caption gretzia-video-caption">
+                <i class="fa fa-video-camera" aria-hidden="true"></i>
+                <span class="blog-video__caption-title">视频内容</span>
+                <button class="blog-video__collapse" type="button" data-video-collapse
+                        aria-expanded="true" aria-label="折叠视频" title="折叠视频">
+                    <i class="fa fa-chevron-up" aria-hidden="true"></i>
+                </button>
+            </div>
+        {% endif %}
+    </article>
+    <noscript>
+        <style>
+            [data-video-player] .blog-video__preview-overlay,
+            [data-video-player] .blog-video__expand { display: none !important; }
+        </style>
+    </noscript>
+    {% endwith %}
 {% else %}
-    <div class="gretzia-video-placeholder">
-        <div class="gretzia-placeholder-content">
-            <i class="fa fa-video-camera fa-3x"></i>
+    <div class="blog-video blog-video--empty gretzia-video-placeholder"
+         role="status"
+         aria-label="视频文件不可用">
+        <div class="blog-video__empty-content gretzia-placeholder-content">
+            <i class="fa fa-video-camera fa-3x" aria-hidden="true"></i>
             <p>视频文件不可用</p>
             <small>请检查视频文件是否存在</small>
         </div>

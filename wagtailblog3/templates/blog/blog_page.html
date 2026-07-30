@@ -4,7 +4,7 @@
 
 {% block extra_css %}
     {{ block.super }}
-    <link rel="stylesheet" href="{% static 'blog/css/blog.css' %}?v=20260728-7">
+    <link rel="stylesheet" href="{% static 'blog/css/blog.css' %}?v=20260730-1">
     <link rel="stylesheet" href="{% static 'blog/css/blog-resize.css' %}">
     {% if has_image or has_gallery %}<link rel="stylesheet" href="{% static 'blog/css/lightbox/lightbox.css' %}">{% endif %}
 
@@ -17,9 +17,12 @@
     {% include "includes/content/code_highlighting_css.html" %}
     {% if has_image %}<link rel="stylesheet" href="{% static 'blog/css/image_blocks.css' %}">{% endif %}
     {% if has_gallery %}<link rel="stylesheet" href="{% static 'blog/css/blog-gallery.css' %}?v=20260726-2">{% endif %}
-    {% if has_video %}<link rel="stylesheet" href="{% static 'blog/css/video_blocks.css' %}">{% endif %}
+    {% if has_video %}
+        <link rel="stylesheet" href="{% static 'vendor/plyr/plyr.css' %}?v=3.7.8">
+        <link rel="stylesheet" href="{% static 'blog/css/video_blocks.css' %}">
+    {% endif %}
     {% if has_audio %}<link rel="stylesheet" href="{% static 'blog/css/audio_blocks.css' %}">{% endif %}
-    {% if has_embed %}<link rel="stylesheet" href="{% static 'blog/css/embed_blocks.css' %}">{% endif %}
+    {% if has_embed %}<link rel="stylesheet" href="{% static 'blog/css/embed_blocks.css' %}?v=20260730-1730">{% endif %}
     {% if has_table %}<link rel="stylesheet" href="{% static 'blog/css/table_blocks.css' %}">{% endif %}
     {% if has_mermaid %}{% include "includes/content/mermaid_css.html" %}{% endif %}
     <link rel="stylesheet" href="{% static 'comments/css/comments.css' %}?v=20260729-5">
@@ -47,7 +50,7 @@
                     {% endif %}
                 </div>
                 {% with title_length=page.title|length %}
-                    <h1 class="blog-title{% if title_length > 36 %} blog-title--long{% elif title_length > 22 %} blog-title--medium{% endif %}">{{ page.title }}</h1>
+                    <h1 class="blog-title{% if title_length > 36 %} blog-title--long{% elif title_length > 22 %} blog-title--medium{% else %} blog-title--short{% endif %}">{{ page.title }}</h1>
                 {% endwith %}
                 {% if page.intro %}
                     <div class="blog-intro" data-blog-intro>
@@ -330,7 +333,11 @@
     {% if has_image or has_gallery %}<script src="{% static 'blog/js/lightbox/lightbox.js' %}" defer></script>{% endif %}
     {% if has_gallery %}<script src="{% static 'blog/js/blog-gallery.js' %}?v=20260726-1" defer></script>{% endif %}
     {% if has_image %}<script src="{% static 'blog/js/image_blocks.js' %}" defer></script>{% endif %}
-    {% if has_video %}<script src="{% static 'blog/js/video_blocks.js' %}" defer></script>{% endif %}
+    {% if has_video %}
+        <script src="{% static 'vendor/plyr/plyr.min.js' %}?v=3.7.8" defer></script>
+        <script src="{% static 'blog/js/video_blocks.js' %}" defer></script>
+    {% endif %}
+    {% if has_embed %}<script src="{% static 'blog/js/embed_blocks.js' %}?v=20260730-1730" defer></script>{% endif %}
     {% if has_mermaid %}{% include "includes/content/mermaid_js.html" %}{% endif %}
 
     {% include "includes/content/code_highlighting_js.html" %}

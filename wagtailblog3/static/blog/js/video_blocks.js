@@ -1,376 +1,213 @@
-// static/blog/js/video_blocks.js
-// Gretzia风格视频块增强功能 - 缩略图预览 + 模态框播放
+/* Blog video player integration. Plyr supplies controls; this module owns page state. */
+(function () {
+    'use strict';
 
-$(document).ready(function() {
-    initializeGretziaVideoBlocks();
-});
+    var players = new Map();
+    var floatingStates = new Map();
+    var playerOptions = {
+        controls: ['play-large', 'play', 'progress', 'current-time', 'duration', 'mute', 'volume', 'settings', 'pip', 'fullscreen'],
+        settings: ['speed'],
+        speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] },
+        seekTime: 10,
+        tooltips: { controls: true, seek: true },
+        keyboard: { focused: true, global: false },
+        fullscreen: { enabled: true, fallback: true, iosNative: true },
+        resetOnEnd: false
+    };
 
-function initializeGretziaVideoBlocks() {
-    // 获取所有视频预览块
-    var $videoBlocks = $('.content-block-wrapper[data-block-type="video_block"]');
-
-    $videoBlocks.each(function() {
-        var $block = $(this);
-        var $videoPreview = $block.find('.gretzia-video-preview');
-
-        if ($videoPreview.length === 0) return;
-
-        // 设置视频预览功能
-        setupVideoPreview($videoPreview);
-
-        // 优化视频缩略图加载
-        optimizeVideoThumbnail($videoPreview);
-    });
-
-    // 初始化键盘快捷键
-    setupKeyboardShortcuts();
-}
-
-function setupVideoPreview($videoPreview) {
-    // 点击预览时打开模态框
-    $videoPreview.on('click', function(e) {
-        e.preventDefault();
-
-        var videoUrl = $(this).attr('data-video-url');
-        var videoType = $(this).attr('data-video-type') || 'video/mp4';
-        var videoTitle = $(this).attr('data-video-title') || '视频播放';
-        var videoWidth = $(this).attr('data-video-width');
-        var videoHeight = $(this).attr('data-video-height');
-
-        if (videoUrl) {
-            openVideoModal(videoUrl, videoType, videoTitle, videoWidth, videoHeight);
+    function markPlayerError(root, error) {
+        root.classList.add('blog-video--error');
+        root.setAttribute('data-video-error', '播放失败');
+        if (window.console && console.warn) {
+            console.warn('Blog video failed to load.', error);
         }
-    });
+    }
 
-    // 添加悬停效果增强
-    $videoPreview.on('mouseenter', function() {
-        $(this).find('.gretzia-play-button').addClass('pulse');
-    }).on('mouseleave', function() {
-        $(this).find('.gretzia-play-button').removeClass('pulse');
-    });
-}
-
-function openVideoModal(videoUrl, videoType, videoTitle, videoWidth, videoHeight) {
-    // 创建模态框HTML
-    var modalHtml = `
-        <div class="gretzia-video-modal">
-            <div class="gretzia-video-modal-content">
-                <span class="gretzia-video-modal-close">&times;</span>
-                <video controls autoplay>
-                    <source src="${videoUrl}" type="${videoType}">
-                    <p>您的浏览器不支持视频播放。<a href="${videoUrl}">点击这里下载视频文件</a></p>
-                </video>
-                ${videoTitle ? `<div class="gretzia-video-modal-caption">${videoTitle}</div>` : ''}
-                <div class="gretzia-video-controls">
-                    <button class="gretzia-video-play-pause" title="播放/暂停 (空格键)">
-                        <i class="fa fa-pause"></i>
-                    </button>
-                    <button class="gretzia-video-fullscreen" title="全屏 (F键)">
-                        <i class="fa fa-expand"></i>
-                    </button>
-                    <button class="gretzia-video-mute" title="静音 (M键)">
-                        <i class="fa fa-volume-up"></i>
-                    </button>
-                </div>
-            </div>
-        </div>
-    `;
-
-    // 将模态框添加到页面
-    var $modal = $(modalHtml);
-    $('body').append($modal);
-
-    // 设置初始尺寸
-    var $modalContent = $modal.find('.gretzia-video-modal-content');
-    var $video = $modal.find('video');
-
-    if (videoWidth && videoHeight) {
-        // 计算合适的显示尺寸
-        var maxWidth = $(window).width() * 0.9;
-        var maxHeight = $(window).height() * 0.8;
-        var aspectRatio = videoWidth / videoHeight;
-
-        var displayWidth = Math.min(videoWidth, maxWidth);
-        var displayHeight = Math.min(videoHeight, maxHeight);
-
-        // 保持宽高比
-        if (displayWidth / displayHeight > aspectRatio) {
-            displayWidth = displayHeight * aspectRatio;
-        } else {
-            displayHeight = displayWidth / aspectRatio;
-        }
-
-        $modalContent.css({
-            'width': displayWidth + 'px',
-            'height': 'auto'
+    function pauseOtherPlayers(current) {
+        players.forEach(function (player) {
+            if (player !== current && !player.paused) {
+                player.pause();
+            }
         });
     }
 
-    // 显示模态框
-    setTimeout(function() {
-        $modal.addClass('active');
-
-        // 聚焦视频元素以支持键盘控制
-        $video.focus();
-    }, 10);
-
-    // 设置模态框事件
-    setupModalEvents($modal);
-
-    // 设置视频控制
-    setupVideoControls($modal);
-
-    // 设置拖拽功能
-    setupModalDragging($modal);
-}
-
-function setupModalEvents($modal) {
-    var $modalContent = $modal.find('.gretzia-video-modal-content');
-    var $video = $modal.find('video');
-
-    // 关闭按钮
-    $modal.find('.gretzia-video-modal-close').on('click', function() {
-        closeVideoModal($modal);
-    });
-
-    // 点击背景关闭
-    $modal.on('click', function(e) {
-        if (e.target === this) {
-            closeVideoModal($modal);
+    function restorePlayer(state) {
+        if (!state.open) {
+            return;
         }
-    });
-
-    // ESC键关闭
-    $(document).on('keydown.gretzia-video', function(e) {
-        if (e.key === 'Escape') {
-            closeVideoModal($modal);
+        if (state.placeholder.parentNode) {
+            state.placeholder.parentNode.replaceChild(state.container, state.placeholder);
         }
-    });
+        state.root.classList.remove('blog-video--floating');
+        state.button.setAttribute('aria-expanded', 'false');
+        state.open = false;
+        state.button.focus({ preventScroll: true });
+    }
 
-    // 防止视频区域点击冒泡
-    $modalContent.on('click', function(e) {
-        e.stopPropagation();
-    });
-}
-
-function setupVideoControls($modal) {
-    var $video = $modal.find('video')[0];
-    var $playPauseBtn = $modal.find('.gretzia-video-play-pause');
-    var $fullscreenBtn = $modal.find('.gretzia-video-fullscreen');
-    var $muteBtn = $modal.find('.gretzia-video-mute');
-
-    // 播放/暂停控制
-    $playPauseBtn.on('click', function() {
-        if ($video.paused) {
-            $video.play();
-            $(this).find('i').removeClass('fa-play').addClass('fa-pause');
+    function closeFloatingPlayer(state) {
+        if (state.dialog.open) {
+            state.dialog.close();
         } else {
-            $video.pause();
-            $(this).find('i').removeClass('fa-pause').addClass('fa-play');
+            restorePlayer(state);
         }
-    });
+    }
 
-    // 全屏控制
-    $fullscreenBtn.on('click', function() {
-        if ($video.requestFullscreen) {
-            $video.requestFullscreen();
-        } else if ($video.webkitRequestFullscreen) {
-            $video.webkitRequestFullscreen();
-        } else if ($video.mozRequestFullScreen) {
-            $video.mozRequestFullScreen();
+    function openFloatingPlayer(root, player, button) {
+        var existing = floatingStates.get(player);
+        if (existing && existing.open) {
+            return;
         }
-    });
 
-    // 静音控制
-    $muteBtn.on('click', function() {
-        if ($video.muted) {
-            $video.muted = false;
-            $(this).find('i').removeClass('fa-volume-off').addClass('fa-volume-up');
-        } else {
-            $video.muted = true;
-            $(this).find('i').removeClass('fa-volume-up').addClass('fa-volume-off');
+        var dialog = document.createElement('dialog');
+        dialog.className = 'blog-video-dialog';
+        dialog.setAttribute('aria-labelledby', 'blog-video-dialog-title');
+
+        var shell = document.createElement('div');
+        shell.className = 'blog-video-dialog__shell';
+        var header = document.createElement('div');
+        header.className = 'blog-video-dialog__header';
+        var title = document.createElement('h2');
+        title.id = 'blog-video-dialog-title';
+        title.textContent = root.getAttribute('data-video-title') || '视频播放';
+        var close = document.createElement('button');
+        close.className = 'blog-video-dialog__close';
+        close.type = 'button';
+        close.setAttribute('aria-label', '关闭视频放大窗口');
+        close.title = '关闭';
+        close.innerHTML = '<i class="fa fa-times" aria-hidden="true"></i>';
+        var mount = document.createElement('div');
+        mount.className = 'blog-video-dialog__player';
+        header.append(title, close);
+        shell.append(header, mount);
+        dialog.appendChild(shell);
+        document.body.appendChild(dialog);
+
+        var state = {
+            root: root,
+            player: player,
+            button: button,
+            dialog: dialog,
+            close: close,
+            container: player.elements.container,
+            placeholder: document.createComment('video-player-position'),
+            open: false
+        };
+        floatingStates.set(player, state);
+
+        function open() {
+            if (state.open) {
+                return;
+            }
+            state.container.parentNode.insertBefore(state.placeholder, state.container);
+            mount.appendChild(state.container);
+            state.root.classList.add('blog-video--floating');
+            state.button.setAttribute('aria-expanded', 'true');
+            state.open = true;
+            if (typeof dialog.showModal === 'function') {
+                dialog.showModal();
+            } else {
+                dialog.setAttribute('open', '');
+            }
+            close.focus({ preventScroll: true });
         }
-    });
 
-    // 视频事件监听
-    $($video).on('play', function() {
-        $playPauseBtn.find('i').removeClass('fa-play').addClass('fa-pause');
-    }).on('pause', function() {
-        $playPauseBtn.find('i').removeClass('fa-pause').addClass('fa-play');
-    }).on('volumechange', function() {
-        var $icon = $muteBtn.find('i');
-        if (this.muted || this.volume === 0) {
-            $icon.removeClass('fa-volume-up fa-volume-down').addClass('fa-volume-off');
-        } else if (this.volume < 0.5) {
-            $icon.removeClass('fa-volume-up fa-volume-off').addClass('fa-volume-down');
-        } else {
-            $icon.removeClass('fa-volume-down fa-volume-off').addClass('fa-volume-up');
+        function onDialogClose() {
+            restorePlayer(state);
+            dialog.remove();
+            floatingStates.delete(player);
         }
-    });
-}
 
-function setupModalDragging($modal) {
-    var $modalContent = $modal.find('.gretzia-video-modal-content');
-    var isDragging = false;
-    var dragStart = { x: 0, y: 0 };
-    var modalStart = { x: 0, y: 0 };
+        button.setAttribute('aria-expanded', 'false');
+        button.addEventListener('click', open);
+        close.addEventListener('click', function () {
+            closeFloatingPlayer(state);
+        });
+        dialog.addEventListener('click', function (event) {
+            if (event.target === dialog) {
+                closeFloatingPlayer(state);
+            }
+        });
+        dialog.addEventListener('close', onDialogClose);
 
-    $modalContent.on('mousedown', function(e) {
-        // 只在标题栏或边框区域开始拖拽
-        if (e.target === this || $(e.target).hasClass('gretzia-video-modal-caption')) {
-            isDragging = true;
-            dragStart.x = e.clientX;
-            dragStart.y = e.clientY;
+        open();
+    }
 
-            var offset = $modalContent.offset();
-            modalStart.x = offset.left;
-            modalStart.y = offset.top;
-
-            $modalContent.addClass('dragging');
-            e.preventDefault();
+    function initializePlayer(root) {
+        var video = root.querySelector('video');
+        if (!video || players.has(video)) {
+            return null;
         }
-    });
 
-    $(document).on('mousemove.gretzia-drag', function(e) {
-        if (isDragging) {
-            var deltaX = e.clientX - dragStart.x;
-            var deltaY = e.clientY - dragStart.y;
-
-            $modalContent.css({
-                'position': 'absolute',
-                'left': modalStart.x + deltaX + 'px',
-                'top': modalStart.y + deltaY + 'px',
-                'margin': '0'
+        var collapseButton = root.querySelector('[data-video-collapse]');
+        if (collapseButton && collapseButton.dataset.collapseReady !== 'true') {
+            collapseButton.dataset.collapseReady = 'true';
+            collapseButton.addEventListener('click', function () {
+                var collapsed = root.classList.toggle('blog-video--collapsed');
+                collapseButton.setAttribute('aria-expanded', String(!collapsed));
+                collapseButton.setAttribute('aria-label', collapsed ? '展开视频' : '折叠视频');
+                collapseButton.title = collapsed ? '展开视频' : '折叠视频';
+                collapseButton.innerHTML = collapsed
+                    ? '<i class="fa fa-chevron-down" aria-hidden="true"></i>'
+                    : '<i class="fa fa-chevron-up" aria-hidden="true"></i>';
             });
         }
-    });
 
-    $(document).on('mouseup.gretzia-drag', function() {
-        if (isDragging) {
-            isDragging = false;
-            $modalContent.removeClass('dragging');
+        if (typeof window.Plyr !== 'function') {
+            video.controls = true;
+            root.classList.add('blog-video--native-fallback');
+            return null;
         }
-    });
-}
 
-function setupKeyboardShortcuts() {
-    $(document).on('keydown.gretzia-video-global', function(e) {
-        var $activeModal = $('.gretzia-video-modal.active');
-        if ($activeModal.length === 0) return;
+        video.removeAttribute('muted');
+        video.setAttribute('playsinline', '');
+        var player = new window.Plyr(video, playerOptions);
+        var expandButton = root.querySelector('[data-video-expand]');
+        players.set(video, player);
+        root.classList.add('blog-video--ready');
+        root.__blogVideoPlayer = player;
 
-        var $video = $activeModal.find('video')[0];
-
-        switch(e.key) {
-            case ' ':
-            case 'Enter':
-                e.preventDefault();
-                if ($video.paused) {
-                    $video.play();
-                } else {
-                    $video.pause();
-                }
-                break;
-            case 'f':
-            case 'F':
-                e.preventDefault();
-                $activeModal.find('.gretzia-video-fullscreen').click();
-                break;
-            case 'm':
-            case 'M':
-                e.preventDefault();
-                $activeModal.find('.gretzia-video-mute').click();
-                break;
-            case 'ArrowLeft':
-                e.preventDefault();
-                $video.currentTime = Math.max(0, $video.currentTime - 10);
-                break;
-            case 'ArrowRight':
-                e.preventDefault();
-                $video.currentTime = Math.min($video.duration, $video.currentTime + 10);
-                break;
-            case 'ArrowUp':
-                e.preventDefault();
-                $video.volume = Math.min(1, $video.volume + 0.1);
-                break;
-            case 'ArrowDown':
-                e.preventDefault();
-                $video.volume = Math.max(0, $video.volume - 0.1);
-                break;
+        if (expandButton) {
+            expandButton.addEventListener('click', function (event) {
+                event.stopPropagation();
+                openFloatingPlayer(root, player, expandButton);
+            });
         }
-    });
-}
-
-function closeVideoModal($modal) {
-    var $video = $modal.find('video')[0];
-
-    // 暂停视频播放
-    if ($video) {
-        $video.pause();
+        player.on('play', function () {
+            pauseOtherPlayers(player);
+        });
+        player.on('error', function (event) {
+            markPlayerError(root, event);
+        });
+        player.on('ready', function () {
+            root.classList.add('blog-video--loaded');
+        });
+        player.on('destroy', function () {
+            var state = floatingStates.get(player);
+            if (state) {
+                closeFloatingPlayer(state);
+            }
+            players.delete(video);
+            delete root.__blogVideoPlayer;
+        });
+        return player;
     }
 
-    // 移除事件监听
-    $(document).off('keydown.gretzia-video');
-    $(document).off('mousemove.gretzia-drag');
-    $(document).off('mouseup.gretzia-drag');
-
-    // 淡出并移除模态框
-    $modal.removeClass('active');
-    setTimeout(function() {
-        $modal.remove();
-    }, 300);
-}
-
-function optimizeVideoThumbnail($videoPreview) {
-    var $videoBackground = $videoPreview.find('.gretzia-video-background video');
-
-    if ($videoBackground.length > 0) {
-        // 设置视频加载优化
-        $videoBackground.attr('preload', 'metadata');
-
-        // 视频加载完成后的处理
-        $videoBackground.on('loadedmetadata', function() {
-            // 可以在这里添加更多的优化逻辑
-            this.currentTime = 1; // 跳转到第1秒作为缩略图
+    function initializeBlogVideoPlayers() {
+        document.querySelectorAll('[data-video-player]').forEach(function (root) {
+            initializePlayer(root);
         });
     }
 
-    // 为预览添加加载动画
-    $videoPreview.addClass('loading');
+    window.BlogVideoPlayers = {
+        initialize: initializeBlogVideoPlayers,
+        get: function (video) { return players.get(video) || null; },
+        getAll: function () { return Array.from(players.values()); },
+        options: playerOptions
+    };
 
-    // 模拟加载完成
-    setTimeout(function() {
-        $videoPreview.removeClass('loading').addClass('loaded');
-    }, 500);
-}
-
-// 添加CSS动画类
-$('<style>')
-    .prop('type', 'text/css')
-    .html(`
-        .gretzia-play-button.pulse {
-            animation: gretziaButtonPulse 1s infinite;
-        }
-        
-        @keyframes gretziaButtonPulse {
-            0% { transform: scale(1); }
-            50% { transform: scale(1.05); }
-            100% { transform: scale(1); }
-        }
-        
-        .gretzia-video-preview.loading {
-            opacity: 0.7;
-        }
-        
-        .gretzia-video-preview.loaded {
-            opacity: 1;
-            transition: opacity 0.3s ease;
-        }
-    `)
-    .appendTo('head');
-
-// 导出函数供外部使用
-window.GretziaVideoBlocks = {
-    initialize: initializeGretziaVideoBlocks,
-    openModal: openVideoModal,
-    closeModal: closeVideoModal
-};
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initializeBlogVideoPlayers);
+    } else {
+        initializeBlogVideoPlayers();
+    }
+}());

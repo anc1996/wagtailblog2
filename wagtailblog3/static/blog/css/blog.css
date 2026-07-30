@@ -91,7 +91,8 @@
     letter-spacing: -0.025em;
     overflow-wrap: anywhere;
     word-break: normal;
-    text-wrap: balance;
+    /* Keep wrapped titles using the available hero width across every size tier. */
+    text-wrap: pretty;
     text-shadow: 0 4px 22px rgba(0, 0, 0, 0.38);
     font-family: 'Playfair Display', serif;
 }
@@ -108,7 +109,6 @@
     font-size: clamp(1.95rem, 1.7rem + 1.25vw, 3rem);
     line-height: 1.24;
     letter-spacing: -0.018em;
-    text-wrap: pretty;
 }
 
 .blog-meta {

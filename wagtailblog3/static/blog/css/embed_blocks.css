@@ -77,6 +77,38 @@
     border-top: 1px solid rgba(255, 255, 255, 0.05);
     padding: 0.7rem 1.2rem !important;
 }
+
+.geek-embed-meta__actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    flex: 0 0 auto;
+}
+
+.geek-embed-collapse {
+    width: 32px;
+    height: 32px;
+    display: grid;
+    place-items: center;
+    border: 1px solid rgba(232, 197, 150, 0.24);
+    border-radius: 7px;
+    color: #aaa39a;
+    background: transparent;
+    cursor: pointer;
+}
+
+.geek-embed-collapse:hover,
+.geek-embed-collapse:focus-visible {
+    color: #171513;
+    background: var(--embed-accent);
+    outline: none;
+}
+
+.geek-embed-container--collapsed .geek-embed-video-stage,
+.geek-embed-container--collapsed .geek-custom-embed.audio-mode,
+.geek-embed-container--collapsed .geek-native-video-wrapper {
+    display: none;
+}
 .geek-embed-meta .embed-title {
     font-size: 0.82rem;
     font-family: 'Fira Code', 'Cascadia Code', monospace; /* 黑客专属等宽字体 */
@@ -91,4 +123,272 @@
     padding: 3px 8px;
     border-radius: 4px;
     border: 1px solid rgba(0, 210, 255, 0.15);
+}
+
+/* Unified video presentation for provider-owned iframe players. */
+.geek-embed-container--video {
+    --embed-accent: #d9a566;
+    --embed-text: #f4eee5;
+    --embed-panel: #1b1c20;
+    border-color: rgba(232, 197, 150, 0.2);
+    background: var(--embed-panel);
+}
+
+.geek-embed-video-stage {
+    position: relative;
+    aspect-ratio: 16 / 9;
+    width: 100%;
+    overflow: hidden;
+    background: #111214;
+}
+
+.geek-embed-container--video .geek-custom-embed.video-mode,
+.geek-embed-container--video .geek-native-video-wrapper {
+    width: 100%;
+    height: 100%;
+    padding: 0;
+}
+
+.geek-embed-container--video .video-embed-wrapper,
+.geek-embed-container--video iframe {
+    width: 100% !important;
+    height: 100% !important;
+    border: 0 !important;
+}
+
+/* Wagtail's generated wrapper already owns the 16:9 ratio. Clear its
+   padding ratio and make it fill the single outer video stage. */
+.geek-embed-container--video .geek-custom-embed.video-mode .video-embed-wrapper {
+    position: absolute !important;
+    inset: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+}
+
+.geek-embed-container--video .geek-custom-embed.video-mode .video-embed-wrapper iframe {
+    position: absolute !important;
+    inset: 0 !important;
+}
+
+/* YouTube oEmbed may return a plain inner div instead of the named
+   video-embed-wrapper. Both generated shapes must fill the same stage. */
+.geek-embed-container--video .geek-custom-embed.video-mode > div {
+    position: absolute !important;
+    inset: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+.geek-embed-container--video .geek-custom-embed.video-mode > div iframe {
+    position: absolute !important;
+    inset: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+}
+
+.geek-embed-status {
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    padding: 1rem;
+    color: #aaa39a;
+    background: #111214;
+    text-align: center;
+    pointer-events: none;
+}
+
+/* The video stage is moved into a dialog when enlarged, so the status
+   element is temporarily outside the article selector scope. Its own
+   accessibility state must control visibility in both locations. */
+.geek-embed-status[aria-hidden="true"] {
+    display: none !important;
+}
+
+.geek-embed-status__spinner {
+    width: 22px;
+    height: 22px;
+    flex: 0 0 auto;
+    border: 2px solid rgba(217, 165, 102, 0.25);
+    border-top-color: var(--embed-accent);
+    border-radius: 50%;
+    animation: geek-embed-spin 0.8s linear infinite;
+}
+
+.geek-embed-container--loaded .geek-embed-status {
+    display: none;
+}
+
+.geek-embed-container--failed .geek-embed-status {
+    color: #f0c7b4;
+    background: rgba(17, 18, 20, 0.94);
+}
+
+.geek-embed-container--failed .geek-embed-status__spinner {
+    display: none;
+}
+
+@keyframes geek-embed-spin {
+    to { transform: rotate(360deg); }
+}
+
+.geek-embed-expand {
+    position: absolute;
+    right: 0.85rem;
+    bottom: 0.85rem;
+    z-index: 4;
+    width: 38px;
+    height: 38px;
+    display: grid;
+    place-items: center;
+    border: 1px solid rgba(232, 197, 150, 0.32);
+    border-radius: 8px;
+    color: var(--embed-text);
+    background: rgba(17, 18, 20, 0.78);
+    cursor: pointer;
+    backdrop-filter: blur(10px);
+}
+
+.geek-embed-expand:hover,
+.geek-embed-expand:focus-visible {
+    color: #171513;
+    background: var(--embed-accent);
+    outline: none;
+}
+
+.geek-embed-dialog {
+    width: min(1180px, calc(100vw - 48px));
+    max-width: none;
+    padding: 0;
+    border: 1px solid rgba(232, 197, 150, 0.24);
+    border-radius: 12px;
+    color: var(--embed-text);
+    background: var(--embed-panel);
+    box-shadow: 0 28px 90px rgba(0, 0, 0, 0.58);
+}
+
+.geek-embed-dialog::backdrop {
+    background: rgba(7, 8, 9, 0.88);
+    backdrop-filter: blur(8px);
+}
+
+.geek-embed-dialog__shell {
+    overflow: hidden;
+}
+
+.geek-embed-dialog__header {
+    min-height: 52px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.7rem 0.85rem 0.7rem 1rem;
+    border-bottom: 1px solid rgba(232, 197, 150, 0.2);
+}
+
+.geek-embed-dialog__header h2 {
+    margin: 0;
+    overflow: hidden;
+    font-size: 1rem;
+    font-weight: 650;
+    line-height: 1.35;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.geek-embed-dialog__close {
+    flex: 0 0 auto;
+    width: 36px;
+    height: 36px;
+    display: grid;
+    place-items: center;
+    border: 1px solid rgba(232, 197, 150, 0.24);
+    border-radius: 8px;
+    color: var(--embed-text);
+    background: transparent;
+    cursor: pointer;
+}
+
+.geek-embed-dialog__close:hover,
+.geek-embed-dialog__close:focus-visible {
+    color: #171513;
+    background: var(--embed-accent);
+    outline: none;
+}
+
+.geek-embed-dialog__stage,
+.geek-embed-dialog .geek-embed-video-stage {
+    width: 100%;
+    min-height: 0;
+}
+
+.geek-embed-dialog__stage {
+    position: relative;
+    height: auto;
+    aspect-ratio: 16 / 9;
+    background: #111214;
+}
+
+.geek-embed-dialog .geek-embed-video-stage {
+    position: absolute;
+    inset: 0;
+    height: 100%;
+    aspect-ratio: auto;
+}
+
+/* The stage is moved outside its article while enlarged, so repeat the
+   provider sizing contract inside the dialog scope. */
+.geek-embed-dialog .geek-custom-embed.video-mode {
+    position: absolute !important;
+    inset: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    padding: 0 !important;
+}
+
+.geek-embed-dialog .geek-custom-embed.video-mode > div,
+.geek-embed-dialog .geek-custom-embed.video-mode .video-embed-wrapper {
+    position: absolute !important;
+    inset: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+.geek-embed-dialog .geek-custom-embed.video-mode iframe {
+    position: absolute !important;
+    inset: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    border: 0 !important;
+}
+
+body:has(.geek-embed-dialog[open]) {
+    overflow: hidden;
+}
+
+@media (max-width: 767px) {
+    .geek-embed-dialog {
+        width: calc(100vw - 20px);
+        border-radius: 9px;
+    }
+
+    .geek-embed-expand {
+        right: 0.6rem;
+        bottom: 0.6rem;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .geek-embed-status__spinner {
+        animation: none;
+    }
 }

@@ -1,38 +1,51 @@
 {% load wagtailembeds_tags %}
 
-{# 🛡️ 智能兼容钩子：识别新旧版本数据结构 #}
 {% with media_data=value.embed_url|default:value title=value.title|default:"历史媒体档案" %}
-
-<div class="geek-embed-container my-5 shadow-sm"
-     data-provider="{{ media_data.provider_name|default:'media'|lower }}"
-     aria-label="多媒体播放器: {{ title }}">
-
-    {# 1. 智能音频嗅探 #}
-    {% if 'audio-embed-wrapper' in media_data.html or 'spotify.com' in media_data.html or 'soundcloud.com' in media_data.html or 'music.163.com' in media_data.html %}
+{% with embed_html=media_data.html|default:'' provider=media_data.provider_name|default:'Streaming' %}
+<article class="geek-embed-container{% if 'video-embed-wrapper' in embed_html or 'bilibili.com' in embed_html or 'youtube.com' in embed_html or 'youtu.be' in embed_html or 'vimeo.com' in embed_html or 'qq.com' in embed_html or 'youku.com' in embed_html %} geek-embed-container--video{% endif %} my-5 shadow-sm"
+         data-provider="{{ provider|lower }}"
+         {% if 'video-embed-wrapper' in embed_html or 'bilibili.com' in embed_html or 'youtube.com' in embed_html or 'youtu.be' in embed_html or 'vimeo.com' in embed_html or 'qq.com' in embed_html or 'youku.com' in embed_html %}data-embed-video{% endif %}
+         aria-label="多媒体播放器: {{ title }}">
+    {% if 'audio-embed-wrapper' in embed_html or 'spotify.com' in embed_html or 'soundcloud.com' in embed_html or 'music.163.com' in embed_html %}
         <div class="geek-custom-embed audio-mode">
-            {{ media_data.html|safe }}
+            {{ embed_html|safe }}
         </div>
-
-    {# 2. 智能视频嗅探 #}
-    {% elif 'video-embed-wrapper' in media_data.html or 'bilibili.com' in media_data.html or 'qq.com' in media_data.html or 'youku.com' in media_data.html %}
-        <div class="geek-custom-embed video-mode">
-            {{ media_data.html|safe }}
+    {% elif 'video-embed-wrapper' in embed_html or 'bilibili.com' in embed_html or 'youtube.com' in embed_html or 'youtu.be' in embed_html or 'vimeo.com' in embed_html or 'qq.com' in embed_html or 'youku.com' in embed_html %}
+        <div class="geek-embed-video-stage">
+            <div class="geek-custom-embed video-mode">
+                {{ embed_html|safe }}
+            </div>
+            <div class="geek-embed-status" data-embed-status role="status" aria-live="polite">
+                <span class="geek-embed-status__spinner" aria-hidden="true"></span>
+                <span data-embed-status-text>正在加载外部视频…</span>
+            </div>
+            <button class="geek-embed-expand"
+                    type="button"
+                    data-embed-expand
+                    aria-label="放大视频"
+                    title="放大视频">
+                <i class="fa fa-expand" aria-hidden="true"></i>
+            </button>
         </div>
-
-    {# 3. 兜底原生视频 (YouTube, Vimeo) #}
     {% else %}
         <div class="geek-native-video-wrapper">
-            {{ media_data.html|safe }}
+            {{ embed_html|safe }}
         </div>
     {% endif %}
 
-    {# 4. 底部极客控制台 #}
     <div class="geek-embed-meta d-flex justify-content-between align-items-center px-3 py-2">
         <span class="embed-title text-truncate text-muted">
-            <i class="fa-solid fa-compact-disc fa-spin me-2 text-info"></i>{{ title }}
+            <i class="fa-solid fa-compact-disc me-2 text-info" aria-hidden="true"></i>{{ title }}
         </span>
-        <span class="badge badge-geek-dark text-uppercase small">{{ media_data.provider_name|default:'Streaming' }}</span>
+        <span class="geek-embed-meta__actions">
+            <span class="badge badge-geek-dark text-uppercase small">{{ provider }}</span>
+            <button class="geek-embed-collapse" type="button" data-embed-collapse
+                    aria-expanded="true" aria-label="折叠流媒体" title="折叠流媒体">
+                <i class="fa fa-chevron-up" aria-hidden="true"></i>
+            </button>
+        </span>
     </div>
-</div>
+</article>
 
+{% endwith %}
 {% endwith %}

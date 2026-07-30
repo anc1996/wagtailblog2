@@ -159,135 +159,6 @@
     border-radius: 12px;
 }
 
-/* ==================== 视频模态框样式 ==================== */
-.gretzia-video-modal {
-    display: none;
-    position: fixed;
-    z-index: 9999;
-    left: 0;
-    top: 0;
-    width: 100%;
-    height: 100%;
-    background-color: rgba(0, 0, 0, 0.95);
-    backdrop-filter: blur(5px);
-    overflow: hidden;
-}
-
-.gretzia-video-modal.active {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    animation: gretzia-fadeIn 0.3s ease;
-}
-
-/* 模态框内容容器 */
-.gretzia-video-modal-content {
-    position: relative;
-    max-width: 95vw;
-    max-height: 95vh;
-    margin: auto;
-    background: #1a1a1a;
-    border-radius: 12px;
-    overflow: hidden;
-    box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5);
-    animation: gretzia-scaleIn 0.3s ease;
-    cursor: grab;
-    user-select: none;
-    resize: both;
-    min-width: 400px;
-    min-height: 300px;
-}
-
-.gretzia-video-modal-content.dragging {
-    cursor: grabbing;
-}
-
-/* 模态框视频播放器 */
-.gretzia-video-modal video {
-    width: 100%;
-    height: auto;
-    max-width: 90vw;
-    max-height: 80vh;
-    display: block;
-    background: #000;
-    border-radius: 12px 12px 0 0;
-    outline: none;
-}
-
-/* 模态框标题 */
-.gretzia-video-modal-caption {
-    padding: 1rem 1.5rem;
-    background: #1a1a1a;
-    color: #ffffff;
-    text-align: center;
-    font-size: 1rem;
-    border-radius: 0 0 12px 12px;
-    border-top: 1px solid #333;
-}
-
-/* 关闭按钮 */
-.gretzia-video-modal-close {
-    position: absolute;
-    top: 15px;
-    right: 20px;
-    color: white;
-    font-size: 28px;
-    font-weight: bold;
-    cursor: pointer;
-    z-index: 10000;
-    background: rgba(0, 0, 0, 0.7);
-    border-radius: 50%;
-    width: 40px;
-    height: 40px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.3s ease;
-}
-
-.gretzia-video-modal-close:hover {
-    background: rgba(255, 95, 86, 0.8);
-    transform: scale(1.1);
-}
-
-/* 模态框控制栏 */
-.gretzia-video-controls {
-    position: absolute;
-    bottom: 15px;
-    left: 50%;
-    transform: translateX(-50%);
-    background: rgba(0, 0, 0, 0.8);
-    padding: 0.5rem 1rem;
-    border-radius: 25px;
-    display: flex;
-    gap: 1rem;
-    align-items: center;
-    color: white;
-    backdrop-filter: blur(10px);
-    opacity: 0;
-    transition: all 0.3s ease;
-}
-
-.gretzia-video-modal-content:hover .gretzia-video-controls {
-    opacity: 1;
-}
-
-.gretzia-video-controls button {
-    background: none;
-    border: none;
-    color: white;
-    font-size: 16px;
-    cursor: pointer;
-    padding: 0.3rem;
-    border-radius: 50%;
-    transition: all 0.2s ease;
-}
-
-.gretzia-video-controls button:hover {
-    background: rgba(255, 255, 255, 0.2);
-    transform: scale(1.1);
-}
-
 /* ==================== 视频占位符样式 ==================== */
 .gretzia-video-placeholder {
     width: 80%;
@@ -315,23 +186,6 @@
 .gretzia-placeholder-content small {
     font-size: 0.9rem;
     opacity: 0.8;
-}
-
-/* ==================== 动画效果 ==================== */
-@keyframes gretzia-fadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
-}
-
-@keyframes gretzia-scaleIn {
-    from {
-        opacity: 0;
-        transform: scale(0.5);
-    }
-    to {
-        opacity: 1;
-        transform: scale(1);
-    }
 }
 
 /* ==================== 响应式设计 ==================== */
@@ -416,10 +270,6 @@
         margin: 1.5rem 0;
     }
 
-    .gretzia-video-modal-content {
-        min-width: 300px;
-        min-height: 200px;
-    }
 }
 
 /* ==================== 深色模式适配 ==================== */
@@ -446,27 +296,361 @@
     }
 }
 
-/* =======================================
-   拖拽与缩放功能增强样式
-   ======================================= */
+/* ==================== Blog video theme ==================== */
 
-/* 1. 为模态框头部添加可拖动鼠标指针 */
-.gretzia-modal-header {
-    cursor: move;
+:root {
+    --blog-video-bg: #111214;
+    --blog-video-panel: #1b1c20;
+    --blog-video-border: rgba(232, 197, 150, 0.2);
+    --blog-video-accent: #d9a566;
+    --blog-video-accent-strong: #e8c596;
+    --blog-video-text: #f4eee5;
+    --blog-video-muted: #aaa39a;
 }
 
-/* 2. jQuery UI 缩放手柄样式 */
-.ui-resizable-handle {
-    position: absolute;
-    font-size: 0.1px;
+.content-block-wrapper[data-block-type="video_block"] {
+    margin: 2.75rem 0;
+}
+
+.blog-video {
+    width: min(100%, 980px);
+    margin: 0 auto;
+    overflow: hidden;
+    color: var(--blog-video-text);
+}
+
+.blog-video.gretzia-video-preview {
+    max-width: 980px;
+    width: 100%;
+    background: var(--blog-video-panel);
+    border: 1px solid var(--blog-video-border);
+    border-radius: 12px;
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
+    cursor: pointer;
+    transform: none;
+}
+
+.blog-video.gretzia-video-preview:hover {
+    transform: none;
+    border-color: rgba(232, 197, 150, 0.38);
+    box-shadow: 0 22px 58px rgba(0, 0, 0, 0.36);
+}
+
+.blog-video__stage,
+.blog-video__media {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    height: auto;
+}
+
+.blog-video__stage {
+    border-radius: 11px 11px 0 0;
+}
+
+.blog-video__media {
+    background-color: var(--blog-video-bg);
+    background-size: cover;
+}
+
+.blog-video__native-preview,
+.blog-video .plyr video {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    background: var(--blog-video-bg);
+}
+
+.blog-video__preview-overlay {
+    background: linear-gradient(180deg, rgba(10, 11, 12, 0.1), rgba(10, 11, 12, 0.64));
+}
+
+.blog-video.gretzia-video-preview:hover .blog-video__preview-overlay {
+    background: linear-gradient(180deg, rgba(10, 11, 12, 0.16), rgba(10, 11, 12, 0.72));
+}
+
+.blog-video__play {
+    width: 68px;
+    height: 68px;
+    margin-bottom: 1rem;
+    color: #171513;
+    background: var(--blog-video-accent-strong);
+    border: 1px solid rgba(255, 248, 230, 0.7);
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.32);
+}
+
+.blog-video__play:hover {
+    background: #f1d5a4;
+    box-shadow: 0 12px 34px rgba(0, 0, 0, 0.42);
+}
+
+.blog-video__meta {
+    color: var(--blog-video-text);
+    background: rgba(17, 18, 20, 0.76);
+    border: 1px solid rgba(232, 197, 150, 0.22);
+    border-radius: 8px;
+    backdrop-filter: blur(12px);
+}
+
+.blog-video__caption {
+    min-height: 48px;
+    justify-content: flex-start;
+    padding: 0.78rem 1rem;
+    color: var(--blog-video-muted);
+    background: var(--blog-video-panel);
+    border-top: 1px solid var(--blog-video-border);
+    font-style: normal;
+    text-align: left;
+}
+
+.blog-video__caption-title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.blog-video__collapse {
+    flex: 0 0 auto;
+    width: 32px;
+    height: 32px;
+    display: grid;
+    place-items: center;
+    margin-left: auto;
+    border: 1px solid var(--blog-video-border);
+    border-radius: 7px;
+    color: var(--blog-video-muted);
+    background: transparent;
+    cursor: pointer;
+}
+
+.blog-video__collapse:hover,
+.blog-video__collapse:focus-visible {
+    color: #171513;
+    background: var(--blog-video-accent-strong);
+    outline: none;
+}
+
+.blog-video--collapsed .blog-video__stage {
+    display: none;
+}
+
+.blog-video__caption i {
+    color: var(--blog-video-accent);
+}
+
+.blog-video .plyr {
+    --plyr-color-main: var(--blog-video-accent);
+    --plyr-video-background: var(--blog-video-bg);
+    --plyr-menu-background: #202126;
+    --plyr-menu-color: var(--blog-video-text);
+    --plyr-control-icon-size: 16px;
+    width: 100%;
+    border-radius: 11px 11px 0 0;
+    overflow: hidden;
+    background: var(--blog-video-bg);
+}
+
+.blog-video .plyr__controls {
+    padding: 0.75rem 0.9rem;
+    background: linear-gradient(180deg, transparent, rgba(9, 10, 11, 0.92));
+}
+
+.blog-video .plyr__control:hover,
+.blog-video .plyr__control[aria-expanded="true"] {
+    color: #171513;
+    background: var(--blog-video-accent-strong);
+}
+
+.blog-video .plyr__menu__container {
+    border: 1px solid var(--blog-video-border);
+    box-shadow: 0 14px 36px rgba(0, 0, 0, 0.38);
+}
+
+.blog-video .plyr__progress input[type="range"],
+.blog-video .plyr__volume input[type="range"] {
+    color: var(--blog-video-accent);
+}
+
+.blog-video--empty {
+    max-width: 980px;
+    padding: 3rem 2rem;
+    background: var(--blog-video-panel);
+    border: 1px dashed var(--blog-video-border);
+    border-radius: 12px;
+    color: var(--blog-video-muted);
+    text-align: center;
+}
+
+.blog-video--empty i {
+    color: var(--blog-video-accent);
+}
+
+@media (max-width: 767px) {
+    .content-block-wrapper[data-block-type="video_block"] {
+        margin: 2rem 0;
+    }
+
+    .blog-video,
+    .blog-video.gretzia-video-preview {
+        border-radius: 9px;
+    }
+
+    .blog-video__stage,
+    .blog-video__media,
+    .blog-video .plyr {
+        border-radius: 8px 8px 0 0;
+    }
+
+    .blog-video__play {
+        width: 58px;
+        height: 58px;
+    }
+
+    .blog-video .plyr__controls {
+        padding: 0.65rem 0.5rem;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .blog-video.gretzia-video-preview,
+    .blog-video.gretzia-video-preview:hover,
+    .blog-video__play {
+        transition: none;
+    }
+}
+
+.blog-video--ready .blog-video__preview-overlay {
+    display: none;
+}
+
+.blog-video--ready .blog-video__media {
     display: block;
-    z-index: 9999;
 }
-.ui-resizable-e { cursor: e-resize; width: 7px; right: -5px; top: 0; height: 100%; }
-.ui-resizable-s { cursor: s-resize; height: 7px; bottom: -5px; left: 0; width: 100%; }
-.ui-resizable-n { cursor: n-resize; height: 7px; top: -5px; left: 0; width: 100%; }
-.ui-resizable-w { cursor: w-resize; width: 7px; left: -5px; top: 0; height: 100%; }
-.ui-resizable-se { cursor: se-resize; width: 12px; height: 12px; right: 1px; bottom: 1px; background: transparent; }
-.ui-resizable-sw { cursor: sw-resize; width: 9px; height: 9px; left: -5px; bottom: -5px; }
-.ui-resizable-nw { cursor: nw-resize; width: 9px; height: 9px; left: -5px; top: -5px; }
-.ui-resizable-ne { cursor: ne-resize; width: 9px; height: 9px; right: -5px; top: -5px; }
+
+.blog-video--error .blog-video__media::after {
+    content: '视频暂时无法播放';
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    color: var(--blog-video-muted);
+    background: rgba(17, 18, 20, 0.78);
+}
+
+.blog-video__expand {
+    position: absolute;
+    right: 0.85rem;
+    bottom: 0.85rem;
+    z-index: 3;
+    width: 38px;
+    height: 38px;
+    display: grid;
+    place-items: center;
+    border: 1px solid rgba(232, 197, 150, 0.32);
+    border-radius: 8px;
+    color: var(--blog-video-text);
+    background: rgba(17, 18, 20, 0.76);
+    cursor: pointer;
+    backdrop-filter: blur(10px);
+}
+
+.blog-video__expand:hover,
+.blog-video__expand:focus-visible {
+    color: #171513;
+    background: var(--blog-video-accent-strong);
+    outline: none;
+}
+
+.blog-video-dialog {
+    width: min(1180px, calc(100vw - 48px));
+    max-width: none;
+    padding: 0;
+    border: 1px solid var(--blog-video-border);
+    border-radius: 12px;
+    color: var(--blog-video-text);
+    background: var(--blog-video-panel);
+    box-shadow: 0 28px 90px rgba(0, 0, 0, 0.58);
+}
+
+.blog-video-dialog::backdrop {
+    background: rgba(7, 8, 9, 0.88);
+    backdrop-filter: blur(8px);
+}
+
+.blog-video-dialog__shell {
+    overflow: hidden;
+}
+
+.blog-video-dialog__header {
+    min-height: 52px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.7rem 0.85rem 0.7rem 1rem;
+    border-bottom: 1px solid var(--blog-video-border);
+}
+
+.blog-video-dialog__header h2 {
+    margin: 0;
+    overflow: hidden;
+    color: var(--blog-video-text);
+    font-size: 1rem;
+    font-weight: 650;
+    line-height: 1.35;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.blog-video-dialog__close {
+    flex: 0 0 auto;
+    width: 36px;
+    height: 36px;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--blog-video-border);
+    border-radius: 8px;
+    color: var(--blog-video-text);
+    background: transparent;
+    cursor: pointer;
+}
+
+.blog-video-dialog__close:hover,
+.blog-video-dialog__close:focus-visible {
+    color: #171513;
+    background: var(--blog-video-accent-strong);
+    outline: none;
+}
+
+.blog-video-dialog__player,
+.blog-video-dialog .plyr {
+    width: 100%;
+}
+
+.blog-video-dialog .plyr {
+    --plyr-color-main: var(--blog-video-accent);
+    --plyr-video-background: var(--blog-video-bg);
+    --plyr-menu-background: #202126;
+    --plyr-menu-color: var(--blog-video-text);
+    background: var(--blog-video-bg);
+}
+
+body:has(.blog-video-dialog[open]) {
+    overflow: hidden;
+}
+
+@media (max-width: 767px) {
+    .blog-video__expand {
+        right: 0.6rem;
+        bottom: 0.6rem;
+    }
+
+    .blog-video-dialog {
+        width: calc(100vw - 20px);
+        border-radius: 9px;
+    }
+
+    .blog-video-dialog__header h2 {
+        font-size: 0.92rem;
+    }
+}

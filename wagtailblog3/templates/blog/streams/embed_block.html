@@ -2,7 +2,7 @@
 
 {% with media_data=value.embed_url|default:value title=value.title|default:"历史媒体档案" %}
 {% with embed_html=media_data.html|default:'' provider=media_data.provider_name|default:'Streaming' %}
-<article class="geek-embed-container{% if 'video-embed-wrapper' in embed_html or 'bilibili.com' in embed_html or 'youtube.com' in embed_html or 'youtu.be' in embed_html or 'vimeo.com' in embed_html or 'qq.com' in embed_html or 'youku.com' in embed_html %} geek-embed-container--video{% endif %} my-5 shadow-sm"
+<article class="geek-embed-container{% if 'music.163.com' in embed_html %} geek-embed-container--audio geek-embed-container--netease{% elif 'video-embed-wrapper' in embed_html or 'bilibili.com' in embed_html or 'youtube.com' in embed_html or 'youtu.be' in embed_html or 'vimeo.com' in embed_html or 'qq.com' in embed_html or 'youku.com' in embed_html %} geek-embed-container--video{% endif %} my-5 shadow-sm"
          data-provider="{{ provider|lower }}"
          {% if 'video-embed-wrapper' in embed_html or 'bilibili.com' in embed_html or 'youtube.com' in embed_html or 'youtu.be' in embed_html or 'vimeo.com' in embed_html or 'qq.com' in embed_html or 'youku.com' in embed_html %}data-embed-video{% endif %}
          aria-label="多媒体播放器: {{ title }}">

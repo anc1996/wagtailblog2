@@ -6,6 +6,7 @@
     {{ block.super }}
     <link rel="stylesheet" href="{% static 'blog/css/blog.css' %}?v=20260730-1">
     <link rel="stylesheet" href="{% static 'blog/css/blog-resize.css' %}">
+    <link rel="stylesheet" href="{% static 'blog/css/adaptive-scroll.css' %}?v=20260730-2127">
     {% if has_image or has_gallery %}<link rel="stylesheet" href="{% static 'blog/css/lightbox/lightbox.css' %}">{% endif %}
 
     <link rel="stylesheet" href="{% static 'blog/css/github-markdown.min.css' %}">
@@ -17,12 +18,14 @@
     {% include "includes/content/code_highlighting_css.html" %}
     {% if has_image %}<link rel="stylesheet" href="{% static 'blog/css/image_blocks.css' %}">{% endif %}
     {% if has_gallery %}<link rel="stylesheet" href="{% static 'blog/css/blog-gallery.css' %}?v=20260726-2">{% endif %}
-    {% if has_video %}
+    {% if has_video or has_audio %}
         <link rel="stylesheet" href="{% static 'vendor/plyr/plyr.css' %}?v=3.7.8">
+    {% endif %}
+    {% if has_video %}
         <link rel="stylesheet" href="{% static 'blog/css/video_blocks.css' %}">
     {% endif %}
     {% if has_audio %}<link rel="stylesheet" href="{% static 'blog/css/audio_blocks.css' %}">{% endif %}
-    {% if has_embed %}<link rel="stylesheet" href="{% static 'blog/css/embed_blocks.css' %}?v=20260730-1730">{% endif %}
+    {% if has_embed %}<link rel="stylesheet" href="{% static 'blog/css/embed_blocks.css' %}?v=20260730-2102">{% endif %}
     {% if has_table %}<link rel="stylesheet" href="{% static 'blog/css/table_blocks.css' %}">{% endif %}
     {% if has_mermaid %}{% include "includes/content/mermaid_css.html" %}{% endif %}
     <link rel="stylesheet" href="{% static 'comments/css/comments.css' %}?v=20260729-5">
@@ -326,6 +329,7 @@
     <script type="module" src="{% static 'comments/js/comments.js' %}?v=20260729-5"></script>
 
     <script src="{% static 'blog/js/blog_page.js' %}?v=20260728-3" defer></script>
+    <script src="{% static 'blog/js/adaptive-blog-scroll.js' %}?v=20260730-2127" defer></script>
 
     <!-- 🆕 添加拖动布局JS -->
     <script src="{% static 'blog/js/resize-manager.js' %}"></script>
@@ -333,10 +337,13 @@
     {% if has_image or has_gallery %}<script src="{% static 'blog/js/lightbox/lightbox.js' %}" defer></script>{% endif %}
     {% if has_gallery %}<script src="{% static 'blog/js/blog-gallery.js' %}?v=20260726-1" defer></script>{% endif %}
     {% if has_image %}<script src="{% static 'blog/js/image_blocks.js' %}" defer></script>{% endif %}
-    {% if has_video %}
+    {% if has_video or has_audio %}
         <script src="{% static 'vendor/plyr/plyr.min.js' %}?v=3.7.8" defer></script>
+    {% endif %}
+    {% if has_video %}
         <script src="{% static 'blog/js/video_blocks.js' %}" defer></script>
     {% endif %}
+    {% if has_audio %}<script src="{% static 'blog/js/audio_blocks.js' %}?v=20260730-2219" defer></script>{% endif %}
     {% if has_embed %}<script src="{% static 'blog/js/embed_blocks.js' %}?v=20260730-1730" defer></script>{% endif %}
     {% if has_mermaid %}{% include "includes/content/mermaid_js.html" %}{% endif %}
 

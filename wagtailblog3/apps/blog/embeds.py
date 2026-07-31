@@ -71,22 +71,58 @@ class YoukuFinder(EmbedFinder):
 # 4. 网易云音乐 (NetEase Cloud Music)
 # ==========================================
 class NetEaseMusicFinder(EmbedFinder):
-    pattern = re.compile(r'music\.163\.com/(?:#/)?song\?id=(\d+)')
+    song_pattern = re.compile(r'music\.163\.com/(?:#/)?song\?id=(\d+)')
+    outchain_pattern = re.compile(
+        r'music\.163\.com/#/outchain/\d+/(\d+)/m/([^/?#]+)',
+        re.IGNORECASE,
+    )
+    player_pattern = re.compile(
+        r'music\.163\.com/outchain/player\?[^#]*?\bid=(\d+)',
+        re.IGNORECASE,
+    )
 
     def accept(self, url):
-        return bool(self.pattern.search(url))
+        return bool(
+            self.song_pattern.search(url)
+            or self.outchain_pattern.search(url)
+            or self.player_pattern.search(url)
+        )
+
+    def _parse_url(self, url):
+        match = self.outchain_pattern.search(url)
+        if match:
+            return match.group(1), match.group(2).lower() == 'use'
+
+        for pattern in (self.song_pattern, self.player_pattern):
+            match = pattern.search(url)
+            if match:
+                return match.group(1), False
+
+        return None, False
 
     def find_embed(self, url, max_width=None):
-        song_id = self.pattern.search(url).group(1)
+        song_id, autoplay = self._parse_url(url)
+        if not song_id:
+            raise ValueError('网易云音乐链接缺少歌曲 ID')
+
+        auto = '1' if autoplay else '0'
         html = f"""
-        <div class="audio-embed-wrapper shadow-sm mt-3 mb-3">
-            <iframe title="网易云音乐播放器"
-                    frameborder="no" border="0" marginwidth="0" marginheight="0" width="100%" height="66"
-                    src="//music.163.com/outchain/player?type=2&id={song_id}&auto=0&height=66">
+        <div class="audio-embed-wrapper netease-music-wrapper">
+            <iframe class="netease-music-player" title="网易云音乐播放器"
+                    frameborder="no" border="0" marginwidth="0" marginheight="0"
+                    width="330" height="86"
+                    src="https://music.163.com/outchain/player?type=2&id={song_id}&auto={auto}&height=66">
             </iframe>
         </div>
         """
-        return {'title': 'NetEase Cloud Music', 'provider_name': 'NetEase', 'type': 'rich', 'width': 1000, 'height': 66, 'html': html}
+        return {
+            'title': 'NetEase Cloud Music',
+            'provider_name': '网易云音乐',
+            'type': 'rich',
+            'width': 330,
+            'height': 86,
+            'html': html,
+        }
 
 # ==========================================
 # 5. QQ音乐 (QQ Music) 解析器

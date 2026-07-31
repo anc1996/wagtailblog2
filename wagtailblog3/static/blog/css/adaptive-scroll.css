@@ -1,0 +1,102 @@
+
+
+/* =========================================================
+   Adaptive scroll mode
+   Default is document flow. Internal scrolling is enabled only
+   for a column whose content actually exceeds the viewport.
+   ========================================================= */
+@media (min-width: 1280px) {
+    .blog-layout-container {
+        height: auto;
+        min-height: 0;
+        align-items: start;
+    }
+
+    .blog-layout-container.adaptive-scroll-ready {
+        height: calc(100vh - 7rem);
+        height: calc(100dvh - 7rem);
+        min-height: 0;
+        align-items: stretch;
+    }
+
+    .blog-layout-container.adaptive-scroll-ready .blog-sidebar-left,
+    .blog-layout-container.adaptive-scroll-ready .blog-sidebar-right,
+    .blog-layout-container.adaptive-scroll-ready .blog-center-column {
+        height: auto;
+        min-height: 0;
+    }
+
+    .blog-layout-container.adaptive-scroll-ready .blog-center-column {
+        height: 100%;
+    }
+
+    .article-scroll-container,
+    .toc-wrapper,
+    .sidebar-scroll-area {
+        height: auto;
+        max-height: none !important;
+        overflow-y: visible;
+        overflow-x: hidden;
+        overscroll-behavior-y: auto;
+        scrollbar-gutter: auto;
+    }
+
+    .blog-layout-container.adaptive-scroll-ready .article-scroll-container,
+    .blog-layout-container.adaptive-scroll-ready .toc-wrapper,
+    .blog-layout-container.adaptive-scroll-ready .sidebar-scroll-area {
+        position: static;
+    }
+
+    .blog-layout-container.article-is-scrollable .article-scroll-container,
+    .article-scroll-container.is-scrollable {
+        height: 100%;
+        max-height: 100% !important;
+        overflow-y: auto;
+        overscroll-behavior-y: auto;
+        scrollbar-gutter: stable;
+    }
+
+    .blog-layout-container.toc-is-scrollable .toc-wrapper,
+    .toc-wrapper.is-scrollable {
+        height: 100%;
+        max-height: 100% !important;
+        overflow-y: auto;
+        overscroll-behavior-y: auto;
+        scrollbar-gutter: stable;
+    }
+
+    .blog-layout-container.sidebar-is-scrollable .sidebar-scroll-area,
+    .sidebar-scroll-area.is-scrollable {
+        height: 100%;
+        max-height: 100% !important;
+        overflow-y: auto;
+        overscroll-behavior-y: auto;
+        scrollbar-gutter: stable;
+    }
+
+    /* Do not leave a full-height paper shell around a short article. */
+    .blog-layout-container:not(.adaptive-scroll-ready) .blog-center-column {
+        height: auto;
+    }
+
+    .blog-layout-container:not(.adaptive-scroll-ready) .article-scroll-container {
+        flex: none;
+    }
+}
+
+@media (max-width: 1279px) {
+    .blog-layout-container,
+    .blog-layout-container.adaptive-scroll-ready {
+        height: auto;
+        min-height: 0;
+    }
+
+    .article-scroll-container,
+    .toc-wrapper,
+    .sidebar-scroll-area {
+        height: auto !important;
+        max-height: none !important;
+        overflow: visible !important;
+        overscroll-behavior-y: auto !important;
+    }
+}

@@ -21,6 +21,21 @@
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0">
 
+    <script>
+        (function () {
+            var preference = 'auto';
+            try {
+                var stored = window.localStorage.getItem('wagtailblog-site-theme');
+                if (stored === 'light' || stored === 'dark' || stored === 'auto') preference = stored;
+            } catch (error) {}
+            var dark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+            var theme = preference === 'auto' ? (dark ? 'dark' : 'light') : preference;
+            document.documentElement.dataset.themePreference = preference;
+            document.documentElement.dataset.theme = theme;
+            document.documentElement.style.colorScheme = theme;
+        }());
+    </script>
+
     {# Open Graph 标签 (社交分享优化) #}
     <meta property="og:title" content="{% if page.seo_title %}{{ page.seo_title }}{% else %}{{ page.title }}{% endif %}" />
     <meta property="og:description" content="{{ page.search_description|default:'' }}" />
@@ -51,7 +66,8 @@
     {% block extra_css %}{% endblock %}
 
     {# Shared visual system. Keep this last so page-specific legacy styles stay compatible. #}
-    <link rel="stylesheet" href="{% static 'css/site-theme.css' %}?v=20260731-2">
+    <link rel="stylesheet" href="{% static 'css/site-theme.css' %}?v=20260731-7">
+    <script src="{% static 'js/site-theme.js' %}?v=20260731-1" defer></script>
     {% block extra_css_after_site_theme %}{% endblock %}
 
 </head>

@@ -28,6 +28,28 @@
                     </div>
                 </div>
                 <div class="top-right info-block right-aligned">
+                    <div class="site-theme-control-item site-theme-control--header" data-site-theme-control>
+                        <button class="site-theme-toggle"
+                                type="button"
+                                data-site-theme-toggle
+                                aria-haspopup="menu"
+                                aria-expanded="false"
+                                aria-label="阅读主题：跟随系统"
+                                title="阅读主题：跟随系统">
+                            <i class="fa fa-adjust" aria-hidden="true"></i>
+                        </button>
+                        <div class="site-theme-menu" data-site-theme-menu role="menu" aria-label="选择阅读主题" hidden>
+                            <button type="button" role="menuitemradio" aria-checked="true" data-site-theme-option="auto">
+                                <i class="fa fa-adjust" aria-hidden="true"></i><span>跟随系统</span>
+                            </button>
+                            <button type="button" role="menuitemradio" aria-checked="false" data-site-theme-option="light">
+                                <i class="fa fa-sun-o" aria-hidden="true"></i><span>白天模式</span>
+                            </button>
+                            <button type="button" role="menuitemradio" aria-checked="false" data-site-theme-option="dark">
+                                <i class="fa fa-moon-o" aria-hidden="true"></i><span>夜间模式</span>
+                            </button>
+                        </div>
+                    </div>
                     <!--搜索框-->
                     <div class="search-box-outer">
                         <div class="dropdown">
@@ -99,7 +121,6 @@
                                 </li>
                                 {# 你可以在这里添加其他固定的顶级菜单项，例如“搜索” #}
                                  <li><a href="{% url 'search:search' %}">全文搜索</a></li>
-
 
                             </ul>
                         </div>

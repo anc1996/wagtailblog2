@@ -2,10 +2,14 @@
     'use strict';
 
     const BLOCK_SELECTOR = '[data-mermaid-block]';
-    const STORAGE_KEY = 'wagtailblog-mermaid-theme';
     const MIN_SCALE = 0.4;
     const MAX_SCALE = 3;
     const ZOOM_STEP = 0.2;
+    const DIALOG_MARGIN = 16;
+    const DIALOG_MIN_WIDTH = 520;
+    const DIALOG_MIN_HEIGHT = 360;
+    const DIALOG_MOBILE_QUERY = '(max-width: 767px)';
+    const DIALOG_RESIZE_EDGES = ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw'];
 
     const states = new WeakMap();
     let mermaidPromise = null;
@@ -87,26 +91,10 @@
         }
     };
 
-    function readStoredTheme() {
-        try {
-            const value = window.localStorage.getItem(STORAGE_KEY);
-            return value === 'dark' || value === 'light' ? value : null;
-        } catch (error) {
-            return null;
-        }
-    }
-
-    function storeTheme(theme) {
-        try {
-            window.localStorage.setItem(STORAGE_KEY, theme);
-        } catch (error) {
-            // Theme persistence is optional when storage is unavailable.
-        }
-    }
-
     function preferredTheme() {
-        return readStoredTheme()
-            || (window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        const siteTheme = document.documentElement.dataset.theme;
+        if (siteTheme === 'dark' || siteTheme === 'light') return siteTheme;
+        return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
     }
 
     function mermaidConfig(theme) {
@@ -308,9 +296,7 @@
         if (icon) icon.className = `fa ${isDark ? 'fa-sun-o' : 'fa-moon-o'}`;
     }
 
-    function setTheme(theme, persist = true) {
-        if (persist) storeTheme(theme);
-
+    function setTheme(theme) {
         document.querySelectorAll(BLOCK_SELECTOR).forEach((block) => {
             updateThemeUi(block, theme);
             if (block.dataset.mermaidRendered === 'true' || block.dataset.mermaidState === 'error') {
@@ -437,6 +423,242 @@
         window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     }
 
+    function dialogWindowControlsEnabled() {
+        return !window.matchMedia(DIALOG_MOBILE_QUERY).matches;
+    }
+
+    function dialogMinimumSize() {
+        const availableWidth = Math.max(window.innerWidth - DIALOG_MARGIN * 2, 0);
+        const availableHeight = Math.max(window.innerHeight - DIALOG_MARGIN * 2, 0);
+        return {
+            width: Math.min(DIALOG_MIN_WIDTH, availableWidth),
+            height: Math.min(DIALOG_MIN_HEIGHT, availableHeight)
+        };
+    }
+
+    function readDialogGeometry(dialog) {
+        const rect = dialog.getBoundingClientRect();
+        return {
+            left: rect.left,
+            top: rect.top,
+            width: rect.width,
+            height: rect.height,
+            right: rect.right,
+            bottom: rect.bottom
+        };
+    }
+
+    function clampDialogGeometry(geometry) {
+        const minimum = dialogMinimumSize();
+        const maximumWidth = Math.max(window.innerWidth - DIALOG_MARGIN * 2, 0);
+        const maximumHeight = Math.max(window.innerHeight - DIALOG_MARGIN * 2, 0);
+        const width = Math.min(Math.max(geometry.width, minimum.width), maximumWidth);
+        const height = Math.min(Math.max(geometry.height, minimum.height), maximumHeight);
+        const maxLeft = Math.max(DIALOG_MARGIN, window.innerWidth - DIALOG_MARGIN - width);
+        const maxTop = Math.max(DIALOG_MARGIN, window.innerHeight - DIALOG_MARGIN - height);
+
+        return {
+            left: Math.min(Math.max(geometry.left, DIALOG_MARGIN), maxLeft),
+            top: Math.min(Math.max(geometry.top, DIALOG_MARGIN), maxTop),
+            width,
+            height
+        };
+    }
+
+    function applyDialogGeometry(dialog, geometry) {
+        const next = clampDialogGeometry(geometry);
+        dialog.style.inset = 'auto';
+        dialog.style.margin = '0';
+        dialog.style.left = `${Math.round(next.left)}px`;
+        dialog.style.top = `${Math.round(next.top)}px`;
+        dialog.style.width = `${Math.round(next.width)}px`;
+        dialog.style.height = `${Math.round(next.height)}px`;
+        return next;
+    }
+
+    function resizeDialogGeometry(origin, deltaX, deltaY, edges) {
+        const minimum = dialogMinimumSize();
+        const maxRight = window.innerWidth - DIALOG_MARGIN;
+        const maxBottom = window.innerHeight - DIALOG_MARGIN;
+        let left = origin.left;
+        let top = origin.top;
+        let right = origin.right;
+        let bottom = origin.bottom;
+
+        if (edges.includes('e')) {
+            right = Math.min(Math.max(origin.right + deltaX, origin.left + minimum.width), maxRight);
+        }
+        if (edges.includes('w')) {
+            left = Math.max(Math.min(origin.left + deltaX, origin.right - minimum.width), DIALOG_MARGIN);
+        }
+        if (edges.includes('s')) {
+            bottom = Math.min(Math.max(origin.bottom + deltaY, origin.top + minimum.height), maxBottom);
+        }
+        if (edges.includes('n')) {
+            top = Math.max(Math.min(origin.top + deltaY, origin.bottom - minimum.height), DIALOG_MARGIN);
+        }
+
+        return {
+            left,
+            top,
+            width: right - left,
+            height: bottom - top
+        };
+    }
+
+    function refreshDialogViewport(viewport, state, zoomOutput) {
+        window.requestAnimationFrame(() => {
+            if (!viewport.isConnected) return;
+            if (state.userAdjusted) {
+                applyTransform(viewport, state, zoomOutput);
+            } else {
+                fitDiagram(viewport, state, zoomOutput);
+            }
+        });
+    }
+
+    function updateDialogMaximizeButton(button, maximized) {
+        if (!button) return;
+        const label = maximized ? '还原窗口' : '最大化窗口';
+        button.setAttribute('aria-pressed', String(maximized));
+        button.setAttribute('aria-label', label);
+        button.title = label;
+        const icon = button.querySelector('i');
+        if (icon) icon.className = `fa ${maximized ? 'fa-compress' : 'fa-expand'}`;
+    }
+
+    function bindDialogWindowControls(dialog, viewport, modalState, zoomOutput) {
+        const header = dialog.querySelector('.mermaid-dialog-header');
+        const maximizeButton = dialog.querySelector('[data-dialog-action="maximize"]');
+        const resizeHandles = [...dialog.querySelectorAll('[data-dialog-resize]')];
+        const windowState = {
+            maximized: false,
+            geometry: null,
+            restoreGeometry: null,
+            interaction: null
+        };
+
+        const endInteraction = (event) => {
+            const interaction = windowState.interaction;
+            if (!interaction || (event && event.pointerId !== interaction.pointerId)) return;
+            interaction.target.releasePointerCapture?.(interaction.pointerId);
+            windowState.interaction = null;
+            dialog.classList.remove('is-window-dragging', 'is-window-resizing');
+            document.body.classList.remove('mermaid-window-interaction');
+        };
+
+        const onPointerMove = (event) => {
+            const interaction = windowState.interaction;
+            if (!interaction || event.pointerId !== interaction.pointerId) return;
+
+            const deltaX = event.clientX - interaction.startX;
+            const deltaY = event.clientY - interaction.startY;
+            let next;
+
+            if (interaction.type === 'drag') {
+                next = {
+                    left: interaction.origin.left + deltaX,
+                    top: interaction.origin.top + deltaY,
+                    width: interaction.origin.width,
+                    height: interaction.origin.height
+                };
+            } else {
+                next = resizeDialogGeometry(interaction.origin, deltaX, deltaY, interaction.edges);
+            }
+
+            windowState.geometry = applyDialogGeometry(dialog, next);
+            event.preventDefault();
+        };
+
+        const beginInteraction = (event, type, edges = '') => {
+            if (!dialogWindowControlsEnabled() || windowState.maximized) return;
+            if (event.pointerType === 'mouse' && event.button !== 0) return;
+
+            const origin = readDialogGeometry(dialog);
+            windowState.geometry = {
+                left: origin.left,
+                top: origin.top,
+                width: origin.width,
+                height: origin.height
+            };
+            windowState.interaction = {
+                type,
+                edges,
+                pointerId: event.pointerId,
+                startX: event.clientX,
+                startY: event.clientY,
+                origin,
+                target: event.currentTarget
+            };
+            event.currentTarget.setPointerCapture?.(event.pointerId);
+            dialog.classList.add(type === 'drag' ? 'is-window-dragging' : 'is-window-resizing');
+            document.body.classList.add('mermaid-window-interaction');
+            event.preventDefault();
+        };
+
+        const setMaximized = (maximized) => {
+            if (!dialogWindowControlsEnabled() || maximized === windowState.maximized) return;
+
+            if (maximized) {
+                const geometry = windowState.geometry || readDialogGeometry(dialog);
+                windowState.restoreGeometry = {
+                    left: geometry.left,
+                    top: geometry.top,
+                    width: geometry.width,
+                    height: geometry.height
+                };
+                dialog.classList.add('is-window-maximized');
+            } else {
+                dialog.classList.remove('is-window-maximized');
+                if (windowState.restoreGeometry) {
+                    windowState.geometry = applyDialogGeometry(dialog, windowState.restoreGeometry);
+                }
+            }
+
+            windowState.maximized = maximized;
+            updateDialogMaximizeButton(maximizeButton, maximized);
+            refreshDialogViewport(viewport, modalState, zoomOutput);
+        };
+
+        header?.addEventListener('pointerdown', (event) => {
+            if (event.target.closest('button, a, input, select, textarea')) return;
+            beginInteraction(event, 'drag');
+        });
+
+        header?.addEventListener('dblclick', (event) => {
+            if (event.target.closest('button, a, input, select, textarea')) return;
+            setMaximized(!windowState.maximized);
+        });
+
+        resizeHandles.forEach((handle) => {
+            handle.addEventListener('pointerdown', (event) => {
+                beginInteraction(event, 'resize', handle.dataset.dialogResize || '');
+            });
+        });
+
+        dialog.addEventListener('pointermove', onPointerMove);
+        dialog.addEventListener('pointerup', endInteraction);
+        dialog.addEventListener('pointercancel', endInteraction);
+
+        const onWindowResize = () => {
+            if (dialogWindowControlsEnabled() && !windowState.maximized && windowState.geometry) {
+                windowState.geometry = applyDialogGeometry(dialog, windowState.geometry);
+            }
+            refreshDialogViewport(viewport, modalState, zoomOutput);
+        };
+
+        window.addEventListener('resize', onWindowResize);
+        updateDialogMaximizeButton(maximizeButton, false);
+
+        return {
+            toggleMaximized: () => setMaximized(!windowState.maximized),
+            destroy: () => {
+                endInteraction();
+                window.removeEventListener('resize', onWindowResize);
+            }
+        };
+    }
+
     function openFullscreen(block, opener) {
         const sourceInner = block.querySelector('[data-mermaid-inner]');
         const sourceSvg = sourceInner?.querySelector('svg');
@@ -463,6 +685,27 @@
                 </footer>
             </div>`;
 
+        const header = dialog.querySelector('.mermaid-dialog-header');
+        const closeButton = dialog.querySelector('[data-dialog-action="close"]');
+        const headerActions = document.createElement('div');
+        headerActions.className = 'mermaid-dialog-header-actions';
+
+        const maximizeButton = document.createElement('button');
+        maximizeButton.className = 'mermaid-icon-button mermaid-dialog-maximize';
+        maximizeButton.type = 'button';
+        maximizeButton.dataset.dialogAction = 'maximize';
+        maximizeButton.setAttribute('aria-pressed', 'false');
+        maximizeButton.setAttribute('aria-label', '最大化窗口');
+        maximizeButton.title = '最大化窗口';
+        maximizeButton.innerHTML = '<i class="fa fa-expand" aria-hidden="true"></i>';
+
+        headerActions.append(maximizeButton);
+        if (closeButton) headerActions.append(closeButton);
+        header?.append(headerActions);
+        dialog.insertAdjacentHTML('beforeend', DIALOG_RESIZE_EDGES.map((edge) => (
+            `<span class="mermaid-dialog-resize-handle mermaid-dialog-resize-handle--${edge}" data-dialog-resize="${edge}" aria-hidden="true"></span>`
+        )).join(''));
+
         const viewport = dialog.querySelector('[data-dialog-viewport]');
         const inner = sourceInner.cloneNode(true);
         inner.style.transform = '';
@@ -481,6 +724,15 @@
         };
         const zoomOutput = dialog.querySelector('[data-dialog-zoom]');
         bindViewport(viewport, modalState, zoomOutput);
+        const windowControls = bindDialogWindowControls(dialog, viewport, modalState, zoomOutput);
+        let dialogResizeObserver = null;
+
+        if ('ResizeObserver' in window) {
+            dialogResizeObserver = new ResizeObserver(() => {
+                refreshDialogViewport(viewport, modalState, zoomOutput);
+            });
+            dialogResizeObserver.observe(viewport);
+        }
 
         const close = () => {
             if (dialog.open) dialog.close();
@@ -493,10 +745,13 @@
             if (action === 'zoom-out') changeZoom(viewport, modalState, zoomOutput, -ZOOM_STEP);
             if (action === 'fit') fitDiagram(viewport, modalState, zoomOutput);
             if (action === 'download') downloadSvg(viewport.querySelector('svg'));
+            if (action === 'maximize') windowControls.toggleMaximized();
             if (event.target === dialog) close();
         });
 
         dialog.addEventListener('close', () => {
+            dialogResizeObserver?.disconnect();
+            windowControls.destroy();
             document.body.classList.remove('mermaid-modal-open');
             dialog.remove();
             window.requestAnimationFrame(() => {
@@ -539,7 +794,12 @@
             }
 
             if (action === 'theme') {
-                setTheme(currentTheme(block) === 'dark' ? 'light' : 'dark');
+                const theme = currentTheme(block) === 'dark' ? 'light' : 'dark';
+                if (window.WagtailBlogTheme?.setPreference) {
+                    window.WagtailBlogTheme.setPreference(theme);
+                } else {
+                    setTheme(theme);
+                }
                 return;
             }
 
@@ -607,10 +867,9 @@
             blocks.forEach((block) => renderBlock(block));
         }
 
-        const colorScheme = window.matchMedia?.('(prefers-color-scheme: dark)');
-        colorScheme?.addEventListener?.('change', (event) => {
-            if (readStoredTheme()) return;
-            setTheme(event.matches ? 'dark' : 'light', false);
+        window.addEventListener('site-theme-change', (event) => {
+            const theme = event.detail?.theme;
+            if (theme === 'dark' || theme === 'light') setTheme(theme);
         });
     }
 

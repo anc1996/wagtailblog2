@@ -26,7 +26,7 @@
                         <form method="get" action="{% url 'blog:author_list' %}">
                             <div class="form-group">
                                 <input type="search" name="q" value="{{ search_query|default:'' }}" placeholder="{% translate 'Search Authors...' %}">
-                                <button type="submit"><span class="icon fa fa-search"></span></button>
+                                <button type="submit" aria-label="{% translate 'Search Authors' %}"><span class="icon fa fa-search" aria-hidden="true"></span></button>
                             </div>
                         </form>
                     </div>

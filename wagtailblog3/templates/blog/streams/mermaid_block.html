@@ -1,43 +1,75 @@
-{% load static %}
-
-<div class="mermaid-diagram-wrapper">
-    {# --- 标题栏和折叠控制 --- #}
-    <div class="mermaid-header">
-        <div style="display: flex; align-items: center;">
-            <span class="toggle-icon">▲</span>
-            <span class="mermaid-title">📊 Mermaid 图表</span>
+<section class="mermaid-diagram-wrapper" data-mermaid-block data-mermaid-state="idle" aria-label="Mermaid 图表">
+    <header class="mermaid-header">
+        <div class="mermaid-heading">
+            <i class="fa fa-sitemap" aria-hidden="true"></i>
+            <span>Mermaid 图表</span>
         </div>
-        <div class="mermaid-toggle-hint">点击折叠/展开</div>
-    </div>
+        <button class="mermaid-icon-button mermaid-collapse-button"
+                type="button"
+                data-mermaid-action="collapse"
+                aria-expanded="true"
+                title="折叠图表"
+                aria-label="折叠图表">
+            <i class="fa fa-chevron-up" aria-hidden="true"></i>
+        </button>
+    </header>
 
-    {# --- 核心内容区域 --- #}
-    <div class="mermaid-content">
-        {# 调试面板 #}
-        <details>
-            <summary>🐛 查看原始代码</summary>
-            <pre>{{ value.code }}</pre>
-            <p>💡 如果图表未显示，请检查上面的代码语法是否正确</p>
+    <div class="mermaid-content" data-mermaid-content>
+        <div class="mermaid-toolbar" role="toolbar" aria-label="图表工具">
+            <div class="mermaid-toolbar-group" aria-label="缩放控制">
+                <button class="mermaid-icon-button" type="button" data-mermaid-action="zoom-out" title="缩小" aria-label="缩小">
+                    <i class="fa fa-search-minus" aria-hidden="true"></i>
+                </button>
+                <button class="mermaid-icon-button" type="button" data-mermaid-action="zoom-in" title="放大" aria-label="放大">
+                    <i class="fa fa-search-plus" aria-hidden="true"></i>
+                </button>
+                <button class="mermaid-icon-button" type="button" data-mermaid-action="fit" title="适应窗口" aria-label="适应窗口">
+                    <i class="fa fa-crosshairs" aria-hidden="true"></i>
+                </button>
+                <span class="mermaid-zoom-level" data-mermaid-zoom aria-live="polite">100%</span>
+            </div>
+
+            <div class="mermaid-toolbar-group mermaid-toolbar-group--actions">
+                <button class="mermaid-icon-button" type="button" data-mermaid-action="source" title="查看源码" aria-label="查看源码">
+                    <i class="fa fa-code" aria-hidden="true"></i>
+                </button>
+                <button class="mermaid-icon-button" type="button" data-mermaid-action="download" title="下载 SVG" aria-label="下载 SVG">
+                    <i class="fa fa-download" aria-hidden="true"></i>
+                </button>
+                <button class="mermaid-icon-button" type="button" data-mermaid-action="theme" aria-pressed="false" title="切换到暗色主题" aria-label="切换到暗色主题">
+                    <i class="fa fa-moon-o" aria-hidden="true"></i>
+                </button>
+                <button class="mermaid-icon-button" type="button" data-mermaid-action="fullscreen" title="全屏查看" aria-label="全屏查看">
+                    <i class="fa fa-arrows-alt" aria-hidden="true"></i>
+                </button>
+            </div>
+        </div>
+
+        <details class="mermaid-source-panel" data-mermaid-source-panel>
+            <summary>Mermaid 源码</summary>
+            <div class="mermaid-source-content">
+                <pre><code>{{ value.code }}</code></pre>
+                <button class="mermaid-copy-button" type="button" data-mermaid-action="copy-source">
+                    <i class="fa fa-copy" aria-hidden="true"></i>
+                    <span>复制源码</span>
+                </button>
+            </div>
         </details>
 
-        {# 工具栏：缩放、主题切换、全屏 #}
-        <div class="zoom-controls">
-            <span class="zoom-title">缩放控制：</span>
-            <button data-zoom="in">🔍 放大</button>
-            <button data-zoom="out">🔍 缩小</button>
-            <button data-zoom="reset">↺ 重置</button>
-            <button type="button" class="theme-toggle-btn" style="background: #6f42c1; color: white;">🌓 切换主题</button>
-            <button data-zoom="fullscreen" class="mermaid-fullscreen-btn">
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display: inline-block; vertical-align: middle; margin-right: 5px;"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg>
-                全屏查看
-            </button>
-            <span class="zoom-level">100%</span>
-        </div>
-
-        {# 图表渲染容器 #}
-        <div class="mermaid-chart-container">
-            <textarea class="mermaid-raw-source" style="display: none;">{{ value.code|safe }}</textarea>
-
-            <div class="mermaid-inner"></div>
+        <div class="mermaid-chart-container"
+             data-mermaid-viewport
+             tabindex="0"
+             aria-label="Mermaid 图表画布">
+            <textarea class="mermaid-raw-source" hidden>{{ value.code }}</textarea>
+            <div class="mermaid-status" data-mermaid-status role="status" aria-live="polite">
+                <i class="fa fa-circle-o-notch fa-spin" aria-hidden="true"></i>
+                <span>正在渲染图表</span>
+            </div>
+            <div class="mermaid-error" data-mermaid-error role="alert" hidden>
+                <i class="fa fa-exclamation-circle" aria-hidden="true"></i>
+                <span>图表暂时无法显示，请检查 Mermaid 语法。</span>
+            </div>
+            <div class="mermaid-inner" data-mermaid-inner></div>
         </div>
     </div>
-</div>
+</section>

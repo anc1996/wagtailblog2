@@ -50,6 +50,10 @@
 
     {% block extra_css %}{% endblock %}
 
+    {# Shared visual system. Keep this last so page-specific legacy styles stay compatible. #}
+    <link rel="stylesheet" href="{% static 'css/site-theme.css' %}?v=20260731-2">
+    {% block extra_css_after_site_theme %}{% endblock %}
+
 </head>
 
 <body class="{% block body_class %}{% endblock %}">

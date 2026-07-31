@@ -7,7 +7,8 @@
     <link rel="stylesheet" href="{% static 'blog/css/blog.css' %}?v=20260730-1">
     <link rel="stylesheet" href="{% static 'blog/css/blog-resize.css' %}">
     <link rel="stylesheet" href="{% static 'blog/css/adaptive-scroll.css' %}?v=20260730-2127">
-    {% if has_image or has_gallery %}<link rel="stylesheet" href="{% static 'blog/css/lightbox/lightbox.css' %}">{% endif %}
+    {% include "includes/content/article_reading_css.html" %}
+    {% if has_image or has_gallery %}{% include "includes/content/image_viewer_css.html" %}{% endif %}
 
     <link rel="stylesheet" href="{% static 'blog/css/github-markdown.min.css' %}">
     <link rel="stylesheet" href="{% static 'blog/css/markdown-theme.css' %}">
@@ -16,7 +17,6 @@
 
     {# 评论支持代码围栏，因此评论区存在时也按需启用公共代码高亮能力。 #}
     {% include "includes/content/code_highlighting_css.html" %}
-    {% if has_image %}<link rel="stylesheet" href="{% static 'blog/css/image_blocks.css' %}">{% endif %}
     {% if has_gallery %}<link rel="stylesheet" href="{% static 'blog/css/blog-gallery.css' %}?v=20260726-2">{% endif %}
     {% if has_video or has_audio %}
         <link rel="stylesheet" href="{% static 'vendor/plyr/plyr.css' %}?v=3.7.8">
@@ -45,11 +45,11 @@
                     <span>博客文章</span>
                     {% if page.get_parent.get_parent.title %}
                         <span class="blog-hero-eyebrow-separator" aria-hidden="true">·</span>
-                        <span>{{ page.get_parent.get_parent.title }}</span>
+                        <a class="blog-hero-eyebrow-link" href="{% pageurl page.get_parent.get_parent %}">{{ page.get_parent.get_parent.title }}</a>
                     {% endif %}
                     {% if page.get_parent.title %}
                         <span class="blog-hero-eyebrow-separator" aria-hidden="true">·</span>
-                        <span>{{ page.get_parent.title }}</span>
+                        <a class="blog-hero-eyebrow-link" href="{% pageurl page.get_parent %}">{{ page.get_parent.title }}</a>
                     {% endif %}
                 </div>
                 {% with title_length=page.title|length %}
@@ -148,13 +148,17 @@
           </div>
 
             <!-- 中间栏：文章 -->
-            <main class="blog-center-column">
+            <main class="blog-center-column" data-article-reading>
                 <div id="article-scroll-container" class="article-scroll-container">
                     <div class="article-body-content">
-                        <div class="content-blocks">
+                        <div class="content-blocks" data-reading-content data-content-image-gallery>
                             {% for block in page.body %}
                                 <div class="content-block-wrapper {% if block.block_type == 'rich_text' or block.block_type == 'markdown_block' %}markdown-body{% endif %}" data-block-type="{{ block.block_type }}">
-                                    {% include_block block %}
+                                    {% if block.block_type == 'image_block' %}
+                                        {% include "blog/streams/image_block.html" with value=block.value only %}
+                                    {% else %}
+                                        {% include_block block %}
+                                    {% endif %}
                                 </div>
                             {% endfor %}
                         </div>
@@ -254,6 +258,7 @@
                 <section class="blog-gallery"
                          data-gallery-batch-size="8"
                          data-gallery-total="{{ gallery_images|length }}"
+                         data-content-image-gallery
                          aria-labelledby="blog-gallery-title">
                     <div class="blog-gallery-header">
                         <div>
@@ -265,11 +270,16 @@
                     <div class="gallery-grid">
                         {% for gallery_image in gallery_images %}
                             {% image gallery_image.image fill-640x400 format-webp as gallery_thumb %}
+                            {% image gallery_image.image width-640 format-webp as gallery_medium %}
+                            {% image gallery_image.image width-1280 format-webp as gallery_large %}
                             <figure class="gallery-item" data-gallery-index="{{ forloop.counter0 }}">
                                 <a class="gallery-link"
                                    href="{% image_url gallery_image.image 'original' %}"
-                                   data-lightbox="blog-page-gallery"
-                                   data-title="{% if gallery_image.caption %}{{ gallery_image.caption }}{% else %}{{ gallery_image.image.title }}{% endif %}"
+                                   data-pswp-item
+                                   data-pswp-width="{{ gallery_image.image.width }}"
+                                   data-pswp-height="{{ gallery_image.image.height }}"
+                                   data-pswp-srcset="{{ gallery_medium.url }} {{ gallery_medium.width }}w{% if gallery_large.width != gallery_medium.width %}, {{ gallery_large.url }} {{ gallery_large.width }}w{% endif %}"
+                                   data-pswp-caption="{% if gallery_image.caption %}{{ gallery_image.caption }}{% else %}{{ gallery_image.image.title }}{% endif %}"
                                    aria-label="查看大图：{% if gallery_image.caption %}{{ gallery_image.caption }}{% else %}{{ gallery_image.image.title }}{% endif %}">
                                     <img src="{{ gallery_thumb.url }}"
                                          alt="{% if gallery_image.caption %}{{ gallery_image.caption }}{% else %}{{ gallery_image.image.title }}{% endif %}"
@@ -334,9 +344,9 @@
     <!-- 🆕 添加拖动布局JS -->
     <script src="{% static 'blog/js/resize-manager.js' %}"></script>
 
-    {% if has_image or has_gallery %}<script src="{% static 'blog/js/lightbox/lightbox.js' %}" defer></script>{% endif %}
+    {% include "includes/content/article_reading_js.html" %}
+    {% if has_image or has_gallery %}{% include "includes/content/image_viewer_js.html" %}{% endif %}
     {% if has_gallery %}<script src="{% static 'blog/js/blog-gallery.js' %}?v=20260726-1" defer></script>{% endif %}
-    {% if has_image %}<script src="{% static 'blog/js/image_blocks.js' %}" defer></script>{% endif %}
     {% if has_video or has_audio %}
         <script src="{% static 'vendor/plyr/plyr.min.js' %}?v=3.7.8" defer></script>
     {% endif %}

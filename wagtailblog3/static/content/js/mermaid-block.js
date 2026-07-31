@@ -1,244 +1,622 @@
-/*
- * wagtailblog3/static/content/js/mermaid-block.js
- * 核心逻辑：完美支持缩放 (Zoom)、硬件加速平移拖拽 (Pan)、全屏 (Fullscreen) 与动态渲染
- */
-$(function() {
-    // ==========================================
-    // 1. Mermaid 异步加载与渲染引擎
-    // ==========================================
+(() => {
+    'use strict';
+
+    const BLOCK_SELECTOR = '[data-mermaid-block]';
+    const STORAGE_KEY = 'wagtailblog-mermaid-theme';
+    const MIN_SCALE = 0.4;
+    const MAX_SCALE = 3;
+    const ZOOM_STEP = 0.2;
+
+    const states = new WeakMap();
     let mermaidPromise = null;
+    let renderQueue = Promise.resolve();
+    let renderSequence = 0;
+
+    const palettes = {
+        light: {
+            background: '#fffdfb',
+            primaryColor: '#f4e8dd',
+            primaryTextColor: '#292724',
+            primaryBorderColor: '#a76035',
+            secondaryColor: '#e7f0ed',
+            secondaryTextColor: '#292724',
+            secondaryBorderColor: '#4e756a',
+            tertiaryColor: '#f7f3ed',
+            tertiaryTextColor: '#292724',
+            tertiaryBorderColor: '#b7aaa0',
+            lineColor: '#765f50',
+            textColor: '#292724',
+            mainBkg: '#f4e8dd',
+            nodeBorder: '#a76035',
+            clusterBkg: '#f7f3ed',
+            clusterBorder: '#b7aaa0',
+            titleColor: '#292724',
+            edgeLabelBackground: '#fffdfb',
+            actorBkg: '#f4e8dd',
+            actorBorder: '#a76035',
+            actorTextColor: '#292724',
+            actorLineColor: '#8a7668',
+            signalColor: '#5f4d42',
+            signalTextColor: '#292724',
+            labelBoxBkgColor: '#fffdfb',
+            labelBoxBorderColor: '#b7aaa0',
+            labelTextColor: '#292724',
+            loopTextColor: '#292724',
+            noteBkgColor: '#fff4cd',
+            noteBorderColor: '#bb8b2f',
+            noteTextColor: '#392f20',
+            activationBkgColor: '#e7f0ed',
+            activationBorderColor: '#4e756a',
+            fontFamily: 'Lato, "Noto Sans SC", "Microsoft YaHei", sans-serif'
+        },
+        dark: {
+            background: '#1f1d1b',
+            primaryColor: '#38312c',
+            primaryTextColor: '#f4eee8',
+            primaryBorderColor: '#c9895c',
+            secondaryColor: '#263834',
+            secondaryTextColor: '#f2eee9',
+            secondaryBorderColor: '#78a89a',
+            tertiaryColor: '#2b2926',
+            tertiaryTextColor: '#f4eee8',
+            tertiaryBorderColor: '#81746a',
+            lineColor: '#d4ad8d',
+            textColor: '#f4eee8',
+            mainBkg: '#38312c',
+            nodeBorder: '#c9895c',
+            clusterBkg: '#292724',
+            clusterBorder: '#81746a',
+            titleColor: '#fffaf5',
+            edgeLabelBackground: '#262320',
+            actorBkg: '#38312c',
+            actorBorder: '#c9895c',
+            actorTextColor: '#f4eee8',
+            actorLineColor: '#a99a8e',
+            signalColor: '#e4c6ad',
+            signalTextColor: '#f4eee8',
+            labelBoxBkgColor: '#262320',
+            labelBoxBorderColor: '#81746a',
+            labelTextColor: '#f4eee8',
+            loopTextColor: '#f4eee8',
+            noteBkgColor: '#4b4127',
+            noteBorderColor: '#d4aa52',
+            noteTextColor: '#fff3c4',
+            activationBkgColor: '#263834',
+            activationBorderColor: '#78a89a',
+            fontFamily: 'Lato, "Noto Sans SC", "Microsoft YaHei", sans-serif'
+        }
+    };
+
+    function readStoredTheme() {
+        try {
+            const value = window.localStorage.getItem(STORAGE_KEY);
+            return value === 'dark' || value === 'light' ? value : null;
+        } catch (error) {
+            return null;
+        }
+    }
+
+    function storeTheme(theme) {
+        try {
+            window.localStorage.setItem(STORAGE_KEY, theme);
+        } catch (error) {
+            // Theme persistence is optional when storage is unavailable.
+        }
+    }
+
+    function preferredTheme() {
+        return readStoredTheme()
+            || (window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    }
+
+    function mermaidConfig(theme) {
+        return {
+            startOnLoad: false,
+            securityLevel: 'strict',
+            suppressErrorRendering: true,
+            theme: 'base',
+            themeVariables: palettes[theme],
+            maxTextSize: 50000,
+            deterministicIds: true,
+            deterministicIDSeed: `wagtailblog-${theme}`,
+            flowchart: { htmlLabels: false, useMaxWidth: false },
+            sequence: { useMaxWidth: false },
+            gantt: { useMaxWidth: false }
+        };
+    }
+
     function getMermaid() {
         if (!mermaidPromise) {
-            // 使用动态 import 引入模块，彻底解决 MIME Type 和 inline script 限制
-            mermaidPromise = import("/static/vendor/mermaid/mermaid.esm.min.mjs").then(module => {
-                const m = module.default;
-                m.initialize({ startOnLoad: false, securityLevel: 'loose' });
-                return m;
-            });
+            mermaidPromise = import('/static/vendor/mermaid/mermaid.esm.min.mjs')
+                .then((module) => module.default);
         }
         return mermaidPromise;
     }
 
-    async function renderChart($wrapper) {
-        const m = await getMermaid();
-        const source = $wrapper.find('.mermaid-raw-source').val().trim();
-        if (!source) return;
-
-        const isDark = $wrapper.hasClass('dark-theme');
-        const themeName = isDark ? 'dark' : 'default';
-        const graphId = 'mm-' + Math.random().toString(36).substr(2, 9);
-
-        try {
-            const { svg } = await m.render(graphId, source);
-            const $inner = $wrapper.find('.mermaid-inner');
-            $inner.html(svg);
-            // 关键修复：强制移除生成 SVG 的 max-width，保证自由缩放
-            $inner.find('svg').css('max-width', 'none');
-            applyTransform($wrapper);
-        } catch (error) {
-            console.error("Mermaid 渲染失败:", error);
-        }
+    function enqueueRender(task) {
+        const result = renderQueue.then(task, task);
+        renderQueue = result.catch(() => undefined);
+        return result;
     }
 
-    // 初始化所有未被处理的图表
-    $('.mermaid-diagram-wrapper:not(.mm-initialized)').each(function() {
-        const $wrapper = $(this).addClass('mm-initialized');
-        if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-            $wrapper.addClass('dark-theme');
-        }
-        renderChart($wrapper);
-    });
-
-    // ==========================================
-    // 2. 状态与动画管理 (Zoom & Pan)
-    // ==========================================
-    function getState($container) {
-        let state = $container.data('mm-state');
+    function getState(block) {
+        let state = states.get(block);
         if (!state) {
-            state = { scale: 1, tx: 0, ty: 0, isDragging: false };
-            $container.data('mm-state', state);
+            state = {
+                scale: 1,
+                fitScale: 1,
+                tx: 0,
+                ty: 0,
+                pointers: new Map(),
+                renderVersion: 0,
+                userAdjusted: false,
+                dragging: false,
+                didDrag: false
+            };
+            states.set(block, state);
         }
         return state;
     }
 
-    function applyTransform($container) {
-        // 判断是在网页内嵌还是在全屏弹窗中
-        const isModal = $container.attr('id') === 'mermaid-lightbox-body';
-        const $wrapper = isModal ? $('#mermaid-lightbox') : $container.closest('.mermaid-diagram-wrapper');
-        const $inner = $container.find('.mermaid-inner');
-        const state = getState($container);
+    function sourceFor(block) {
+        return block.querySelector('.mermaid-raw-source')?.value.trim() || '';
+    }
 
-        const transition = state.isDragging ? 'none' : 'transform 0.2s ease-out';
-        $inner.css({
-            'transform': `translate(${state.tx}px, ${state.ty}px) scale(${state.scale})`,
-            'transform-origin': 'center center',
-            'transition': transition
-        });
+    function currentTheme(block) {
+        return block.classList.contains('dark-theme') ? 'dark' : 'light';
+    }
 
-        $wrapper.find('.zoom-level').text(Math.round(state.scale * 100) + '%');
+    function setRenderState(block, status) {
+        block.dataset.mermaidState = status;
+        const loading = block.querySelector('[data-mermaid-status]');
+        const error = block.querySelector('[data-mermaid-error]');
 
-        // ==== 🆕 新增：联动滑块，并动态绘制进度条颜色 ====
-        const $slider = $wrapper.find('.mm-zoom-slider');
-        if ($slider.length) {
-            $slider.val(state.scale);
-            const min = parseFloat($slider.attr('min'));
-            const max = parseFloat($slider.attr('max'));
-            const percentage = ((state.scale - min) / (max - min)) * 100;
-            // 核心魔法：利用线性渐变，让滑块左侧显示主色，右侧显示边框底色
-            $slider.css('background', `linear-gradient(to right, var(--mm-btn-bg) ${percentage}%, var(--mm-border) ${percentage}%)`);
+        if (loading) loading.hidden = status !== 'loading';
+        if (error) error.hidden = status !== 'error';
+    }
+
+    function diagramDimensions(viewport) {
+        const svg = viewport.querySelector('svg');
+        if (!svg) return null;
+
+        const viewBox = svg.viewBox?.baseVal;
+        const width = viewBox?.width || Number.parseFloat(svg.getAttribute('width')) || 800;
+        const height = viewBox?.height || Number.parseFloat(svg.getAttribute('height')) || 480;
+        return { svg, width, height };
+    }
+
+    function clampScale(value) {
+        return Math.min(Math.max(value, MIN_SCALE), MAX_SCALE);
+    }
+
+    function clampPan(viewport, state) {
+        const dimensions = diagramDimensions(viewport);
+        if (!dimensions) return;
+
+        const overflowX = Math.max((dimensions.width * state.scale - viewport.clientWidth) / 2, 0);
+        const overflowY = Math.max((dimensions.height * state.scale - viewport.clientHeight) / 2, 0);
+        const allowance = 72;
+
+        state.tx = Math.min(Math.max(state.tx, -overflowX - allowance), overflowX + allowance);
+        state.ty = Math.min(Math.max(state.ty, -overflowY - allowance), overflowY + allowance);
+    }
+
+    function applyTransform(viewport, state, zoomOutput) {
+        const inner = viewport.querySelector('[data-mermaid-inner], .mermaid-inner');
+        if (!inner) return;
+
+        clampPan(viewport, state);
+        inner.style.transform = `translate3d(${state.tx}px, ${state.ty}px, 0) scale(${state.scale})`;
+        inner.style.transition = state.dragging ? 'none' : '';
+        if (zoomOutput) zoomOutput.textContent = `${Math.round(state.scale * 100)}%`;
+    }
+
+    function fitDiagram(viewport, state, zoomOutput) {
+        const dimensions = diagramDimensions(viewport);
+        if (!dimensions || !viewport.clientWidth || !viewport.clientHeight) return;
+
+        const horizontal = Math.max(viewport.clientWidth - 48, 1) / dimensions.width;
+        const vertical = Math.max(viewport.clientHeight - 48, 1) / dimensions.height;
+        state.fitScale = clampScale(Math.min(horizontal, vertical, 1));
+        state.scale = state.fitScale;
+        state.tx = 0;
+        state.ty = 0;
+        state.userAdjusted = false;
+        applyTransform(viewport, state, zoomOutput);
+    }
+
+    function prepareSvg(block, svg, width, height) {
+        svg.style.maxWidth = 'none';
+        svg.style.width = `${width}px`;
+        svg.style.height = `${height}px`;
+        svg.setAttribute('role', 'img');
+        svg.setAttribute('aria-label', 'Mermaid 图表');
+        svg.setAttribute('focusable', 'false');
+
+        if (!svg.querySelector('title')) {
+            const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+            title.textContent = 'Mermaid 图表';
+            svg.prepend(title);
+        }
+
+        block.dataset.mermaidRendered = 'true';
+    }
+
+    async function renderBlock(block, options = {}) {
+        const source = sourceFor(block);
+        if (!source) {
+            setRenderState(block, 'error');
+            return;
+        }
+
+        const state = getState(block);
+        const version = ++state.renderVersion;
+        setRenderState(block, 'loading');
+
+        try {
+            await enqueueRender(async () => {
+                const mermaid = await getMermaid();
+                const theme = currentTheme(block);
+                mermaid.initialize(mermaidConfig(theme));
+
+                const graphId = `wagtailblog-mermaid-${++renderSequence}`;
+                const result = await mermaid.render(graphId, source);
+                if (version !== state.renderVersion) return;
+
+                const inner = block.querySelector('[data-mermaid-inner]');
+                if (!inner) return;
+
+                inner.innerHTML = result.svg;
+                const viewport = block.querySelector('[data-mermaid-viewport]');
+                const dimensions = viewport ? diagramDimensions(viewport) : null;
+                if (!viewport || !dimensions) throw new Error('Mermaid returned an empty SVG');
+
+                prepareSvg(block, dimensions.svg, dimensions.width, dimensions.height);
+                result.bindFunctions?.(inner);
+                setRenderState(block, 'ready');
+
+                window.requestAnimationFrame(() => {
+                    const zoomOutput = block.querySelector('[data-mermaid-zoom]');
+                    if (options.preserveTransform && state.userAdjusted) {
+                        applyTransform(viewport, state, zoomOutput);
+                    } else {
+                        fitDiagram(viewport, state, zoomOutput);
+                    }
+                });
+            });
+        } catch (error) {
+            if (version === state.renderVersion) {
+                setRenderState(block, 'error');
+                block.querySelector('[data-mermaid-inner]')?.replaceChildren();
+            }
+            console.error('Mermaid render failed:', error);
         }
     }
 
-    // ==========================================
-    // 3. 按钮交互事件 (使用 jQuery 事件委托绑定到 body)
-    // ==========================================
+    function updateThemeUi(block, theme) {
+        const isDark = theme === 'dark';
+        block.classList.toggle('dark-theme', isDark);
 
-    // 折叠/展开
-    $('body').on('click', '.mermaid-header', function() {
-        const $wrapper = $(this).closest('.mermaid-diagram-wrapper');
-        const $content = $wrapper.find('.mermaid-content');
-        const $icon = $(this).find('.toggle-icon');
+        const button = block.querySelector('[data-mermaid-action="theme"]');
+        if (!button) return;
 
-        $content.slideToggle(300);
-        $icon.css('transform', $content.is(':visible') ? 'rotate(180deg)' : 'rotate(0deg)');
-    });
+        const label = isDark ? '切换到亮色主题' : '切换到暗色主题';
+        button.setAttribute('aria-pressed', String(isDark));
+        button.setAttribute('aria-label', label);
+        button.title = label;
+        const icon = button.querySelector('i');
+        if (icon) icon.className = `fa ${isDark ? 'fa-sun-o' : 'fa-moon-o'}`;
+    }
 
-    // 缩放操作 (放大、缩小、重置)
-    $('body').on('click', 'button[data-zoom]', function(e) {
-        e.stopPropagation();
-        const action = $(this).data('zoom');
-        if (action === 'fullscreen') return; // 全屏走独立逻辑
+    function setTheme(theme, persist = true) {
+        if (persist) storeTheme(theme);
 
-        const isModal = $(this).closest('#mermaid-lightbox').length > 0;
-        const $container = isModal ? $('#mermaid-lightbox-body') : $(this).closest('.mermaid-diagram-wrapper').find('.mermaid-chart-container');
-
-        if (!$container.length) return;
-        const state = getState($container);
-
-        if (action === 'in') state.scale = Math.min(state.scale + 0.2, 5.0);
-        else if (action === 'out') state.scale = Math.max(state.scale - 0.2, 0.2);
-        else if (action === 'reset') {
-            state.scale = 1; state.tx = 0; state.ty = 0;
-        }
-
-        applyTransform($container);
-    });
-
-    // ==========================================
-    // 🆕 3.5 监听滑块拖动事件
-    // ==========================================
-    $('body').on('input', '.mm-zoom-slider', function(e) {
-        const val = parseFloat($(this).val());
-        const isModal = $(this).closest('#mermaid-lightbox').length > 0;
-        const $container = isModal ? $('#mermaid-lightbox-body') : $(this).closest('.mermaid-diagram-wrapper').find('.mermaid-chart-container');
-
-        if (!$container.length) return;
-        const state = getState($container);
-        state.scale = val;
-        applyTransform($container); // 触发重绘与 UI 同步
-    });
-
-
-    // 主题切换
-    $('body').on('click', '.theme-toggle-btn', function(e) {
-        e.stopPropagation();
-        const $wrapper = $(this).closest('.mermaid-diagram-wrapper');
-        $wrapper.toggleClass('dark-theme');
-        renderChart($wrapper); // 切换完类名后重新渲染 SVG
-    });
-
-    // ==========================================
-    // 4. 鼠标硬件加速拖拽平移
-    // ==========================================
-    $('.mermaid-chart-container, #mermaid-lightbox-body').css('cursor', 'grab');
-
-    $('body').on('mousedown', '.mermaid-chart-container, #mermaid-lightbox-body', function(e) {
-        e.preventDefault();
-        const $container = $(this);
-        const state = getState($container);
-
-        state.isDragging = true;
-        state.startX = e.pageX - state.tx;
-        state.startY = e.pageY - state.ty;
-        $container.css('cursor', 'grabbing');
-        applyTransform($container);
-    });
-
-    $(window).on('mousemove', function(e) {
-        // 查找当前正在拖拽的容器
-        const $container = $('.mermaid-chart-container, #mermaid-lightbox-body').filter(function() {
-            return ($(this).data('mm-state') || {}).isDragging;
-        });
-
-        if ($container.length) {
-            const state = getState($container);
-            state.tx = e.pageX - state.startX;
-            state.ty = e.pageY - state.startY;
-            applyTransform($container);
-        }
-    });
-
-    $(window).on('mouseup', function() {
-        $('.mermaid-chart-container, #mermaid-lightbox-body').each(function() {
-            const state = getState($(this));
-            if (state.isDragging) {
-                state.isDragging = false;
-                $(this).css('cursor', 'grab');
-                applyTransform($(this));
+        document.querySelectorAll(BLOCK_SELECTOR).forEach((block) => {
+            updateThemeUi(block, theme);
+            if (block.dataset.mermaidRendered === 'true' || block.dataset.mermaidState === 'error') {
+                renderBlock(block, { preserveTransform: true });
             }
         });
-    });
+    }
 
-    // ==========================================
-    // 5. 全屏查看功能 (带继承缩放与进度条)
-    // ==========================================
-    $('body').on('click', '.mermaid-fullscreen-btn', function(e) {
-        e.stopPropagation();
-        const $wrapper = $(this).closest('.mermaid-diagram-wrapper');
-        const $diagramHtml = $wrapper.find('.mermaid-inner').html();
+    function changeZoom(viewport, state, zoomOutput, amount) {
+        state.scale = clampScale(state.scale + amount);
+        state.userAdjusted = true;
+        applyTransform(viewport, state, zoomOutput);
+    }
 
-        // 🆕 获取原网页图表的缩放比例，让全屏打开时平滑继承
-        const embeddedState = getState($wrapper.find('.mermaid-chart-container'));
-        const initScale = embeddedState.scale || 1;
+    function pointerDistance(points) {
+        if (points.length < 2) return 0;
+        return Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
+    }
 
-        // 构建全屏 HTML
-        const modalHtml = `
-            <div id="mermaid-lightbox" class="${$wrapper.hasClass('dark-theme') ? 'dark-theme' : ''}">
-                <div class="mermaid-lightbox-modal">
-                    <div class="mermaid-lightbox-header">
-                        <div class="mermaid-lightbox-window-controls">
-                            <button id="mermaid-lightbox-close" title="关闭" style="background:#ff5f57; border:none; width:14px; height:14px; border-radius:50%; margin-right:5px; cursor:pointer;"></button>
-                        </div>
-                        <div class="mermaid-lightbox-title" style="flex-grow:1; text-align:center; font-weight:bold;">图表预览</div>
-                    </div>
-                    <div id="mermaid-lightbox-body" class="mermaid-chart-container" style="flex-grow:1; overflow:hidden; display:flex; align-items:center; justify-content:center;">
-                        <div class="mermaid-inner">${$diagramHtml}</div>
-                    </div>
-                    <div class="mermaid-lightbox-controls zoom-controls" style="padding:10px; display:flex; gap:15px; justify-content:center; align-items:center; border-top:1px solid var(--mm-border);">
-                        <button data-zoom="out">🔍 缩小</button>
-                        <input type="range" class="mm-zoom-slider" min="0.2" max="5.0" step="0.1" value="${initScale}">
-                        <button data-zoom="in">🔍 放大</button>
-                        <button data-zoom="reset">↺ 重置</button>
-                        <span class="zoom-level">100%</span>
-                    </div>
-                </div>
-            </div>
-        `;
+    function bindViewport(viewport, state, zoomOutput) {
+        if (viewport.dataset.mermaidNavigationReady === 'true') return;
+        viewport.dataset.mermaidNavigationReady = 'true';
 
-        $('body').append(modalHtml);
+        viewport.addEventListener('pointerdown', (event) => {
+            if (event.pointerType === 'mouse' && event.button !== 0) return;
+            if (event.target.closest('a, button')) return;
 
-        // 🆕 初始化全屏容器的 state，并立即渲染一次让滑块铺满正确的颜色
-        const $modalBody = $('#mermaid-lightbox-body');
-        const modalState = getState($modalBody);
-        modalState.scale = initScale;
-        modalState.tx = 0; // 全屏后位置归中
-        modalState.ty = 0;
-        applyTransform($modalBody);
-    });
+            viewport.setPointerCapture?.(event.pointerId);
+            state.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+            state.dragging = true;
+            state.didDrag = false;
+            state.startX = event.clientX - state.tx;
+            state.startY = event.clientY - state.ty;
 
-    $('body').on('click', '#mermaid-lightbox-close, #mermaid-lightbox', function(e) {
-        if (e.target === this) {
-            $('#mermaid-lightbox').remove();
+            if (state.pointers.size === 2) {
+                state.pinchDistance = pointerDistance([...state.pointers.values()]);
+                state.pinchScale = state.scale;
+            }
+            viewport.classList.add('is-dragging');
+        });
+
+        viewport.addEventListener('pointermove', (event) => {
+            if (!state.pointers.has(event.pointerId)) return;
+            state.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+
+            if (state.pointers.size >= 2) {
+                const distance = pointerDistance([...state.pointers.values()]);
+                if (state.pinchDistance > 0) {
+                    state.scale = clampScale(state.pinchScale * (distance / state.pinchDistance));
+                }
+            } else {
+                state.tx = event.clientX - state.startX;
+                state.ty = event.clientY - state.startY;
+            }
+
+            state.didDrag = true;
+            state.userAdjusted = true;
+            applyTransform(viewport, state, zoomOutput);
+        });
+
+        const finishPointer = (event) => {
+            state.pointers.delete(event.pointerId);
+            if (state.pointers.size === 1) {
+                const point = [...state.pointers.values()][0];
+                state.startX = point.x - state.tx;
+                state.startY = point.y - state.ty;
+            } else if (state.pointers.size === 0) {
+                state.dragging = false;
+                viewport.classList.remove('is-dragging');
+                applyTransform(viewport, state, zoomOutput);
+            }
+        };
+
+        viewport.addEventListener('pointerup', finishPointer);
+        viewport.addEventListener('pointercancel', finishPointer);
+
+        viewport.addEventListener('click', (event) => {
+            if (!state.didDrag) return;
+            event.preventDefault();
+            event.stopPropagation();
+            state.didDrag = false;
+        }, true);
+
+        viewport.addEventListener('wheel', (event) => {
+            if (!event.ctrlKey && !event.metaKey) return;
+            event.preventDefault();
+            changeZoom(viewport, state, zoomOutput, event.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP);
+        }, { passive: false });
+    }
+
+    function copyText(value) {
+        if (navigator.clipboard && window.isSecureContext) {
+            return navigator.clipboard.writeText(value);
         }
-    });
-});
+
+        return new Promise((resolve, reject) => {
+            const textarea = document.createElement('textarea');
+            textarea.value = value;
+            textarea.setAttribute('readonly', '');
+            textarea.style.position = 'fixed';
+            textarea.style.opacity = '0';
+            document.body.appendChild(textarea);
+            textarea.select();
+            const copied = document.execCommand('copy');
+            textarea.remove();
+            copied ? resolve() : reject(new Error('Copy failed'));
+        });
+    }
+
+    function downloadSvg(svg) {
+        if (!svg) return;
+
+        const clone = svg.cloneNode(true);
+        clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+        const content = `<?xml version="1.0" encoding="UTF-8"?>\n${new XMLSerializer().serializeToString(clone)}`;
+        const blob = new Blob([content], { type: 'image/svg+xml;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'mermaid-diagram.svg';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
+    function openFullscreen(block, opener) {
+        const sourceInner = block.querySelector('[data-mermaid-inner]');
+        const sourceSvg = sourceInner?.querySelector('svg');
+        if (!sourceSvg) return;
+
+        const dialog = document.createElement('dialog');
+        dialog.className = `mermaid-dialog${currentTheme(block) === 'dark' ? ' dark-theme' : ''}`;
+        dialog.setAttribute('aria-label', 'Mermaid 图表全屏预览');
+        dialog.innerHTML = `
+            <div class="mermaid-dialog-shell">
+                <header class="mermaid-dialog-header">
+                    <span><i class="fa fa-sitemap" aria-hidden="true"></i> Mermaid 图表</span>
+                    <button class="mermaid-icon-button" type="button" data-dialog-action="close" title="关闭全屏" aria-label="关闭全屏">
+                        <i class="fa fa-times" aria-hidden="true"></i>
+                    </button>
+                </header>
+                <div class="mermaid-dialog-viewport" data-dialog-viewport tabindex="0"></div>
+                <footer class="mermaid-dialog-toolbar" role="toolbar" aria-label="全屏图表工具">
+                    <button class="mermaid-icon-button" type="button" data-dialog-action="zoom-out" title="缩小" aria-label="缩小"><i class="fa fa-search-minus" aria-hidden="true"></i></button>
+                    <button class="mermaid-icon-button" type="button" data-dialog-action="zoom-in" title="放大" aria-label="放大"><i class="fa fa-search-plus" aria-hidden="true"></i></button>
+                    <button class="mermaid-icon-button" type="button" data-dialog-action="fit" title="适应窗口" aria-label="适应窗口"><i class="fa fa-crosshairs" aria-hidden="true"></i></button>
+                    <span class="mermaid-zoom-level" data-dialog-zoom aria-live="polite">100%</span>
+                    <button class="mermaid-icon-button mermaid-dialog-download" type="button" data-dialog-action="download" title="下载 SVG" aria-label="下载 SVG"><i class="fa fa-download" aria-hidden="true"></i></button>
+                </footer>
+            </div>`;
+
+        const viewport = dialog.querySelector('[data-dialog-viewport]');
+        const inner = sourceInner.cloneNode(true);
+        inner.style.transform = '';
+        inner.style.transition = '';
+        viewport.appendChild(inner);
+
+        const modalState = {
+            scale: 1,
+            fitScale: 1,
+            tx: 0,
+            ty: 0,
+            pointers: new Map(),
+            dragging: false,
+            didDrag: false,
+            userAdjusted: false
+        };
+        const zoomOutput = dialog.querySelector('[data-dialog-zoom]');
+        bindViewport(viewport, modalState, zoomOutput);
+
+        const close = () => {
+            if (dialog.open) dialog.close();
+        };
+
+        dialog.addEventListener('click', (event) => {
+            const action = event.target.closest('[data-dialog-action]')?.dataset.dialogAction;
+            if (action === 'close') close();
+            if (action === 'zoom-in') changeZoom(viewport, modalState, zoomOutput, ZOOM_STEP);
+            if (action === 'zoom-out') changeZoom(viewport, modalState, zoomOutput, -ZOOM_STEP);
+            if (action === 'fit') fitDiagram(viewport, modalState, zoomOutput);
+            if (action === 'download') downloadSvg(viewport.querySelector('svg'));
+            if (event.target === dialog) close();
+        });
+
+        dialog.addEventListener('close', () => {
+            document.body.classList.remove('mermaid-modal-open');
+            dialog.remove();
+            window.requestAnimationFrame(() => {
+                if (opener?.isConnected) opener.focus();
+            });
+        }, { once: true });
+
+        document.body.appendChild(dialog);
+        document.body.classList.add('mermaid-modal-open');
+        dialog.showModal();
+        window.requestAnimationFrame(() => {
+            fitDiagram(viewport, modalState, zoomOutput);
+            dialog.querySelector('[data-dialog-action="close"]')?.focus();
+        });
+    }
+
+    function bindBlock(block) {
+        if (block.dataset.mermaidReady === 'true') return;
+        block.dataset.mermaidReady = 'true';
+
+        const state = getState(block);
+        const viewport = block.querySelector('[data-mermaid-viewport]');
+        const zoomOutput = block.querySelector('[data-mermaid-zoom]');
+        if (viewport) bindViewport(viewport, state, zoomOutput);
+
+        block.addEventListener('click', async (event) => {
+            const button = event.target.closest('[data-mermaid-action]');
+            if (!button || !block.contains(button)) return;
+            const action = button.dataset.mermaidAction;
+
+            if (action === 'collapse') {
+                const content = block.querySelector('[data-mermaid-content]');
+                const expanded = button.getAttribute('aria-expanded') === 'true';
+                button.setAttribute('aria-expanded', String(!expanded));
+                button.setAttribute('aria-label', expanded ? '展开图表' : '折叠图表');
+                button.title = expanded ? '展开图表' : '折叠图表';
+                content.hidden = expanded;
+                button.querySelector('i').className = `fa ${expanded ? 'fa-chevron-down' : 'fa-chevron-up'}`;
+                return;
+            }
+
+            if (action === 'theme') {
+                setTheme(currentTheme(block) === 'dark' ? 'light' : 'dark');
+                return;
+            }
+
+            if (action === 'source') {
+                const panel = block.querySelector('[data-mermaid-source-panel]');
+                if (panel) panel.open = !panel.open;
+                return;
+            }
+
+            if (action === 'copy-source') {
+                const label = button.querySelector('span');
+                try {
+                    await copyText(sourceFor(block));
+                    if (label) label.textContent = '已复制';
+                    window.setTimeout(() => {
+                        if (label) label.textContent = '复制源码';
+                    }, 1500);
+                } catch (error) {
+                    console.error('Unable to copy Mermaid source:', error);
+                }
+                return;
+            }
+
+            if (!viewport) return;
+            if (action === 'zoom-in') changeZoom(viewport, state, zoomOutput, ZOOM_STEP);
+            if (action === 'zoom-out') changeZoom(viewport, state, zoomOutput, -ZOOM_STEP);
+            if (action === 'fit') fitDiagram(viewport, state, zoomOutput);
+            if (action === 'download') downloadSvg(viewport.querySelector('svg'));
+            if (action === 'fullscreen') openFullscreen(block, button);
+        });
+
+        if ('ResizeObserver' in window && viewport) {
+            const resizeObserver = new ResizeObserver(() => {
+                if (block.dataset.mermaidState !== 'ready') return;
+                if (state.userAdjusted) {
+                    applyTransform(viewport, state, zoomOutput);
+                } else {
+                    fitDiagram(viewport, state, zoomOutput);
+                }
+            });
+            resizeObserver.observe(viewport);
+        }
+    }
+
+    function initialize() {
+        const blocks = [...document.querySelectorAll(BLOCK_SELECTOR)];
+        if (!blocks.length) return;
+
+        const theme = preferredTheme();
+        blocks.forEach((block) => {
+            bindBlock(block);
+            updateThemeUi(block, theme);
+        });
+
+        if ('IntersectionObserver' in window) {
+            const observer = new IntersectionObserver((entries) => {
+                entries.forEach((entry) => {
+                    if (!entry.isIntersecting) return;
+                    observer.unobserve(entry.target);
+                    renderBlock(entry.target);
+                });
+            }, { rootMargin: '320px 0px' });
+            blocks.forEach((block) => observer.observe(block));
+        } else {
+            blocks.forEach((block) => renderBlock(block));
+        }
+
+        const colorScheme = window.matchMedia?.('(prefers-color-scheme: dark)');
+        colorScheme?.addEventListener?.('change', (event) => {
+            if (readStoredTheme()) return;
+            setTheme(event.matches ? 'dark' : 'light', false);
+        });
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initialize, { once: true });
+    } else {
+        initialize();
+    }
+})();

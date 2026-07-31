@@ -11,6 +11,11 @@
     <link rel="stylesheet" href="{% static 'blog/css/blog-index.css' %}?v=20260727-3">
 {% endblock %}
 
+{% block extra_css_after_site_theme %}
+    {# Restore the index page's established editorial layout after shared theme overrides. #}
+    <link rel="stylesheet" href="{% static 'blog/css/blog-index.css' %}?v=20260731-legacy">
+{% endblock %}
+
 {% block page_vendor_js %}
     <script src="{% static 'gretzia/js/wow.js' %}"></script>
 {% endblock %}

@@ -1,37 +1,50 @@
-<!-- templates/blog/streams/image_block.html -->
 {% load wagtailimages_tags %}
 
-<div class="content-block-wrapper image-block-wrapper" data-block-type="image">
-    {% if value %}
-        <div class="stream-image-container">
-            <figure class="stream-image-figure">
-                <div class="stream-image-wrapper">
-                    <!-- 使用适中的尺寸而非original，并添加lightbox支持 -->
-                    <a href="{% image_url value 'original' %}"
-                       data-lightbox="blog-gallery"
-                       data-title="{{ value.caption|default:value.title }}"
-                       class="stream-image-link">
-                        {% image value width-800 class="stream-blog-image img-fluid" %}
-                    </a>
-                        <div class="stream-image-model">{{ value.get_model_name }}</div>
-                </div>
-                {% if value.caption %}
-                    <figcaption class="stream-image-caption">
-                        <div class="stream-caption-content">
-                            <i class="fa fa-image"></i>
-                            <span class="stream-caption-text">{{ value.caption }}</span>
-                        </div>
-                    </figcaption>
-                {% endif %}
-            </figure>
+{% if value %}
+    <figure class="content-image{% if value.width > value.height %} content-image--landscape{% elif value.height > value.width %} content-image--portrait{% else %} content-image--square{% endif %}"
+            data-content-image>
+        <div class="content-image__media">
+            <a class="content-image__link"
+               href="{% image_url value 'original' %}"
+               data-pswp-item
+               data-pswp-width="{{ value.width }}"
+               data-pswp-height="{{ value.height }}"
+               data-pswp-caption="{{ value.caption|default:value.title }}"
+               aria-label="查看大图：{{ value.caption|default:value.title }}">
+                <img class="content-image__img"
+                     src="{{ value.file.url }}"
+                     width="{{ value.width }}"
+                     height="{{ value.height }}"
+                     alt="{{ value.caption|default:value.title }}"
+                     loading="lazy"
+                     decoding="async">
+                <span class="content-image__zoom" aria-hidden="true">
+                    <i class="fa fa-search-plus"></i>
+                </span>
+            </a>
+        </div>
 
-        </div>
-    {% else %}
-        <div class="stream-image-placeholder">
-            <div class="stream-placeholder-content">
-                <i class="fa fa-image fa-3x"></i>
-                <p class="stream-placeholder-text">图片不可用</p>
-            </div>
-        </div>
-    {% endif %}
-</div>
+        {% if value.caption or value.title %}
+            <figcaption class="content-image__caption">
+                <span class="content-image__caption-mark" aria-hidden="true">
+                    <i class="fa fa-image"></i>
+                </span>
+                <span class="content-image__caption-text">{{ value.caption|default:value.title }}</span>
+                <a class="content-image__original"
+                   href="{% image_url value 'original' %}"
+                   target="_blank"
+                   rel="noopener noreferrer"
+                   title="在新窗口查看原图"
+                   aria-label="在新窗口查看原图：{{ value.caption|default:value.title }}">
+                    <i class="fa fa-external-link" aria-hidden="true"></i>
+                    <span>查看原图</span>
+                </a>
+            </figcaption>
+        {% endif %}
+    </figure>
+{% else %}
+    <div class="content-image-placeholder" role="status">
+        <i class="fa fa-image" aria-hidden="true"></i>
+        <span>图片暂时无法显示</span>
+    </div>
+{% endif %}

@@ -10,10 +10,8 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ('blog', '0019_alter_blogpage_body'),
-        # Wagtail 7.4.2 provides the 1016 merge migration.  Keep this
-        # application's migration number at 0020; only repair the stale
-        # dependency name so Django can load the migration graph.
-        ('wagtailcore', '0098_merge_20260603_1016'),
+        # Match the Wagtail 7.4.2 migration shipped in the local test env.
+        ('wagtailcore', '0098_merge_20260603_0945'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 

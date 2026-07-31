@@ -3,6 +3,12 @@
 
 
 # ==========================================================
+# 远程开发依赖服务
+# ==========================================================
+# 本地项目运行在 20.5，数据库与基础设施服务运行在 20.2。
+SERVICE_HOST = '192.168.20.2'
+
+# ==========================================================
 # MySQL 数据库配置
 # ==========================================================
 DATABASES = {
@@ -11,7 +17,7 @@ DATABASES = {
 		'NAME': 'wagtailsoftblog_test',
 		'USER': 'root',
 		'PASSWORD': '123456',
-		'HOST': 'localhost',
+		'HOST': SERVICE_HOST,
 		'PORT': '3306',
 		'OPTIONS': {
 			'charset': 'utf8mb4',
@@ -23,7 +29,7 @@ DATABASES = {
 # ==========================================================
 # Redis 配置
 # ==========================================================
-REDIS_HOST = 'localhost'
+REDIS_HOST = SERVICE_HOST
 REDIS_PORT = 6379
 REDIS_PASSWORD = '123456'
 REDIS_DB = 1  # 用于计数器的数据库
@@ -32,7 +38,7 @@ REDIS_DB = 1  # 用于计数器的数据库
 CACHES = {
 	'default': {
 		'BACKEND': 'django_redis.cache.RedisCache',
-		'LOCATION': 'redis://127.0.0.1:6379/1',
+		'LOCATION': f'redis://{REDIS_HOST}:6379/1',
 		'OPTIONS': {
 			'CLIENT_CLASS': 'django_redis.client.DefaultClient',
 			'PASSWORD': '123456'
@@ -40,7 +46,7 @@ CACHES = {
 	},
 	'comment_rate_limit_cache': {  # 新的缓存实例，专门用于评论频率限制
 		'BACKEND': 'django_redis.cache.RedisCache',
-		'LOCATION': 'redis://127.0.0.1:6379/2',  # 使用不同的Redis DB，例如 DB 2
+		'LOCATION': f'redis://{REDIS_HOST}:6379/2',  # 使用不同的Redis DB，例如 DB 2
 		'OPTIONS': {
 			'CLIENT_CLASS': 'django_redis.client.DefaultClient',
 			'PASSWORD': '123456'
@@ -53,7 +59,7 @@ CACHES = {
 # ==========================================================
 MONGO_DB = {
 	'NAME': 'wagtailblog_test',
-	'HOST': 'localhost',
+	'HOST': SERVICE_HOST,
 	'PORT': 27017,
 }
 
@@ -351,7 +357,7 @@ WAGTAILSEARCH_BACKENDS = {
 		
 		# 2. ES 集群的物理连接地址
 		# 本地单节点或集群网关的 REST API 端点
-		'URLS': ['http://127.0.0.1:9200'],
+		'URLS': [f'http://{SERVICE_HOST}:9200'],
 		
 		# 3. 隔离命名空间（索引前缀）
 		# 在多套环境（如开发/测试/生产）公用同一个 ES 集群时，防止索引冲突

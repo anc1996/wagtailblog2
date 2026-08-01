@@ -1,5 +1,5 @@
 # blog/models.py
-import logging,uuid,json,re
+import logging,uuid,json,re,time
 from datetime import datetime
 
 from django.db.models.functions import Coalesce, Lower
@@ -12,7 +12,6 @@ from django.conf import settings
 from django.utils.html import strip_tags  # 用于去除HTML标签
 from django.utils.safestring import mark_safe  # 用于标记HTML安全
 
-from markdown import markdown
 
 from modelcluster.fields import ParentalKey, ParentalManyToManyField
 from modelcluster.contrib.taggit import ClusterTaggableManager
@@ -33,10 +32,16 @@ from wagtail.snippets.models import register_snippet
 from wagtail.blocks.stream_block import StreamValue
 from wagtail_ai.panels import AITitleFieldPanel, AIDescriptionFieldPanel, AIFieldPanel
 
-from wagtailmarkdown.blocks import MarkdownBlock
-
 from blog.page_view_counter import PageViewCounter
-from blog.blocks import AudioBlock, VideoBlock, CustomTableBlock, MermaidBlock, PureCodeBlock, CustomEmbedBlock
+from blog.blocks import (
+	AudioBlock,
+	VideoBlock,
+	CustomTableBlock,
+	MermaidBlock,
+	PureCodeBlock,
+	CustomEmbedBlock,
+	VditorMarkdownBlock,
+)
 from wagtailblog3.mongodb import MongoDBStreamFieldAdapter
 from wagtailblog3.mongo import MongoManager
 
@@ -356,6 +361,36 @@ PROMPT_INTRO = "SEO描述生成"
 
 
 class BlogPageForm(WagtailAdminPageForm):
+	@classmethod
+	def _summarize_validation_error(cls, error):
+		"""Expand Wagtail block errors without logging submitted values."""
+		if isinstance(error, (list, tuple)):
+			return [cls._summarize_validation_error(item) for item in error]
+
+		details = {}
+		block_errors = getattr(error, 'block_errors', None)
+		if block_errors:
+			details['children'] = {
+				str(key): cls._summarize_validation_error(child)
+				for key, child in block_errors.items()
+			}
+
+		non_block_errors = getattr(error, 'non_block_errors', None)
+		if non_block_errors:
+			details['non_block'] = cls._summarize_validation_error(
+				non_block_errors.as_data()
+				if hasattr(non_block_errors, 'as_data')
+				else list(non_block_errors)
+			)
+
+		if not details:
+			messages = [str(message)[:300] for message in getattr(error, 'messages', [])]
+			details['messages'] = messages
+			code = getattr(error, 'code', None)
+			if code:
+				details['code'] = code
+		return details
+
 	def __init__(self, *args, **kwargs):
 		instance = kwargs.get('instance')
 		
@@ -367,6 +402,7 @@ class BlogPageForm(WagtailAdminPageForm):
 			if is_body_empty:
 				mongo_manager = MongoManager()
 				content = None
+				content_source = "none"
 				
 				# 【第一阶段】：直接越过脆弱的视图层，利用 Wagtail 4.0+ 的泛型关联管理器捞取最新快照
 				latest_revision = instance.revisions.order_by('-created_at').first()
@@ -382,21 +418,110 @@ class BlogPageForm(WagtailAdminPageForm):
 							if draft_pointer:
 								# 去 MongoDB 专属草稿快照集合定点捞取大文本
 								content = mongo_manager.get_blog_revision_body(draft_pointer)
+								if content:
+									content_source = "revision"
 					except Exception as e:
 						logger.error(f"BlogPageForm 穿透解析历史快照遭遇异常: {e}", exc_info=True)
 				
 				# 【第二阶段】：如果快照没捞到（例如全新发布后清空了历史，或者老数据迁移残留），直接降级穿透到 Mongo 线上 Live 主表
 				if (not content or 'body' not in content) and getattr(instance, 'mongo_content_id', None):
 					content = mongo_manager.get_blog_content(instance.mongo_content_id)
+					if content:
+						content_source = "live"
 				
 				# 【第三阶段】：对捞出来的 MongoDB 松散字典实施 Hydration，重塑为严格的 React UI 渲染树
 				if content and 'body' in content:
 					# 直接调用模型内封装好的 UUID 补齐与 StreamValue 重建方法
-					instance.body = instance._hydrate_streamfield_from_mongo(content['body'])
-					logger.info(f"💾 异构表单拦截成功！已为页面 [{instance.title}] 完美复活 MongoDB 文本负载。")
+					raw_body = content['body']
+					raw_types = [
+						block.get('type', '<missing>')
+						for block in raw_body
+						if isinstance(block, dict)
+					]
+					logger.info(
+						"blog_body_admin_source page_id=%s source=%s raw_blocks=%s types=%s",
+						instance.pk,
+						content_source,
+						len(raw_body) if isinstance(raw_body, list) else -1,
+						raw_types,
+					)
+					instance.body = instance._hydrate_streamfield_from_mongo(raw_body)
+					logger.info(
+						"blog_body_admin_hydrated page_id=%s hydrated_blocks=%s types=%s",
+						instance.pk,
+						len(instance.body) if hasattr(instance.body, '__len__') else -1,
+						[block.block_type for block in instance.body],
+					)
+				else:
+					logger.warning(
+						"blog_body_admin_missing page_id=%s mongo_content_id=%s",
+						instance.pk,
+						getattr(instance, 'mongo_content_id', None),
+					)
 		
 		# 缝合完毕，将饱满的 instance 交还给 Django 核心表单，开始绑定字段渲染前端
 		super().__init__(*args, **kwargs)
+		if instance and instance.pk:
+			logger.info(
+				"blog_body_admin_form_bound page_id=%s blocks=%s types=%s",
+				instance.pk,
+				len(instance.body) if hasattr(instance.body, '__len__') else -1,
+				[block.block_type for block in instance.body],
+			)
+
+	def full_clean(self):
+		"""Log bound-form validation without recording submitted content."""
+		if not self.is_bound:
+			return super().full_clean()
+
+		started_at = time.monotonic()
+		page_id = getattr(self.instance, 'pk', None)
+		body_count = self.data.get('body-count')
+		block_types = []
+		active_blocks = 0
+		try:
+			parsed_count = int(body_count or 0)
+		except (TypeError, ValueError):
+			parsed_count = 0
+		for index in range(parsed_count):
+			block_type = self.data.get(f'body-{index}-type', '<missing>')
+			deleted = bool(self.data.get(f'body-{index}-deleted'))
+			block_types.append(f'{block_type}:deleted' if deleted else block_type)
+			if not deleted:
+				active_blocks += 1
+
+		logger.info(
+			"blog_body_validation_start page_id=%s body_count=%s active_blocks=%s types=%s",
+			page_id,
+			body_count,
+			active_blocks,
+			block_types,
+		)
+		try:
+			super().full_clean()
+		except Exception:
+			logger.exception(
+				"blog_body_validation_exception page_id=%s elapsed_ms=%s",
+				page_id,
+				round((time.monotonic() - started_at) * 1000, 1),
+			)
+			raise
+
+		errors = {
+			field_name: [
+				self._summarize_validation_error(error)
+				for error in error_list
+			]
+			for field_name, error_list in self._errors.as_data().items()
+		} if self._errors else {}
+		log_method = logger.warning if errors else logger.info
+		log_method(
+			"blog_body_validation_done page_id=%s valid=%s elapsed_ms=%s errors=%s",
+			page_id,
+			not bool(errors),
+			round((time.monotonic() - started_at) * 1000, 1),
+			errors,
+		)
 		
 
 # 博客页面
@@ -456,8 +581,8 @@ class BlogPage(Page):
 		("code_block", PureCodeBlock(default_language='python')),
 		
 		
-		# Markdown块 - 使用wagtail-markdown (包含代码高亮和数学公式支持)
-		('markdown_block', MarkdownBlock(
+		# Markdown块 - 使用项目自有 Vditor 编辑器和安全渲染器
+		('markdown_block', VditorMarkdownBlock(
 			icon='code',
 			label="Markdown (支持代码高亮和数学公式)",
 			help_text="支持标准Markdown、代码高亮、数学公式"
@@ -548,15 +673,41 @@ class BlogPage(Page):
 	def _hydrate_streamfield_from_mongo(self, body_data):
 		"""核心防线：从 Mongo 字典重建 Wagtail Draftail 所需的严格 StreamValue 对象"""
 		if not body_data or not isinstance(body_data, list):
+			logger.info(
+				"blog_body_hydrate_empty page_id=%s value_type=%s",
+				self.pk,
+				type(body_data).__name__,
+			)
 			return []
 		
 		# 黑客防线：为所有缺乏 id 的 block 自动补齐 uuid，防止前端 React 崩溃
+		missing_ids = 0
 		for block in body_data:
 			if isinstance(block, dict) and 'id' not in block:
 				block['id'] = str(uuid.uuid4())
+				missing_ids += 1
+		block_types = [
+			block.get('type', '<missing>')
+			for block in body_data
+			if isinstance(block, dict)
+		]
+		logger.info(
+			"blog_body_hydrate_start page_id=%s raw_blocks=%s missing_ids=%s types=%s",
+			self.pk,
+			len(body_data),
+			missing_ids,
+			block_types,
+		)
 		
 		try:
-			return MongoDBStreamFieldAdapter.from_mongodb(body_data, self.body.stream_block)
+			stream_value = MongoDBStreamFieldAdapter.from_mongodb(body_data, self.body.stream_block)
+			logger.info(
+				"blog_body_hydrate_done page_id=%s hydrated_blocks=%s types=%s",
+				self.pk,
+				len(stream_value),
+				[block.block_type for block in stream_value],
+			)
+			return stream_value
 		except Exception as e:
 			logger.error(f"StreamField 反序列化降级: {e}", exc_info=True)
 			return StreamValue(self.body.stream_block, body_data, is_lazy=True)
@@ -566,6 +717,13 @@ class BlogPage(Page):
 	# =========================================================================
 	def serializable_data(self):
 		"""拦截生成 Revision 的快照动作，截流大文本送入 MongoDB 历史草稿集合"""
+		started_at = time.monotonic()
+		logger.info(
+			"blog_body_revision_start page_id=%s blocks=%s types=%s",
+			self.pk,
+			len(self.body) if hasattr(self.body, '__len__') else -1,
+			[block.block_type for block in self.body],
+		)
 		data = super().serializable_data()
 		
 		if hasattr(self.body, 'raw_data') and self.body.raw_data:
@@ -581,6 +739,12 @@ class BlogPage(Page):
 		data['mongo_draft_pointer'] = str(draft_pointer)
 		# 将 MySQL 这边的单条行体积抽空，保持大版本跃迁后的轻量化
 		data['body'] = '[]'
+		logger.info(
+			"blog_body_revision_done page_id=%s pointer=%s elapsed_ms=%s",
+			self.pk,
+			draft_pointer,
+			round((time.monotonic() - started_at) * 1000, 1),
+		)
 		
 		return data
 	
@@ -635,11 +799,19 @@ class BlogPage(Page):
 	# =========================================================================
 	def save(self, *args, **kwargs):
 		"""确保 MySQL 正式表体中维持 0 文本包袱"""
+		started_at = time.monotonic()
 		is_new = self.pk is None
 		update_fields = kwargs.get('update_fields')
 		
 		# 【核心防御】：识别是不是只是在存草稿（存草稿仅局部更新 has_unpublished_changes 等）
 		is_draft_metadata_update = update_fields is not None and 'body' not in update_fields
+		logger.info(
+			"blog_body_save_start page_id=%s is_new=%s draft_metadata=%s update_fields=%s",
+			self.pk,
+			is_new,
+			is_draft_metadata_update,
+			list(update_fields) if update_fields is not None else None,
+		)
 		
 		if not is_draft_metadata_update:
 			# 只有明确的全量保存（例如点击“发布”），才推送到线上正式集合 blog_content
@@ -656,9 +828,17 @@ class BlogPage(Page):
 				'body': temp_body_raw or []
 			}
 			try:
+				mongo_started_at = time.monotonic()
 				mongo_manager = MongoManager()
 				content_id = mongo_manager.save_blog_content(content_data, getattr(self, 'mongo_content_id', None))
 				self.mongo_content_id = content_id
+				logger.info(
+					"blog_body_save_mongo_done page_id=%s content_id=%s blocks=%s elapsed_ms=%s",
+					self.pk,
+					content_id,
+					len(temp_body_raw or []),
+					round((time.monotonic() - mongo_started_at) * 1000, 1),
+				)
 			except Exception as e:
 				logger.error(f"保存线上主内容至 MongoDB 失败: {e}", exc_info=True)
 		
@@ -670,6 +850,11 @@ class BlogPage(Page):
 		finally:
 			# 立刻满血复原内存态，保障本次请求周期后续逻辑拿到的是完好的 body
 			self.body = real_body
+		logger.info(
+			"blog_body_save_mysql_done page_id=%s elapsed_ms=%s",
+			self.pk,
+			round((time.monotonic() - started_at) * 1000, 1),
+		)
 		
 		# 新页面发布后的自增外键反向回填
 		if is_new and self.pk and not is_draft_metadata_update:
@@ -755,66 +940,6 @@ class BlogPage(Page):
 		                                      first_published_at__gt=self.first_published_at).distinct().order_by(
 			'first_published_at').first()
 	
-	def _render_markdown_in_body(self, body_data):
-		"""
-		一个辅助函数，接收从MongoDB获取的body原始数据列表，
-		找到其中的 'markdown_block' 并就地进行渲染，同时修复严格的语法排版。
-		"""
-		try:
-			WAGTAILMARKDOWN = getattr(settings, 'WAGTAILMARKDOWN', {})
-			
-			for block_data in body_data:
-				if isinstance(block_data, dict) and block_data.get('type') == 'markdown_block':
-					raw_md = block_data.get('value', '')
-					
-					# ========== 🚀 核心补丁：GFM 语法兼容层 ==========
-					
-					# 1. 修复嵌套列表缩进：将 2~3 个空格强转为 Python-Markdown 严格要求的 4 空格
-					# 匹配逻辑: 行首的引用符(可选) + 2~3个空格 + 列表符(-, *, + 或 数字.)
-					raw_md = re.sub(
-						r'^(>[\s]*)?( {2,3})([-\*\+]\s|\d+\.\s)',
-						r'\1    \3',
-						raw_md,
-						flags=re.MULTILINE
-					)
-					
-					# 2. 修复粘连段落：自动在紧贴着文本的列表上方插入空行
-					lines = raw_md.split('\n')
-					fixed_lines = []
-					# 匹配列表的首行特征
-					list_pattern = re.compile(r'^(>[\s]*)?( {0,4})([-\*\+]\s|\d+\.\s)')
-					
-					for i, line in enumerate(lines):
-						if i > 0:
-							curr_match = list_pattern.match(line)
-							prev_match = list_pattern.match(lines[i - 1])
-							prev_is_empty = not lines[i - 1].strip('> \t\r')
-							
-							# 如果当前行是列表，但前一行有文字且不是列表，说明发生了粘连
-							if curr_match and not prev_match and not prev_is_empty:
-								bq_prefix = curr_match.group(1) or ''
-								# 强行插入一个对应的空行（如果在块引用内，就会插入一个空的 '>'）
-								fixed_lines.append(bq_prefix.strip())
-						
-						fixed_lines.append(line)
-					
-					raw_md = '\n'.join(fixed_lines)
-					# ===================================================
-					
-					# 执行渲染
-					rendered_html = markdown(
-						raw_md,
-						extensions=WAGTAILMARKDOWN.get('extensions', []),
-						extension_configs=WAGTAILMARKDOWN.get('extension_configs', {})
-					)
-					block_data['value'] = mark_safe(rendered_html)
-			
-			return body_data
-		
-		except Exception as e:
-			logger.error(f"渲染Markdown时出错: {e}", exc_info=True)
-			return body_data
-	
 	@staticmethod
 	def _strip_markdown_code(text):
 		"""Remove fenced and inline code before looking for maths markup."""
@@ -890,16 +1015,16 @@ class BlogPage(Page):
 		
 		if mongo_content and 'body' in mongo_content:
 			
-			# 2. 调用独立的辅助函数来渲染Markdown
-			rendered_body_data = self._render_markdown_in_body(mongo_content['body'])
+			# Keep MongoDB data raw here. Markdown is rendered by the block at output time.
+			source_body_data = mongo_content['body']
 			
-			# 3. 将处理过的数据设置到页面body中
+			# Rehydrate the raw StreamField blocks without changing their stored values.
 			try:
-				self.body = MongoDBStreamFieldAdapter.from_mongodb(rendered_body_data, self.body.stream_block)
+				self.body = MongoDBStreamFieldAdapter.from_mongodb(source_body_data, self.body.stream_block)
 			except Exception as e:
 				from wagtail.blocks.stream_block import StreamValue
 				logger.error(f"使用适配器创建StreamValue失败: {e}", exc_info=True)
-				self.body = StreamValue(self.body.stream_block, rendered_body_data, is_lazy=True)
+				self.body = StreamValue(self.body.stream_block, source_body_data, is_lazy=True)
 		
 		# 4. 调用父类的serve方法，使用我们准备好的body内容去渲染模板
 		return super().serve(request)

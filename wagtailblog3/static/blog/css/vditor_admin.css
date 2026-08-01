@@ -1,0 +1,56 @@
+.blog-vditor-field {
+    position: relative;
+    width: 100%;
+}
+
+.blog-vditor-editor {
+    min-height: 320px;
+}
+
+.blog-vditor-source {
+    width: 100%;
+    min-height: 320px;
+    font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+}
+
+.blog-vditor-field[data-vditor-ready="true"] .blog-vditor-source {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+.blog-vditor-field .vditor {
+    border: 1px solid var(--w-color-border-field-default, #d9d9d9);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.blog-vditor-field .vditor-toolbar {
+    border-bottom: 1px solid var(--w-color-border-furniture, #d9d9d9);
+}
+
+/* Keep Vditor fullscreen inside Wagtail's main work area. */
+.blog-vditor-field .vditor.vditor--fullscreen {
+    top: var(--blog-vditor-fullscreen-top, 0px) !important;
+    left: var(--blog-vditor-fullscreen-left, 0px) !important;
+    width: var(--blog-vditor-fullscreen-width, 100vw) !important;
+    height: var(--blog-vditor-fullscreen-height, 100vh) !important;
+    z-index: 98 !important;
+}
+
+/* Keep Prism's global admin theme from recoloring Vditor's Highlight.js output. */
+.blog-vditor-field .vditor code.hljs {
+    color: var(--textarea-text-color);
+    background-color: var(--panel-background-color);
+    text-shadow: none;
+}
+
+[data-theme="dark"] .blog-vditor-field .vditor,
+.theme-dark .blog-vditor-field .vditor {
+    border-color: var(--w-color-border-field-default, #4b5563);
+}

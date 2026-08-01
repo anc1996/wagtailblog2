@@ -2,7 +2,9 @@
 
 import mimetypes
 
+from django import forms
 from django.db import models
+from django.utils.functional import cached_property
 from wagtail.embeds.blocks import EmbedBlock
 from wagtailmedia.blocks import AudioChooserBlock, VideoChooserBlock
 from wagtail.contrib.table_block.blocks import TableBlock as WagtailTableBlock
@@ -12,6 +14,23 @@ from wagtail import blocks
 
 
 from wagtailcodeblock.blocks import CodeBlock
+from .widgets import VditorMarkdownWidget
+from .markdown_renderer import MarkdownRenderer
+
+
+class VditorMarkdownBlock(blocks.TextBlock):
+    """Project-owned Markdown block using Vditor in the Wagtail admin."""
+
+    @cached_property
+    def field(self):
+        field_kwargs = {
+            "widget": VditorMarkdownWidget(attrs={"rows": self.rows})
+        }
+        field_kwargs.update(self.field_options)
+        return forms.CharField(**field_kwargs)
+
+    def render_basic(self, value, context=None):
+        return MarkdownRenderer.render(value, context)
 
 # 🚀 架构师特制：纯净前端代码块（只改前台，不碰后台）
 class PureCodeBlock(CodeBlock):

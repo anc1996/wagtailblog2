@@ -1,0 +1,4 @@
+<div class="blog-vditor-field" data-vditor-field>
+    <div class="blog-vditor-editor" data-vditor-editor></div>
+    <textarea name="{{ widget.name }}"{% include "django/forms/widgets/attrs.html" %}>{{ widget.value|default_if_none:"" }}</textarea>
+</div>

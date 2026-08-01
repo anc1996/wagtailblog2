@@ -3,8 +3,7 @@
 
 
 """
-第三方文本编辑器的配置库,
-包含wagtailcodeblock、wagtail-markdown、wagtailmedia 等第三方集成配置
+博客文本与媒体编辑配置，包含 wagtailcodeblock、项目 Markdown 渲染和 wagtailmedia。
 """
 
 # ==========================================================
@@ -216,11 +215,9 @@ WAGTAIL_CODE_BLOCK_LANGUAGES = (
 
 
 # ==========================================================
-# Wagtail Markdown 配置
+# 博客 Markdown 渲染配置
 # ==========================================================
-WAGTAILMARKDOWN = {
-	"autodownload_fontawesome": False,
-	
+BLOG_MARKDOWN = {
 	# 扩展列表
 	"extensions": [
 		# 基础扩展

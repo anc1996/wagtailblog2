@@ -1,59 +1,130 @@
-$(document).ready(function() {
-    console.log('MongoDB内容编辑器增强已加载');
+(function () {
+    "use strict";
 
-    // 强制初始化StreamField
-    var initStreamField = function() {
-        // 查找所有StreamField容器
-        const streamFields = $('[data-streamfield]');
-        console.log('找到 ' + streamFields.length + ' 个StreamField字段');
+    var LOG_PREFIX = "[BlogEditor]";
 
-        if (streamFields.length > 0) {
-            // 查找添加块按钮
-            const addButtons = $('.action-add-block-h2, .action-add-block');
-            console.log('找到 ' + addButtons.length + ' 个添加块按钮');
+    function fieldLength(field) {
+        if (field.type === "checkbox" || field.type === "radio") {
+            return field.checked ? 1 : 0;
+        }
+        return String(field.value || "").length;
+    }
 
-            if (addButtons.length === 0) {
-                // 如果没有找到添加按钮，可能需要触发初始化
-                console.log('未找到添加块按钮，尝试强制初始化...');
+    function isEmptyRequiredField(field, form) {
+        if (!field.required || field.disabled) {
+            return false;
+        }
+        if (field.type === "checkbox") {
+            return !field.checked;
+        }
+        if (field.type === "radio") {
+            return !form.querySelector(
+                'input[type="radio"][name="' + CSS.escape(field.name) + '"]:checked'
+            );
+        }
+        return !String(field.value || "").trim();
+    }
 
-                // 检查是否是空的StreamField
-                const emptyFields = $('.empty-stream-field');
-                if (emptyFields.length > 0) {
-                    console.log('找到空StreamField，尝试模拟点击添加按钮');
+    function inspectBody(form) {
+        var countField = form.elements.namedItem("body-count");
+        var count = countField ? Number.parseInt(countField.value, 10) || 0 : 0;
+        var blocks = [];
+        var emptyRequired = [];
 
-                    // 尝试模拟点击默认添加按钮
-                    const emptyAddButtons = $('.stream-menu-closed');
-                    if (emptyAddButtons.length > 0) {
-                        // 触发显示按钮
-                        emptyAddButtons.first().removeClass('stream-menu-closed').addClass('stream-menu-open');
-                        console.log('已打开StreamField菜单');
+        for (var index = 0; index < count; index += 1) {
+            var prefix = "body-" + index + "-";
+            var typeField = form.elements.namedItem(prefix + "type");
+            var deletedField = form.elements.namedItem(prefix + "deleted");
+            var deleted = Boolean(deletedField && deletedField.value);
+            var fields = Array.from(form.elements).filter(function (field) {
+                return field.name && field.name.indexOf(prefix) === 0;
+            });
+
+            blocks.push({
+                index: index,
+                type: typeField ? typeField.value : "<missing>",
+                deleted: deleted,
+                fields: fields
+                    .filter(function (field) {
+                        return !/(?:-type|-order|-deleted|-id)$/.test(field.name);
+                    })
+                    .map(function (field) {
+                        return {
+                            name: field.name.slice(prefix.length),
+                            characters: fieldLength(field),
+                            required: field.required,
+                        };
+                    }),
+            });
+
+            if (!deleted) {
+                fields.forEach(function (field) {
+                    if (isEmptyRequiredField(field, form)) {
+                        emptyRequired.push(field.name);
                     }
-                }
+                });
             }
         }
-    };
 
-    // 初始尝试
-    setTimeout(initStreamField, 500);
-    // 再次尝试，以防初始加载延迟
-    setTimeout(initStreamField, 1500);
+        return {
+            bodyCount: count,
+            activeBlocks: blocks.filter(function (block) {
+                return !block.deleted;
+            }).length,
+            emptyRequired: Array.from(new Set(emptyRequired)),
+            blocks: blocks,
+        };
+    }
 
-    // 监控DOM变化，处理动态加载的编辑器
-    var observer = new MutationObserver(function(mutations) {
-        mutations.forEach(function(mutation) {
-            if (mutation.addedNodes && mutation.addedNodes.length > 0) {
-                // 检查是否有新的StreamField相关元素添加
-                setTimeout(initStreamField, 200);
+    function inspect(form, eventName) {
+        var summary = inspectBody(form);
+        var logger = summary.emptyRequired.length ? console.warn : console.info;
+        logger.call(console, LOG_PREFIX, eventName, summary);
+        return summary;
+    }
+
+    function bindForm(form) {
+        if (!form || form.dataset.blogEditorDiagnostics === "true") {
+            return;
+        }
+        form.dataset.blogEditorDiagnostics = "true";
+        var formDataLogPending = false;
+
+        form.addEventListener("submit", function (event) {
+            inspect(form, "form:submit");
+            formDataLogPending = true;
+            console.info(LOG_PREFIX, "form:submitter", {
+                name: event.submitter ? event.submitter.name : null,
+                value: event.submitter ? event.submitter.value : null,
+            });
+        });
+
+        form.addEventListener("formdata", function () {
+            if (formDataLogPending) {
+                formDataLogPending = false;
+                inspect(form, "form:formdata");
             }
         });
-    });
-
-    // 开始观察document body的变化
-    observer.observe(document.body, { childList: true, subtree: true });
-
-    // Markdown编辑器支持代码
-    if(window.wagtailMarkdown) {
-        console.log('发现wagtailMarkdown，正在配置...');
-        // Markdown编辑器配置...
     }
-});
+
+    function init() {
+        var bodyRoot = document.getElementById("body-root");
+        var form = bodyRoot ? bodyRoot.closest("form") : null;
+        bindForm(form);
+
+        var summary = form ? inspectBody(form) : null;
+        console.info(LOG_PREFIX, "ready", summary || { bodyFieldAvailable: false });
+
+        window.BlogEditorDebug = {
+            inspect: function () {
+                return form ? inspect(form, "manual:inspect") : null;
+            },
+        };
+    }
+
+    if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", init, { once: true });
+    } else {
+        init();
+    }
+})();

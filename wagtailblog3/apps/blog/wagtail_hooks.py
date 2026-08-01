@@ -25,6 +25,7 @@ from wagtail.snippets.models import register_snippet
 from .admin import TagsSnippetViewSet
 from .models import PageViewCount
 from .forms import PageViewCountForm
+from . import widget_adapters  # noqa: F401
 
 # 设置日志记录器
 logger = logging.getLogger(__name__)
@@ -35,7 +36,7 @@ logger = logging.getLogger(__name__)
 def global_admin_css():
 	"""
 	在 Wagtail 后台所有页面加载 Font Awesome 5 的 CSS。
-	EasyMDE 编辑器依赖这个图标库来显示工具栏图标（如加粗、斜体、任务列表等）。
+	项目的其他后台组件仍使用其中的图标类。
 	"""
 	# 动态路径替换，用 format_html 是最安全、最标准的做法
 	return format_html('<link rel="stylesheet" href="{}">', static("css/all.min.css"))
@@ -59,75 +60,13 @@ def fix_wagtail_ai_zindex():
 	)
 
 
-@hooks.register("insert_editor_css", order=100)
-def editor_css_easymde():
-	"""为 Wagtail 后台编辑页注入代码高亮和公式的离线 CSS"""
-	
-	# 1. 动态链接部分：继续使用 format_html 保障安全
-	links = format_html(
-		'<link rel="stylesheet" href="{}">\n<link rel="stylesheet" href="{}">\n<link rel="stylesheet" href="{}">',
-		static('vendor/highlightjs/styles/github.min.css'),
-		static('blog/css/katex/katex.min.css'),
-		static('blog/css/formula_palette.css')
-	)
-	
-	# 2. 纯样式部分：使用 mark_safe。
-	# 这样你以后写 CSS 就可以用正常的单大括号 {} 了，再也不用痛苦地写 {{ }}
-	styles = mark_safe(
-		"""
-		<style>
-			/* 修正后台暗黑模式对预览区的影响，确保白底黑字基础阅读正常 */
-			.editor-preview, .editor-preview-side {
-				color: #333 !important;
-				background-color: #fff !important;
-			}
-
-			/* 强制干掉 Wagtail 的灰色，换成 Github Dark 的深空黑 */
-			.editor-preview pre, .editor-preview-side pre {
-				background-color: #0d1117 !important;
-				padding: 16px !important;
-				border-radius: 6px !important;
-			}
-
-			/* 释放字体颜色的控制权给 Highlight.js */
-			.editor-preview pre code.hljs, .editor-preview-side pre code.hljs {
-				background-color: transparent !important;
-				color: #c9d1d9 !important;
-				text-shadow: none !important;
-			}
-		</style>
-		"""
-	)
-	
-	# 拼接返回
-	return links + styles
-
-
-@hooks.register("insert_editor_js", order=100)
-def editor_js_easymde():
-	"""为 Wagtail 后台编辑页注入 JS 引擎及自定义配置"""
-	# 这里全是 <script src="...">，没有任何包含 JS 逻辑的大括号，用 format_html 完全正确
-	return format_html(
-		"""
-		<script src="{}"></script>
-		<script src="{}"></script>
-		<script src="{}"></script>
-		<script src="{}"></script>
-		""",
-		static('vendor/highlightjs/highlight.min.js'),
-		static('blog/css/katex/katex.min.js'),
-		static('blog/js/katex/auto-render.min.js'),
-		static('blog/js/easymde_custom.js')
-	)
-
-
 # 添加JavaScript支持到编辑器
 @hooks.register('insert_editor_js')
 def editor_js():
 	"""添加JavaScript支持到编辑器"""
 	return format_html(
 		'<script src="{}"></script>\n<script src="{}"></script>',
-		static('blog/js/editor-enhancements.js'),
+		f"{static('blog/js/editor-enhancements.js')}?blog_editor=20260801.2",
 		static('blog/js/wagtail_ai_context.js')
 	)
 

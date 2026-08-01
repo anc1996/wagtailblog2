@@ -43,7 +43,6 @@ INSTALLED_APPS = [
     
     # 第三方应用
     "storages",  # 添加 Django Storages
-    "wagtailmarkdown", # wagtail-markdown包
     "wagtailmedia", # wagtail-media 包
     'wagtailcodeblock', #  Wagtail CMS 源代码的语法高亮器块
     "rest_framework",  # Django REST Framework

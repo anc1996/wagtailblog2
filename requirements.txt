@@ -120,7 +120,6 @@ uWSGI==2.0.30
 vine==5.1.0
 wagtail==7.4.2
 wagtail-ai==3.1.0
-wagtail-markdown==0.14.1
 wagtail-modeladmin==2.3.0
 wagtail-video==1.0.1
 wagtailcodeblock==1.30.0.0

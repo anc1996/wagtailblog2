@@ -22,10 +22,10 @@
         <link rel="stylesheet" href="{% static 'vendor/plyr/plyr.css' %}?v=3.7.8">
     {% endif %}
     {% if has_video %}
-        <link rel="stylesheet" href="{% static 'blog/css/video_blocks.css' %}">
+        <link rel="stylesheet" href="{% static 'blog/css/video_blocks.css' %}?v=20260801-1">
     {% endif %}
     {% if has_audio %}<link rel="stylesheet" href="{% static 'blog/css/audio_blocks.css' %}">{% endif %}
-    {% if has_embed %}<link rel="stylesheet" href="{% static 'blog/css/embed_blocks.css' %}?v=20260730-2102">{% endif %}
+    {% if has_embed %}<link rel="stylesheet" href="{% static 'blog/css/embed_blocks.css' %}?v=20260801-1">{% endif %}
     {% if has_table %}<link rel="stylesheet" href="{% static 'blog/css/table_blocks.css' %}">{% endif %}
     {% if has_mermaid %}{% include "includes/content/mermaid_css.html" %}{% endif %}
     <link rel="stylesheet" href="{% static 'comments/css/comments.css' %}?v=20260729-5">
@@ -351,10 +351,10 @@
         <script src="{% static 'vendor/plyr/plyr.min.js' %}?v=3.7.8" defer></script>
     {% endif %}
     {% if has_video %}
-        <script src="{% static 'blog/js/video_blocks.js' %}" defer></script>
+        <script src="{% static 'blog/js/video_blocks.js' %}?v=20260801-1" defer></script>
     {% endif %}
     {% if has_audio %}<script src="{% static 'blog/js/audio_blocks.js' %}?v=20260730-2219" defer></script>{% endif %}
-    {% if has_embed %}<script src="{% static 'blog/js/embed_blocks.js' %}?v=20260730-1730" defer></script>{% endif %}
+    {% if has_embed %}<script src="{% static 'blog/js/embed_blocks.js' %}?v=20260801-1" defer></script>{% endif %}
     {% if has_mermaid %}{% include "includes/content/mermaid_js.html" %}{% endif %}
 
     {% include "includes/content/code_highlighting_js.html" %}

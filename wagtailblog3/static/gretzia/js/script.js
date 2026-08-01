@@ -89,9 +89,12 @@
 (function($) {
 	
 	"use strict";
+	var preloaderHandled = false;
 	function handlePreloader() {
+		if (preloaderHandled) return;
+		preloaderHandled = true;
 		if($('.preloader').length){
-			$('.preloader').delay(200).fadeOut(500);
+			$('.preloader').css('pointer-events', 'none').stop(true, true).fadeOut(300);
 		}
 	}
 	
@@ -480,5 +483,9 @@
 		handlePreloader();
 		enableMasonry();
 	});	
+
+	$(function() {
+		window.setTimeout(handlePreloader, 1500);
+	});
 
 })(window.jQuery);

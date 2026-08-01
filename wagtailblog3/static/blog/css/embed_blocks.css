@@ -175,7 +175,7 @@
 .geek-embed-container--collapsed .geek-embed-video-stage,
 .geek-embed-container--collapsed .geek-custom-embed.audio-mode,
 .geek-embed-container--collapsed .geek-native-video-wrapper {
-    display: none;
+    display: none !important;
 }
 .geek-embed-meta .embed-title {
     font-size: 0.82rem;

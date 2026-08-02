@@ -1,3 +1,5 @@
+"""按文件修改时间清理旧的日志轮转备份。"""
+
 from django.core.management.base import BaseCommand
 import os
 from django.conf import settings
@@ -5,6 +7,7 @@ import datetime
 
 
 class Command(BaseCommand):
+	"""扫描日志目录并按需删除过期的轮转文件。"""
 	help = '清理旧日志文件备份'
 	
 	def add_arguments(self, parser):
@@ -14,6 +17,7 @@ class Command(BaseCommand):
 		                    help='仅显示将被删除的文件，不实际删除')
 	
 	def handle(self, *args, **options):
+		# 模拟运行只统计并展示目标文件，默认命令才真正删除文件。
 		days = options['days']
 		dry_run = options['dry_run']
 		
@@ -24,10 +28,10 @@ class Command(BaseCommand):
 		count = 0
 		total_size = 0
 		
-		# 遍历日志目录
+		# 递归遍历日志目录，只处理轮转产生的备份文件。
 		for root, dirs, files in os.walk(log_dir):
 			for file in files:
-				# 只处理日志备份文件（格式如xxx.log.1, xxx.log.2等）
+				# 仅匹配类似 xxx.log.1、xxx.log.2 的备份文件，不触碰当前活动日志。
 				if '.log.' in file:
 					file_path = os.path.join(root, file)
 					file_time = datetime.datetime.fromtimestamp(os.path.getmtime(file_path))

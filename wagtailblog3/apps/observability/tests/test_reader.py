@@ -1,3 +1,5 @@
+"""验证受限日志读取、轮转跟随和游标失效处理。"""
+
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -17,6 +19,7 @@ def _line(second, level="ERROR", message="failure"):
 
 
 class LogReaderTests(SimpleTestCase):
+    """验证日志读取、轮转跟随、游标失效和结果筛选。"""
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
         self.addCleanup(self.tempdir.cleanup)

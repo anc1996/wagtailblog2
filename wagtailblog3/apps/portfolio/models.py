@@ -1,4 +1,4 @@
-# protfolio/models.py
+# 作品集页面模型
 from wagtail.models import Page
 from wagtail.fields import StreamField
 from wagtail.admin.panels import FieldPanel
@@ -8,7 +8,7 @@ from portfolio.blocks import PortfolioStreamBlock
 class PortfolioPage(Page):
     """作品集页面模型"""
     
-    parent_page_types = ["home.HomePage"] # 限制此页面只能作为 HomePage 的子页面
+    parent_page_types = ["home.HomePage"] # 限制此页面只能作为首页的子页面
 
     body = StreamField(
         PortfolioStreamBlock(),

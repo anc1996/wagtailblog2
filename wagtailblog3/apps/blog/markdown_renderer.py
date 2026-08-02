@@ -1,4 +1,4 @@
-"""Project-owned Markdown rendering for blog content."""
+"""博客正文的 Markdown 渲染器。"""
 
 import re
 from collections import defaultdict
@@ -12,7 +12,7 @@ from django.utils.safestring import mark_safe
 
 
 class MarkdownRenderer:
-    """Render Markdown without changing the stored source string."""
+    """在不改变原始正文的前提下渲染 Markdown。"""
 
     _default_tags = {
         "a", "abbr", "blockquote", "br", "caption", "code", "colgroup",
@@ -21,7 +21,8 @@ class MarkdownRenderer:
         "ol", "p", "pre", "span", "strong", "sub", "summary", "sup",
         "table", "tbody", "td", "tfoot", "th", "thead", "tr", "tt",
         "u", "ul",
-    }
+    }# 元素
+    
     _default_attributes = {
         "*": {"class", "id", "style"},
         "a": {"href", "title", "target", "rel"},
@@ -31,12 +32,13 @@ class MarkdownRenderer:
         "div": {"class", "id"},
         "span": {"class", "id", "style"},
         "table": {"class"},
-    }
+    } # 元素
+    
     _default_styles = {
         "color", "background-color", "font-family", "font-weight",
         "text-align", "width", "height", "margin", "padding",
         "font-size", "border",
-    }
+    } # 属性
 
     @classmethod
     def _settings(cls):
@@ -44,7 +46,8 @@ class MarkdownRenderer:
 
     @classmethod
     def prepare_source(cls, source):
-        """Keep the existing list repair behavior without changing storage."""
+        """修复旧内容中的列表缩进，只作用于渲染副本。"""
+        # 某些旧正文把引用符、缩进和列表标记组合在同一行；统一成四空格后才能被 Markdown 正确识别。
         source = smart_str(source or "")
         source = re.sub(
             r"^(>[\s]*)?( {2,3})([-\*\+]\s|\d+\.\s)",
@@ -92,8 +95,7 @@ class MarkdownRenderer:
             "filter_style_properties": set(
                 config.get("allowed_styles", cls._default_styles)
             ),
-            # The project explicitly allows ``a[rel]``. nh3 rejects using
-            # both that attribute and its automatic link_rel injection.
+            # 项目明确允许链接的 rel 属性；关闭 nh3 自动注入，避免同一属性同时配置导致冲突。
             "link_rel": None,
         }
         if config.get("allowed_settings_mode", "extend").lower() == "override":
@@ -106,7 +108,9 @@ class MarkdownRenderer:
 
     @classmethod
     def render(cls, source, context=None):
-        del context  # Kept for Wagtail's block rendering signature.
+        # 保留 Wagtail 块渲染签名，但渲染规则只依赖正文和全局配置。
+        del context
+        # 先由 Markdown 扩展生成 HTML，再由 nh3 做白名单清洗，防止原始正文携带脚本或危险协议。
         rendered = markdown.markdown(
             cls.prepare_source(source),
             **cls.markdown_kwargs(),

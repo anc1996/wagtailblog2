@@ -1,9 +1,12 @@
+"""验证日志筛选和清理确认表单的输入边界。"""
+
 from django.test import SimpleTestCase
 
 from observability.forms import LogClearForm, LogClearSelectionForm, LogFilterForm
 
 
 class LogFilterFormTests(SimpleTestCase):
+    """验证日志筛选和清理确认表单的边界校验。"""
     def _data(self, **overrides):
         data = {
             "domain": "",

@@ -1,4 +1,4 @@
-# search/views.py
+# 搜索应用的页面视图
 from django.core.paginator import EmptyPage, PageNotAnInteger, Paginator
 from django.template.response import TemplateResponse
 from django.http import JsonResponse
@@ -22,7 +22,7 @@ def search(request):
 	# 获取参数
 	search_query = request.GET.get("query", None)
 	page = request.GET.get("page", 1)
-	search_type = request.GET.get("type", "all")  # all, blog, pages
+	search_type = request.GET.get("type", "all")  # 可选：全部、博客或普通页面
 	
 	# 获取新增参数并清理
 	start_date = clean_search_param(request.GET.get("start_date", None))
@@ -32,14 +32,14 @@ def search(request):
 	# 清理搜索查询
 	search_query = clean_search_param(search_query)
 	
-	# 尝试获取缓存结果
+	# 预留片段缓存入口；当前页面仍由核心搜索结果直接渲染。
 	if search_query:
 		cache_key = SearchCache.get_cache_key(
 			search_query, search_type, page, start_date, end_date, order_by
 		)
 		cached_html = None  # 使用片段缓存，可选功能
 	
-	# 执行搜索
+	# 仅在有有效关键词时访问搜索后端。
 	search_results = None
 	if search_query:
 		search_results = perform_search(
@@ -50,7 +50,7 @@ def search(request):
 			order_by=order_by
 		)
 	
-	# 分页处理
+	# 分页对象同时兼容惰性搜索结果和空结果，保证模板始终有稳定结构。
 	if search_results:
 		paginator = Paginator(search_results, 20)  # 每页20条
 		try:
@@ -64,18 +64,18 @@ def search(request):
 		paginator = Paginator([], 20)
 		paginated_results = paginator.page(1)
 	
-	# 如果是AJAX请求（例如，用于无限滚动或动态加载），则返回JSON
+	# 异步请求只返回结果片段，供无限滚动或动态加载使用。
 	if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
 		return search_ajax(request, paginated_results, search_query, search_type, start_date, end_date, order_by)
 	
-	# 获取热门搜索词 (例如最近30天的前10个)
+	# 获取最近 30 天的热门搜索词，分析失败时不影响搜索页面。
 	try:
 		popular_search_terms_list = SearchAnalytics.get_popular_searches(days=30, limit=10)
 	except Exception as e:
 		logger.error(f"获取热门搜索词失败: {e}", exc_info=True)
 		popular_search_terms_list = []
 	
-	# 记录搜索分析 (只有在实际执行搜索时)
+	# 只有真正执行了关键词搜索才记录统计，避免空页面污染数据。
 	if search_query:
 		try:
 			SearchAnalytics.log_search(
@@ -86,7 +86,7 @@ def search(request):
 		except Exception as e:
 			logger.error(f"记录搜索分析错误: {e}", exc_info=True)
 	
-	# 确保传递给模板的值是清理过的，避免显示None
+	# 向模板传递已清理的值，避免把空参数显示成 None。
 	context = {
 		"search_query": search_query or "",
 		"search_results": paginated_results,
@@ -154,11 +154,11 @@ def search_suggestions(request):
 	
 	# 3. 核心业务下推
 	try:
-		# 直接调用我们在 core.py 里修复好的原生高并发热度聚合引擎
+		# 统一调用核心模块的搜索建议聚合逻辑。
 		suggestions = get_search_suggestions(query)
 		return JsonResponse({'suggestions': suggestions})
 	
 	except Exception as e:
-		# 4. 优雅降级：记录日志，但对前端保持静默，绝不抛出 500 破坏 UI 体验
+		# 搜索建议失败时记录日志并返回空列表，避免影响主搜索页面。
 		logger.error(f"传统 AJAX 获取搜索建议时发生错误: {e}", exc_info=True)
 		return JsonResponse({'suggestions': []})

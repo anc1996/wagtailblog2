@@ -18,7 +18,7 @@ MAX_ROTATION = max(spec.backup_count for spec in LOG_FILE_SPECS)
 
 
 class UnsafeLogTarget(ValueError):
-    """目标不再是 catalog 指向的安全普通文件。"""
+    """目标不再是注册表指向的安全普通文件。"""
 
 
 @dataclass(slots=True)
@@ -78,6 +78,7 @@ def _relative_name(spec: LogFileSpec, rotation: int) -> str:
 
 
 def _registered_candidate(spec: LogFileSpec, rotation: int) -> Path:
+    # 清理目标只能来自注册表，随后逐级检查父目录，阻断路径穿越和符号链接跳转。
     if rotation < 0 or rotation > spec.backup_count:
         raise UnsafeLogTarget("轮转编号超出 catalog 允许范围")
     relative = PurePosixPath(_relative_name(spec, rotation))
@@ -151,7 +152,7 @@ def _mark_failure(result: dict, exc: Exception) -> dict:
 
 
 def _restore_quarantined(path: Path, quarantine: Path) -> bool:
-    """Restore a raced target without overwriting a newer path."""
+    """恢复发生竞争的目标文件，但不覆盖后来生成的新路径。"""
     try:
         os.link(quarantine, path, follow_symlinks=False)
     except (FileExistsError, OSError):
@@ -176,6 +177,7 @@ def _truncate_current(spec: LogFileSpec) -> dict:
             bytes_before=before.st_size,
         )
 
+        # 通过已打开的文件描述符截断，避免路径在检查和写入之间被替换。
         flags = os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0)
         descriptor = os.open(path, flags)
         opened = os.fstat(descriptor)
@@ -203,7 +205,7 @@ def _truncate_current(spec: LogFileSpec) -> dict:
         if not result["inode_preserved"]:
             raise UnsafeLogTarget("截断后当前日志 inode 已被替换")
 
-        # 并发 writer 可能已经写入新内容；旧内容仍由 ftruncate 完整释放。
+        # 并发写入进程可能已经写入新内容；旧内容仍由文件截断操作完整释放。
         result["outcome"] = "truncated"
     except (OSError, UnsafeLogTarget, ValueError) as exc:
         _mark_failure(result, exc)
@@ -253,8 +255,8 @@ def _unlink_rotation(spec: LogFileSpec, rotation: int) -> dict:
         if _identity(immediate) != _identity(before):
             raise UnsafeLogTarget("轮转日志在删除前已被替换，已拒绝删除")
 
-        # rename is the atomic ownership boundary: after it succeeds, no later
-        # replacement at the catalog path can be unlinked by this operation.
+        # 原子改名是文件所有权边界：成功后，清理过程只持有隔离文件，
+        # 即使日志路径被新的写入进程替换，也不会误删新文件。
         quarantine = path.with_name(f".{path.name}.cleanup-{uuid.uuid4().hex}")
         os.rename(path, quarantine)
         isolated = _safe_lstat(quarantine)
@@ -317,6 +319,7 @@ def preview_cleanup(
         for rotation in range(1, MAX_ROTATION + 1)
     }
 
+    # 预览只读取元数据，不执行截断或删除；返回值与实际执行结果使用相同的轮转范围。
     for spec in specs:
         for rotation in range(spec.backup_count + 1):
             path = _registered_candidate(spec, rotation)
@@ -356,6 +359,7 @@ def execute_cleanup(specs: tuple[LogFileSpec, ...], scope: str) -> CleanupResult
     _validate_scope(scope)
     if not specs:
         raise ValueError("没有匹配的注册日志")
+    # 当前文件采用截断以保持写入句柄有效，历史轮转文件采用隔离后删除。
     results = []
     for spec in specs:
         for rotation in _selected_rotations(spec, scope):

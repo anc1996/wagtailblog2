@@ -1,3 +1,5 @@
+"""验证日志后台页面的权限、预览和确认流程。"""
+
 import tempfile
 import uuid
 from pathlib import Path
@@ -24,6 +26,7 @@ TEST_STORAGES = {
 
 @override_settings(STORAGES=TEST_STORAGES)
 class LogAdminViewTests(TestCase):
+    """验证日志后台页面的权限、预览、确认和审计流程。"""
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
         self.addCleanup(self.tempdir.cleanup)

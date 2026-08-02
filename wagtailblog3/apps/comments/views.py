@@ -1,4 +1,4 @@
-# comments/views.py
+# 评论提交、互动、删除和分页接口。
 import logging,time
 
 from django.utils import timezone
@@ -35,6 +35,8 @@ def post_comment(request, page_id):
 		is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
 		
 		# --- 评论频率限制 (新增) ---
+		# 限流键只使用已登录用户名，避免匿名 IP 共享代理导致误伤；缓存中保存时间戳列表，
+		# 每次请求先清理窗口外的记录，再判断是否达到配置的最大提交数。
 		# 确保 settings.COMMENT_RATE_LIMIT 存在且 'ENABLED' 为 True
 		if hasattr(settings, 'COMMENT_RATE_LIMIT') and settings.COMMENT_RATE_LIMIT['ENABLED']:
 			rate_limit_cache = caches[settings.COMMENT_RATE_LIMIT['CACHE_ALIAS']]  # 获取指定的缓存实例
@@ -88,6 +90,8 @@ def post_comment(request, page_id):
 				# 移除 guest_name 和 guest_email 的赋值
 				# --- 用户信息设置 结束 ---
 				
+				# 父评论和被回复用户分别来自请求字段；找不到关联对象时只记录日志，
+				# 仍允许把这次评论作为普通根评论保存，避免因为过期前端数据导致整次提交失败。
 				# 设置父评论 (保持不变)
 				parent_id = request.POST.get('parent_id')
 				if parent_id:
@@ -107,6 +111,7 @@ def post_comment(request, page_id):
 						logger.warning(f"被回复的用户不存在: id={replied_to_user_id}")
 				
 				# 记录IP和用户代理 (保持不变)
+				# 优先读取反向代理传递的首个地址，未经过代理时退回服务器连接地址。
 				x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
 				if x_forwarded_for:
 					comment.ip_address = x_forwarded_for.split(',')[0]
@@ -193,6 +198,7 @@ def react_to_comment(request):
 		)
 		
 		if not created:
+			# 唯一约束保证一个用户只有一条反应记录；重复点击取消，点击另一种类型则原子地切换计数。
 			# 如果点击相同类型，则取消反应
 			if reaction.reaction_type == reaction_type:
 				# 更新评论计数
@@ -269,6 +275,8 @@ def delete_comment(request):
 			is_root_comment = comment.parent is None
 			
 			if is_root_comment:
+				# 根评论删除时保留记录但隐藏正文，子回复也做相同处理，
+				# 这样可以保留审计关系，同时避免悬空回复和逐条删除造成的多次请求。
 				# 一级评论：批量软删除所有相关评论
 				with transaction.atomic():  # 确保数据一致性
 					# 获取所有子回复的ID和数量
@@ -306,6 +314,7 @@ def delete_comment(request):
 					'is_root_comment': True
 				})
 			else:
+				# 回复删除后只递减父评论的展示计数，实际数据仍保留为软删除状态。
 				# 二级评论：只删除自己
 				with transaction.atomic():
 					comment.status = 'deleted'
@@ -382,7 +391,7 @@ def edit_comment(request):
 			return JsonResponse({'status': 'error', 'message': '编辑时间已过'}, status=400)
 		
 		
-		# 更新评论内容
+		# 只更新正文和更新时间，不改作者、父子关系等审计字段。
 		
 		comment.content = new_content
 		comment.updated_at = timezone.now()
@@ -418,7 +427,7 @@ def load_comments(request, page_id):
 	else:  # 最新
 		order_by = ['-created_at']
 	
-	# 获取一级评论（不包括回复）
+	# 先只查询根评论；回复通过独立接口按需加载，避免首屏一次性渲染整棵回复树。
 	root_comments = BlogPageComment.objects.filter(
 		page=page,
 		parent__isnull=True,
@@ -429,7 +438,7 @@ def load_comments(request, page_id):
 	paginator = Paginator(root_comments, per_page)
 	comments_page = paginator.get_page(page_num)
 	
-	# 获取用户反应状态
+	# 反应状态按当前页批量查询，模板据此显示当前用户的点赞/踩按钮状态。
 	user_reactions = {}
 	if request.user.is_authenticated:
 		reactions = CommentReaction.objects.filter(
@@ -465,7 +474,7 @@ def load_replies(request, comment_id):
 	try:
 		parent_comment = BlogPageComment.objects.get(id=comment_id, status='approved')
 		
-		# 获取所有回复
+		# 仅返回已审核回复，并预取作者和被回复用户，避免模板逐条触发额外查询。
 		replies = BlogPageComment.objects.filter(
 			parent=parent_comment,
 			status='approved'
@@ -513,6 +522,7 @@ def admin_approve_comment(request, comment_id):
 		comment.save(update_fields=['status'])
 		
 		# 如果是回复，需要更新父评论回复计数
+		# 审核通过后才增加计数，确保列表中的展示数量与可见状态一致。
 		if comment.parent and comment.parent.status == 'approved':
 			comment.parent.reply_count = F('reply_count') + 1
 			comment.parent.save(update_fields=['reply_count'])

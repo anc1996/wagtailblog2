@@ -1,4 +1,4 @@
-# base/tasks.py
+# 基础应用的异步邮件任务
 import logging
 from typing import Dict, List, Any
 from celery import shared_task
@@ -14,9 +14,9 @@ logger = logging.getLogger(__name__)
 def send_form_confirmation_email(self, form_data: Dict[str, Any], email_config: Dict[str, Any]):
 	"""
 	异步发送表单确认邮件任务
-	Args:
-		form_data: 表单提交的数据
-		email_config: 邮件配置信息
+	参数：
+		form_data：表单提交的数据
+		email_config：邮件配置信息
 	"""
 	try:
 		# 提取邮件配置
@@ -108,9 +108,9 @@ def send_form_confirmation_email(self, form_data: Dict[str, Any], email_config: 
 def send_admin_notification_email(self, form_data: Dict[str, Any], admin_config: Dict[str, Any]):
 	"""
 	异步发送管理员通知邮件任务
-	Args:
-		form_data: 表单提交的数据
-		admin_config: 管理员邮件配置
+	参数：
+		form_data：表单提交的数据
+		admin_config：管理员邮件配置
 	"""
 	try:
 		admin_emails = admin_config.get('admin_emails', [])
@@ -187,11 +187,11 @@ def send_bulk_email(email_list: List[str], subject: str, message: str, html_mess
 	"""
 	异步批量发送邮件任务
 
-	Args:
-		email_list: 收件人邮箱列表
-		subject: 邮件主题
-		message: 纯文本邮件内容
-		html_message: HTML邮件内容
+	参数：
+		email_list：收件人邮箱列表
+		subject：邮件主题
+		message：纯文本邮件内容
+		html_message：HTML 邮件内容
 	"""
 	try:
 		from_email = settings.DEFAULT_FROM_EMAIL
@@ -256,11 +256,11 @@ def get_task_status(task_id):
 	"""
 	获取任务执行状态
 
-	Args:
-		task_id: 任务ID
+	参数：
+		task_id：任务 ID
 
-	Returns:
-		dict: 任务状态信息
+	返回值：
+		dict：任务状态信息
 	"""
 	from celery.result import AsyncResult
 	

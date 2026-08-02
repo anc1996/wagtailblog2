@@ -115,8 +115,8 @@ class LogOverviewView(LogAdminView):
     page_title = "日志概览"
 
     def get(self, request, *args, **kwargs):
-        # Consume the one-shot refresh flag, then canonicalize the URL so a
-        # browser reload returns to the normal cached overview.
+        # 消费一次性刷新标记后规范化 URL，使浏览器刷新回到普通缓存概览，
+        # 避免每次浏览器刷新都重复触发全量统计。
         if request.GET.get("refresh") == "1":
             get_overview(refresh=True)
             return HttpResponseRedirect(reverse("observability:overview"))
@@ -139,6 +139,7 @@ class LogRecordsView(LogAdminView):
         query_data.update(self.request.GET.dict())
         form = LogFilterForm(query_data)
         result = None
+        # 读取、筛选和分页均复用同一份表单清洗结果，避免 GET 参数在不同层重复解释。
         if form.is_valid():
             try:
                 filters = {
@@ -370,7 +371,7 @@ class LogClearConfirmView(LogAdminView):
 
 
 class LogClearPreviewView(LogAdminView):
-    """为 dialog 和降级确认页提供同一份结构化预览。"""
+    """为对话框和降级确认页提供同一份结构化预览。"""
 
     def dispatch(self, request, *args, **kwargs):
         require_log_permission(request, MANAGE_PERMISSION)
@@ -386,6 +387,7 @@ class LogClearPreviewView(LogAdminView):
                 {"errors": {"target_type": [{"message": "全部运行日志仅限超级管理员"}]}},
                 status=403,
             )
+        # 目标只通过注册表键解析，客户端不能提交任意服务器路径。
         specs = select_clear_specs(
             selection["target_type"], selection["target"], selection["kind"]
         )

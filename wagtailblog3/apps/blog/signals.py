@@ -1,4 +1,4 @@
-# blog/signals.py
+# 博客正文与 Revision 的清理信号
 import json
 import logging
 from django.db.models.signals import pre_delete, post_save
@@ -23,13 +23,13 @@ def delete_blog_content_from_mongodb(sender, instance, **kwargs):
 	try:
 		mongo_manager = MongoManager()
 		
-		# 1. 精准删除线上供普通用户访问的正式内容记录
+		# 先删除正式内容，再删除该页面所有草稿快照，避免页面删除后留下孤儿正文。
 		if mongo_content_id:
 			result_content = mongo_manager.delete_blog_content(mongo_content_id)
 			if not result_content:
 				logger.warning(f"信号防线提示：尝试删除正式 MongoDB 内容失败，ID: {mongo_content_id}")
 		
-		# 2. 【核心升级】：调用封装好的经理类，批量擦除该页面积攒的所有历史草稿大文本
+		# 草稿集合按 page_id 批量清理，不需要从每条 Revision 再次解析正文。
 		if page_id:
 			deleted_snapshots = mongo_manager.delete_page_revisions(page_id)
 			if deleted_snapshots > 0:
@@ -51,7 +51,7 @@ def cascade_delete_single_mongo_revision(sender, instance, **kwargs):
 		if isinstance(content, str):
 			content = json.loads(content)
 		
-		# 提取我们在序列化阶段（serializable_data）精心埋藏的草稿外键探针
+		# 读取 serializable_data 写入 Revision 的 Mongo 指针，定位对应草稿快照。
 		pointer = content.get('mongo_draft_pointer')
 		
 		if pointer:

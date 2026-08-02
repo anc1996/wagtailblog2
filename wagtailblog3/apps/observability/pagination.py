@@ -108,6 +108,7 @@ def _load_session(token: str, owner_id: int, filter_hash: str) -> tuple[str, dic
                 and state.get("filter") == filter_hash
             ):
                 return token, state
+    # 签名、用户和筛选指纹任一不匹配都不能复用旧游标，避免跨用户或跨查询读取错误页。
     return _new_session(owner_id, filter_hash)
 
 
@@ -180,6 +181,7 @@ def read_log_page(
     if total_pages is not None:
         requested_page = min(requested_page, max(1, int(total_pages)))
 
+    # 从距离目标最近的检查点开始逐页向前推进；不做 OFFSET/总数查询，成本与跳跃距离相关。
     current_page, cursor = _nearest_cursor(state, requested_page)
     bytes_read = 0
     steps = 0
@@ -211,6 +213,7 @@ def read_log_page(
         cursor = last_result.next_cursor
         _remember_cursor(state, current_page, cursor)
 
+    # 达到步数、字节或时间预算时先返回已建立的最深页，下一次请求继续推进同一会话。
     jump_pending = current_page < requested_page
     display_page = current_page if jump_pending else requested_page
     if jump_pending:

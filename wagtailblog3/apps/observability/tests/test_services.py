@@ -1,3 +1,5 @@
+"""验证日志概览、清理执行和幂等审计服务。"""
+
 import tempfile
 import uuid
 import subprocess
@@ -24,6 +26,7 @@ from observability.services import (
 
 
 class LogClearServiceTests(TestCase):
+    """验证日志清理服务、预览结果和幂等审计记录。"""
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
         self.addCleanup(self.tempdir.cleanup)

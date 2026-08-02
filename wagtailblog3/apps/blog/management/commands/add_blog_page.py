@@ -1,4 +1,4 @@
-# blog/management/commands/add_blog_page.py
+"""交互式创建博客页面并保存 Markdown 正文的管理命令。"""
 import sys
 from pathlib import Path
 
@@ -12,6 +12,7 @@ from blog.models import BlogIndexPage, BlogPage
 
 
 class Command(BaseCommand):
+	"""创建博客页、绑定标签，并按参数保存草稿或发布版本。"""
 	help = "交互式添加博客页面，并把正文作为 BlogPage.body 的 markdown_block 保存"
 
 	def add_arguments(self, parser):
@@ -28,6 +29,7 @@ class Command(BaseCommand):
 		)
 
 	def handle(self, *args, **options):
+		# 先完成所有输入和校验，再进入事务，避免交互期间长时间占用数据库事务。
 		parent = self._get_parent(options.get("parent_id"))
 		title = self._get_value(options.get("title"), "请输入博客标题: ").strip()
 		if not title:
@@ -59,10 +61,11 @@ class Command(BaseCommand):
 		)
 
 		with transaction.atomic():
+			# 页面树、标签和 Revision 必须在同一事务中完成，失败时整体回滚。
 			parent.add_child(instance=page)
 			if tags:
 				page.tags.set(*tags)
-			# 重新赋值一次 body，避免后续保存/发布流程拿到被模型 save() 清空后的内存值。
+		# save() 会临时清空并恢复 body；这里显式重新绑定，确保后续发布流程使用完整正文。
 			page.body = [("markdown_block", body)]
 			revision = page.save_revision()
 			if not options.get("draft"):
@@ -77,6 +80,7 @@ class Command(BaseCommand):
 		self.stdout.write(f"标签: {', '.join(tags) if tags else '(无)'}")
 
 	def _get_parent(self, parent_id):
+		"""根据 ID 或交互选择获取博客索引页。"""
 		if parent_id:
 			try:
 				return BlogIndexPage.objects.get(id=parent_id)
@@ -108,11 +112,13 @@ class Command(BaseCommand):
 			self.stdout.write(self.style.ERROR("未匹配到该序号或页面 ID，请重新输入"))
 
 	def _get_value(self, value, prompt):
+		"""优先使用命令行参数，否则从终端读取一项输入。"""
 		if value is not None:
 			return value
 		return input(prompt)
 
 	def _get_body(self, body_file):
+		"""从文件或终端读取 Markdown 正文，并去除结束标记。"""
 		if body_file:
 			path = Path(body_file)
 			if not path.exists():
@@ -128,11 +134,13 @@ class Command(BaseCommand):
 		return "".join(lines).rstrip()
 
 	def _parse_tags(self, raw_tags):
+		"""按逗号拆分标签并过滤空白项。"""
 		if not raw_tags:
 			return []
 		return [tag.strip() for tag in raw_tags.split(",") if tag.strip()]
 
 	def _make_unique_slug(self, parent, slug):
+		"""在同一父页面下递增后缀，生成不重复的 slug。"""
 		base_slug = slug
 		counter = 2
 		while parent.get_children().filter(slug=slug).exists():
@@ -141,4 +149,5 @@ class Command(BaseCommand):
 		return slug
 
 	def _to_rich_text(self, text):
+		"""转义简介并转换换行，避免把用户输入当作 HTML。"""
 		return linebreaks(escape(text))

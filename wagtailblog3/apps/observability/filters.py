@@ -1,4 +1,4 @@
-"""Reusable logging filters."""
+"""可复用的日志过滤器。"""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from .sanitizer import project_relative_path
 
 
 class ModuleFilter(logging.Filter):
-    """Allow exact logger namespaces and descendants, never prefix collisions."""
+    """允许精确的 logger 命名空间及其子级，避免前缀碰撞。"""
 
     def __init__(self, modules=None):
         super().__init__()
@@ -24,7 +24,7 @@ class ModuleFilter(logging.Filter):
 
 
 class MaxLevelFilter(logging.Filter):
-    """Allow records up to and including ``max_level``."""
+    """允许级别不高于 ``max_level`` 的日志记录。"""
 
     def __init__(self, max_level="WARNING"):
         super().__init__()

@@ -1,4 +1,4 @@
-# blog/page_view_counter.py
+# 博客页面访问计数服务
 """
 页面访问计数服务 —— 纯 MySQL 版本。
 
@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 def _get_client_ip(request) -> str:
+    """按代理头和远端地址顺序获取客户端 IP。"""
     x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
     if x_forwarded_for:
         return x_forwarded_for.split(',')[0].strip()
@@ -70,6 +71,7 @@ class PageViewCounter:
                 'user':       user,
             }
 
+            # 以页面、日期、IP 和用户作为幂等键；重复访问只更新审计时间，不重复增加聚合统计。
             existing = PageView.objects.filter(**lookup).first()
 
             if existing:
@@ -77,7 +79,7 @@ class PageViewCounter:
                 PageView.objects.filter(pk=existing.pk).update(last_viewed_at=now)
                 return False
 
-            # 首次访问：写审计日志
+            # 首次访问：先写明细审计记录，再更新按天聚合表。
             PageView.objects.create(
                 page_id       = self.page_id,
                 date          = self.today,
@@ -86,7 +88,7 @@ class PageViewCounter:
                 user_agent    = request.META.get('HTTP_USER_AGENT', ''),
                 last_viewed_at = now,
             )
-            # 同步更新聚合表
+            # 聚合表只保存展示所需的每日计数，避免读取庞大的明细表。
             self._increment_count(PageViewCount)
             return True
 
@@ -104,7 +106,7 @@ class PageViewCounter:
                 defaults = {'count': 1, 'unique_count': 1}
             )
             if not created:
-                # F() 表达式在数据库层原子累加，避免并发竞态
+                # 使用数据库端 F 表达式原子累加，避免并发请求先读后写造成丢计数。
                 PageViewCount.objects.filter(pk=obj.pk).update(
                     count        = F('count') + 1,
                     unique_count = F('unique_count') + 1,
@@ -122,7 +124,7 @@ class PageViewCounter:
             from django.db.models import Sum
             PageViewCount = self._get_model('PageViewCount')
 
-            # 今日统计：直接读今天那一行的 count 字段
+            # 今日统计只读取当天聚合行。
             today_row = PageViewCount.objects.filter(
                 page_id = self.page_id,
                 date    = self.today,
@@ -131,7 +133,7 @@ class PageViewCounter:
             today_count        = today_row['count']        if today_row else 0
             today_unique_count = today_row['unique_count'] if today_row else 0
 
-            # 历史总计：对 PageViewCount 按 page 聚合，行数 = 文章天数，几百行而已
+            # 历史总计继续聚合小表，行数与文章天数相关，而不是与访问明细数相关。
             totals = PageViewCount.objects.filter(
                 page_id = self.page_id,
             ).aggregate(

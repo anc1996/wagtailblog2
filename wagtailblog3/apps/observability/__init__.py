@@ -1,7 +1,7 @@
-"""Project logging framework.
+"""项目日志框架。
 
-Use ``logging.getLogger(__name__)`` in application code.  Django settings only
-need :func:`get_logging_config`; domain routing is declared in ``registry``.
+业务代码使用 ``logging.getLogger(__name__)`` 获取 logger；Django 配置只需调用
+:func:`get_logging_config`，日志域路由统一声明在 ``registry`` 中。
 """
 
 from .config import (

@@ -1,3 +1,5 @@
+"""验证 observability 应用的注册身份和权限配置。"""
+
 import importlib.util
 from pathlib import Path
 
@@ -10,6 +12,7 @@ from django.test import TestCase
 
 
 class ObservabilityAppConfigTests(TestCase):
+    """验证日志应用的注册身份、目录位置和权限迁移兼容性。"""
     def test_app_uses_apps_directory_with_stable_identity(self):
         config = apps.get_app_config("observability")
 

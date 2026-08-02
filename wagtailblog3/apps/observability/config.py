@@ -1,4 +1,4 @@
-"""Django logging configuration built only from the file catalog."""
+"""仅依据日志文件注册表生成 Django 日志配置。"""
 
 from __future__ import annotations
 
@@ -20,6 +20,8 @@ SANITIZER_MODULE = "observability.sanitizer"
 
 
 def _resolve_log_dir(log_dir: str | os.PathLike[str] | None = None) -> Path:
+    # 相对路径统一相对于 Django 项目根目录解析，避免开发服务器和任务进程
+    # 因当前工作目录不同而把日志写到不同位置。
     if log_dir is None:
         from django.conf import settings
 
@@ -34,7 +36,7 @@ def _resolve_log_dir(log_dir: str | os.PathLike[str] | None = None) -> Path:
 
 
 def ensure_log_dirs(log_dir: str | os.PathLike[str] | None = None) -> str:
-    """Create all catalog directories and return the absolute root."""
+    """创建注册表需要的全部目录，并返回绝对路径根目录。"""
     root = _resolve_log_dir(log_dir)
     root.mkdir(parents=True, exist_ok=True)
     for directory in LOG_DIRECTORIES:
@@ -43,6 +45,7 @@ def ensure_log_dirs(log_dir: str | os.PathLike[str] | None = None) -> str:
 
 
 def _handler_filters(filters: list[str] | None = None) -> list[str]:
+    # 使用字典去重并保持顺序，保证基础脱敏过滤器始终存在且不会重复执行。
     return list(dict.fromkeys(["project_relative_path", "sensitive_data", *(filters or [])]))
 
 
@@ -54,7 +57,7 @@ def _rotating_handler(
     formatter: str = "verbose",
     filters: list[str] | None = None,
 ) -> dict:
-    """Build a process-safe handler from catalog metadata only."""
+    """仅使用注册表元数据构造支持多进程的日志处理器。"""
     return {
         "class": "concurrent_log_handler.ConcurrentRotatingFileHandler",
         "level": level,
@@ -94,6 +97,7 @@ def _domain_logger(activity_handler: str, error_handler: str) -> dict:
 
 
 def _install_domain_routes(root: Path, handlers: dict, loggers: dict) -> None:
+    # 日志域、处理器和 logger 路由全部从注册表生成，新增日志域时无需复制配置块。
     for domain in LOG_DOMAINS:
         activity_key = f"{domain.key}_activity"
         error_key = f"{domain.key}_error"
@@ -112,7 +116,7 @@ def get_logging_config(
     *,
     log_dir: str | os.PathLike[str] | None = None,
 ) -> dict:
-    """Build the complete project logging dictionary."""
+    """构造项目完整的日志配置字典。"""
     root = Path(ensure_log_dirs(log_dir))
     filters: dict[str, dict] = {
         "project_relative_path": {
@@ -247,6 +251,7 @@ def get_logging_config(
 
     selected_modules = [name.strip() for name in (modules_filter or []) if name.strip()]
     if selected_modules:
+        # 模块筛选只附加到控制台处理器，文件日志仍保持完整，便于故障后审计。
         filters["module_filter"] = {
             "()": f"{FILTER_MODULE}.ModuleFilter",
             "modules": selected_modules,

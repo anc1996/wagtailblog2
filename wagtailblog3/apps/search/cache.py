@@ -1,4 +1,4 @@
-# search/cache.py
+# 搜索结果缓存工具
 from django.core.cache import cache
 import hashlib
 import json
@@ -10,7 +10,7 @@ class SearchCache:
 	@staticmethod
 	def get_cache_key(query, search_type='all', page=1, start_date=None, end_date=None, order_by=None):
 		"""生成包含时间范围的缓存键"""
-		# 构建包含所有参数的键字符串
+		# 将关键词、类型、页码和筛选条件全部纳入键，防止不同查询相互覆盖。
 		key_elements = [
 			f"search:{query}:{search_type}:{page}"
 		]

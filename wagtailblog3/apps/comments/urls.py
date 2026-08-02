@@ -1,4 +1,4 @@
-# comments/urls.py
+# 评论相关接口路由。
 from django.urls import path
 from . import views
 

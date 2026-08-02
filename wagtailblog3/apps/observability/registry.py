@@ -54,7 +54,7 @@ def handler_name(domain: LogDomain, kind: str) -> str:
 
 
 def resolve_domain(logger_name: str) -> LogDomain | None:
-    """Return the domain owning a logger namespace, if one is registered."""
+    """返回 logger 命名空间所属的已注册日志域；找不到时返回空值。"""
     matches = (
         domain
         for domain in LOG_DOMAINS

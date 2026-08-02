@@ -1,4 +1,4 @@
-# search/urls.py
+# 搜索应用的 URL 路由
 from django.urls import path
 from . import views
 from . import api
@@ -11,9 +11,8 @@ urlpatterns = [
 	path('suggestions/', views.search_suggestions, name='search_suggestions'),
 	
 	
-	# REST API 接口
-	# 搜索内容api
+	# 搜索数据接口
 	path('api/', api.search_api, name='search_api'),
-	# 搜索热词频率
+	# 搜索建议接口
 	path('api/suggestions/', api.search_suggestions_api, name='search_suggestions_api'),
 ]

@@ -1,3 +1,5 @@
+"""验证 Markdown、Mongo 存储和 Vditor 控件之间的兼容契约。"""
+
 import hashlib
 from types import SimpleNamespace
 
@@ -11,6 +13,7 @@ from wagtailblog3.mongodb import MongoDBStreamFieldAdapter
 
 
 class MarkdownStorageCompatibilityTests(SimpleTestCase):
+    """验证 Markdown 在 Mongo 存储、恢复和渲染之间保持原样。"""
     markdown = """# Existing article
 
 ```python
@@ -51,6 +54,7 @@ $$E = mc^2$$
 
 
 class VditorWidgetCompatibilityTests(SimpleTestCase):
+    """验证 Vditor 只增强编辑体验，不改变提交字段和值类型。"""
     markdown = "# title"
 
     def test_widget_keeps_textarea_as_submission_source(self):
@@ -77,6 +81,7 @@ class VditorWidgetCompatibilityTests(SimpleTestCase):
 
 
 class MarkdownRendererCompatibilityTests(SimpleTestCase):
+    """验证表格、代码、公式、Mermaid 和 HTML 清洗等渲染契约。"""
     sample = (
         "# Compatibility\n\n"
         "| Name | Value |\n| --- | --- |\n| old | new |\n\n"

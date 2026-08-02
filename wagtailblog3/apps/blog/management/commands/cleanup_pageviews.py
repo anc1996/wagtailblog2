@@ -1,4 +1,4 @@
-# blog/management/commands/cleanup_pageviews.py
+"""聚合并清理历史页面访问明细的管理命令。"""
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 import datetime
@@ -8,8 +8,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# 创建数据清理命令
 class Command(BaseCommand):
+	"""在删除明细前确保对应日期已有页面访问聚合数据。"""
 	help = '清理旧的详细访问记录并保留聚合数据'
 	
 	def add_arguments(self, parser):
@@ -21,6 +21,7 @@ class Command(BaseCommand):
 		)
 	
 	def handle(self, *args, **options):
+		# 先计算截止时间并补齐聚合，再删除明细，保证清理不会丢失统计数据。
 		retention_days = options['days']
 		cutoff_date = timezone.now() - datetime.timedelta(days=retention_days)
 		
@@ -48,7 +49,7 @@ class Command(BaseCommand):
 			logger.error(f"删除旧记录时出错: {e}", exc_info=True)
 	
 	def _ensure_aggregations(self, cutoff_date):
-		"""确保所有要删除的数据都有对应的聚合记录"""
+		"""确保即将删除的访问明细都有对应的按日聚合记录。"""
 		# 获取最早的记录日期
 		try:
 			earliest = PageView.objects.filter(
@@ -60,7 +61,7 @@ class Command(BaseCommand):
 			
 			self.stdout.write(f'开始聚合从 {earliest_date} 到 {latest_date} 的访问数据')
 			
-			# 对每一天进行聚合
+			# 逐日聚合，便于重复执行时用 update_or_create 修正已有统计。
 			current_date = earliest_date
 			while current_date <= latest_date:
 				# 获取当天的记录
@@ -71,7 +72,7 @@ class Command(BaseCommand):
 					unique_count=Count('session_key', distinct=True)
 				)
 				
-				# 创建或更新聚合记录
+				# 创建或更新聚合记录，页面不存在的异常数据不会写入聚合表。
 				created_count = 0
 				updated_count = 0
 				

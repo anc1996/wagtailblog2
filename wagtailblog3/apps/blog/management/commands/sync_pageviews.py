@@ -1,4 +1,4 @@
-# blog/management/commands/sync_pageviews.py
+"""将 Redis 中的页面访问计数同步到数据库聚合表。"""
 from django.core.management.base import BaseCommand
 import datetime
 import redis
@@ -9,11 +9,12 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# 创建数据同步命令
 class Command(BaseCommand):
+	"""逐页导入当天访问数，并在成功后清理 Redis 计数键。"""
 	help = '从Redis同步页面访问数据到数据库'
 	
 	def handle(self, *args, **options):
+		# Redis 只作为临时计数来源，数据库的按日聚合记录是最终持久化结果。
 		redis_client = redis.Redis(
 			host=getattr(settings, 'REDIS_HOST', 'localhost'),
 			port=getattr(settings, 'REDIS_PORT', 6379),
@@ -23,7 +24,7 @@ class Command(BaseCommand):
 		
 		today = datetime.date.today()
 		
-		# 查找所有带计数的页面
+		# 批量读取缓存中的页面计数键，逐页写入每日聚合表。
 		view_keys = redis_client.keys("page_views:*")
 		
 		synced_count = 0
@@ -32,16 +33,16 @@ class Command(BaseCommand):
 			page_id = key.decode().split(":")[-1]
 			count = int(redis_client.get(key) or 0)
 			
-			# 获取唯一访客数
+			# 唯一访客集合按页面和日期隔离，避免跨天重复累计。
 			unique_key = f"page_unique_views:{page_id}:{today.isoformat()}"
 			unique_count = redis_client.scard(unique_key)
 			
-			# 更新数据库
+			# 页面不存在或数据格式异常时跳过当前键，继续同步其他页面。
 			try:
 				page_id = int(page_id)
 				page_obj = Page.objects.get(id=page_id)
 				
-				# 更新或创建计数记录
+			# 更新或创建计数记录，使命令重复执行时得到幂等的当天统计。
 				view_count, created = PageViewCount.objects.get_or_create(
 					page=page_obj,
 					date=today,
@@ -57,7 +58,7 @@ class Command(BaseCommand):
 					view_count.unique_count = unique_count
 					view_count.save()
 				
-				# 清除Redis计数
+				# 同步成功后删除计数键，避免下一次任务重复导入。
 				redis_client.delete(key)
 				
 				# 保留唯一访客集合，当天结束后自动过期

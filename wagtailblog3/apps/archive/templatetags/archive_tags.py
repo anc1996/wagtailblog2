@@ -1,4 +1,4 @@
-# archive/templatetags/archive_tags.py
+# 归档应用的模板标签
 from django import template
 from django.db.models import Count
 from django.db.models.functions import TruncYear, TruncMonth
@@ -28,7 +28,7 @@ def archive_sidebar(context, current_year=None, current_month=None):
 		count=Count('id')
 	).order_by('-year', '-month')
 
-	# 组织成树形结构
+	# 先建立年份节点，再把月份挂到对应年份，供模板一次性展开。
 	archive_tree = {}
 
 	for item in yearly_archives:
@@ -50,7 +50,7 @@ def archive_sidebar(context, current_year=None, current_month=None):
 				'display_name': f"{month}月"
 			}
 
-	# 创建 URL，并标记默认显示的最近年份。当前归档年份始终可见。
+	# 为年份和月份生成链接，并默认隐藏较早年份；当前查看年份始终保持可见。
 	total_posts = 0
 	hidden_year_count = 0
 	for index, year in enumerate(archive_tree):
@@ -103,7 +103,7 @@ def archive_sidebar(context, current_year=None, current_month=None):
 def get_item(dictionary, key):
     """允许在模板中通过变量访问字典的键值"""
 
-    # 检查字典是否有get方法
+    # 仅对支持 get 方法的映射对象取值，其他类型安全返回空值。
     if hasattr(dictionary, 'get'):
         return dictionary.get(key)
     return None

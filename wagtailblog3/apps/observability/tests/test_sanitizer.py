@@ -1,3 +1,5 @@
+"""验证日志中的敏感数据和服务器路径清洗。"""
+
 import logging
 from pathlib import Path
 
@@ -8,6 +10,7 @@ from observability.sanitizer import REDACTED, SensitiveDataFilter, sanitize_log_
 
 
 class LogSanitizerTests(SimpleTestCase):
+    """验证敏感字段、授权信息和服务器绝对路径的清洗。"""
     def test_redacts_all_required_sensitive_names_and_bearer(self):
         text = " ".join(
             (

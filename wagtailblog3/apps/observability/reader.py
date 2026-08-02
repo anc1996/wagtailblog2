@@ -99,6 +99,7 @@ def _decode_cursor(value: str) -> dict[str, CursorState]:
     if not isinstance(sources, dict):
         raise ValueError("分页游标格式无效")
 
+    # 游标来自客户端，必须逐字段校验类型和非负范围后才能参与文件定位。
     states: dict[str, CursorState] = {}
     for source, state in sources.items():
         if (
@@ -276,6 +277,7 @@ def _scan_source(
     until: datetime | None,
 ) -> SourceScan:
     """向前扫描并在扫描过程中筛选，直到匹配数或字节预算满足。"""
+    # 先按设备号和 inode 验证文件，再在受限字节预算内从尾部向前扫描，避免读入整文件。
     opened = _open_verified(path, expected_identity)
     if not opened:
         return SourceScan([], 0, 0, valid=False)
@@ -451,6 +453,7 @@ def read_logs(
     """跨文件读取最新记录，并用签名游标保存各文件扫描进度。"""
     page_size = min(max(page_size, 1), 200)
     result_limit = min(page_size, MAX_RESULTS)
+    # 首页建立真实文件快照；后续请求只接受能通过 inode 和内容锚点验证的游标来源。
     specs = iter_log_files(domain or None, kind or None)
     states = _decode_cursor(cursor)
     sources = _cursor_sources(states, specs) if cursor else _initial_sources(specs, include_rotated)
@@ -489,6 +492,7 @@ def read_logs(
             record.rotation = rotation
             candidates.append(record)
 
+    # 不同日志文件合并后按时间倒序取一页，多取一条用于判断是否还有下一页。
     candidates.sort(
         key=lambda item: item.timestamp or datetime.min,
         reverse=True,

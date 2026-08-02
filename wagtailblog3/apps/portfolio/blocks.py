@@ -1,4 +1,4 @@
-# portfolio/blocks.py
+# 作品集应用的 StreamField 块定义
 
 
 from wagtail.blocks import (
@@ -53,15 +53,13 @@ class FeaturedPostsBlock(StructBlock):
         template = "portfolio/blocks/featured_posts_block.html"
 
 
-# 定义一个名为 PortfolioStreamBlock 的 StreamBlock
-# 它继承自 BaseStreamBlock，这意味着它会包含 BaseStreamBlock 中定义的块类型
+# 定义作品集页面使用的 StreamBlock
+# 继承基础内容块，复用通用内容类型并追加作品集专属块。
 class PortfolioStreamBlock(BaseStreamBlock):
     """ 用于 Portfolio 页面或模型的主要 StreamField 的块定义。 """
    
-    # group="Sections" 将这个块放在 Wagtail 后台的 "Sections" 分组下
+    # 将卡片放入后台的“选项”分组。
     card = CardBlock(group="选项")
-    # 在 PortfolioStreamBlock 中添加 FeaturedPostsBlock，并将其分组到 "Sections"
-    # "featured_posts" 是块的别名
-    # group="Sections" 将这个块放在 Wagtail 后台的 "Sections" 分组下
+    # 将特色文章列表放入同一分组；featured_posts 是块在数据中的名称。
     featured_posts = FeaturedPostsBlock(group="选项")
 

@@ -1,4 +1,4 @@
-# blog/forms.py
+# 博客应用的表单定义
 
 
 from django import forms

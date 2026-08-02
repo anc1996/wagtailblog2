@@ -1,4 +1,4 @@
-# blog/views.py 中修改视图
+# 博客应用的接口和作者视图
 from django.http import JsonResponse
 from wagtail.models import Page
 from wagtail.search.backends import get_search_backend
@@ -28,7 +28,7 @@ def toggle_reaction(request, page_id):
 	"""
 	page = get_object_or_404(Page, id=page_id)
 	
-	# 1. 获取 reaction_type_id (兼容表单数据和JSON数据)
+	# 同时兼容表单和 JSON 请求，确保不同前端调用方式得到同一反应类型。
 	reaction_type_id = request.POST.get('reaction_type') or request.POST.get('reaction_id')
 	
 	if not reaction_type_id:
@@ -45,7 +45,7 @@ def toggle_reaction(request, page_id):
 	from .models import ReactionType, Reaction
 	reaction_type = get_object_or_404(ReactionType, id=reaction_type_id)
 	
-	# 2. 识别用户
+	# 登录用户按用户 ID 识别；匿名用户确保有会话，再按会话键识别。
 	user = request.user if request.user.is_authenticated else None
 	if not user and not request.session.session_key:
 		request.session.save()
@@ -53,7 +53,7 @@ def toggle_reaction(request, page_id):
 	
 	ip = get_client_ip(request)
 	
-	# 3. 查找现有反应
+	# 一个主体对同一页面只保留一条反应，后续点击表现为取消或切换。
 	if user:
 		existing = Reaction.objects.filter(page=page, user=user).first()
 	else:
@@ -61,7 +61,7 @@ def toggle_reaction(request, page_id):
 	
 	action = ''
 	
-	# 4. 执行增删改逻辑
+	# 按当前反应是否存在以及类型是否相同，分别执行删除、更新或新增。
 	if existing:
 		if existing.reaction_type_id == int(reaction_type_id):
 			# 点击了同一个 -> 取消
@@ -83,11 +83,11 @@ def toggle_reaction(request, page_id):
 		)
 		action = 'added'
 	
-	# 5. 【关键修改】获取全量计数，而不仅仅是当前的
+	# 返回该页面所有反应类型的完整计数，让前端一次性刷新所有按钮。
 	reaction_counts_query = Reaction.objects.filter(page=page).values('reaction_type').annotate(
 		count=models.Count('id'))
 	
-	# 转换为字典格式 {type_id: count}
+	# 转换为 {反应类型 ID: 数量}，缺失类型由前端按 0 处理。
 	counts = {r['reaction_type']: r['count'] for r in reaction_counts_query}
 	
 	return JsonResponse({
@@ -102,7 +102,7 @@ def get_reaction_counts(request, page_id):
 	"""获取页面的反应计数"""
 	page = get_object_or_404(Page, id=page_id)
 	
-	# 获取所有反应类型
+	# 先取得完整类型列表，确保没有任何反应记录的类型也会出现在响应中。
 	from .models import ReactionType
 	reaction_types = ReactionType.objects.all().order_by('display_order')
 	
@@ -127,7 +127,7 @@ def get_reaction_counts(request, page_id):
 			'count': counts.get(rt.id, 0)
 		})
 	
-	# 检查当前用户是否有反应
+	# 登录用户和匿名会话使用与切换接口相同的识别规则。
 	user_reaction = None
 	if request.user.is_authenticated:
 		reaction = Reaction.objects.filter(
@@ -193,6 +193,7 @@ class AuthorListView(ListView):
 	paginate_by = 10  # 每页显示 10 位作者
 	
 	def get_queryset(self):
+		# 过滤在数据库层完成，分页器只读取当前页的作者。
 		queryset = super().get_queryset()
 		search_query = self.request.GET.get('q')  # 获取搜索参数 'q'
 		page_number = self.request.GET.get('page')
@@ -223,6 +224,7 @@ class AuthorDetailView(DetailView):
 	context_object_name = 'author'
 	
 	def get_context_data(self, **kwargs):
+		# 详情页只查询当前作者已发布文章，并按发布日期倒序展示。
 		context = super().get_context_data(**kwargs)
 		author = self.get_object()
 		

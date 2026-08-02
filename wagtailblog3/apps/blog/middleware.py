@@ -1,4 +1,4 @@
-# blog/middleware.py
+# 博客页面访问中间件占位
 from django.utils.deprecation import MiddlewareMixin
 import logging
 

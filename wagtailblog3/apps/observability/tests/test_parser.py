@@ -1,9 +1,12 @@
+"""验证日志头、相对路径和多行异常信息的解析。"""
+
 from django.test import SimpleTestCase
 
 from observability.parser import parse_bytes
 
 
 class LogParserTests(SimpleTestCase):
+    """验证标准日志头、相对路径和多行回溯的解析结果。"""
     def test_parses_standard_record_and_multiline_traceback(self):
         data = (
             b"[2026-07-29 15:00:00] ERROR [blog.views:save:42] "

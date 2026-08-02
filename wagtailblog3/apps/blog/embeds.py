@@ -1,11 +1,11 @@
 #!/user/bin/env python3
 # -*- coding: utf-8 -*-
-# wagtailblog3/apps/blog/embeds.py
+# 博客应用的第三方媒体嵌入解析器
 import re
 from wagtail.embeds.finders.base import EmbedFinder
 
 # ==========================================
-# 1. Bilibili (B站) 视频解析器
+# 1. 哔哩哔哩视频解析器
 # ==========================================
 class BilibiliFinder(EmbedFinder):
     pattern = re.compile(r'bilibili\.com/video/(BV[a-zA-Z0-9]+)')
@@ -26,7 +26,7 @@ class BilibiliFinder(EmbedFinder):
         return {'title': 'Bilibili Video', 'provider_name': 'Bilibili', 'type': 'video', 'width': 1000, 'height': 562, 'thumbnail_url': '', 'html': html}
 
 # ==========================================
-# 2. 腾讯视频 (Tencent Video) 解析器
+# 2. 腾讯视频解析器
 # ==========================================
 class TencentVideoFinder(EmbedFinder):
     pattern = re.compile(r'qq\.com/x/(?:cover/[^/]+/|page/)([a-zA-Z0-9]+)\.html')
@@ -47,7 +47,7 @@ class TencentVideoFinder(EmbedFinder):
         return {'title': 'Tencent Video', 'provider_name': 'Tencent', 'type': 'video', 'width': 1000, 'height': 562, 'thumbnail_url': '', 'html': html}
 
 # ==========================================
-# 3. 优酷视频 (Youku) 解析器
+# 3. 优酷视频解析器
 # ==========================================
 class YoukuFinder(EmbedFinder):
     pattern = re.compile(r'youku\.com/v_show/id_([a-zA-Z0-9=]+)')
@@ -68,7 +68,7 @@ class YoukuFinder(EmbedFinder):
         return {'title': 'Youku Video', 'provider_name': 'Youku', 'type': 'video', 'width': 1000, 'height': 562, 'thumbnail_url': '', 'html': html}
 
 # ==========================================
-# 4. 网易云音乐 (NetEase Cloud Music)
+# 4. 网易云音乐解析器
 # ==========================================
 class NetEaseMusicFinder(EmbedFinder):
     song_pattern = re.compile(r'music\.163\.com/(?:#/)?song\?id=(\d+)')
@@ -89,6 +89,7 @@ class NetEaseMusicFinder(EmbedFinder):
         )
 
     def _parse_url(self, url):
+        # 网易云存在普通歌曲、外链和播放器三种 URL 形态，依次尝试并返回歌曲 ID 与自动播放标记。
         match = self.outchain_pattern.search(url)
         if match:
             return match.group(1), match.group(2).lower() == 'use'
@@ -125,7 +126,7 @@ class NetEaseMusicFinder(EmbedFinder):
         }
 
 # ==========================================
-# 5. QQ音乐 (QQ Music) 解析器
+# 5. QQ 音乐解析器
 # ==========================================
 class QQMusicFinder(EmbedFinder):
     pattern = re.compile(r'y\.qq\.com/n/ryqq/songDetail/([a-zA-Z0-9]+)')
@@ -146,7 +147,7 @@ class QQMusicFinder(EmbedFinder):
         return {'title': 'QQ Music', 'provider_name': 'QQ Music', 'type': 'rich', 'width': 1000, 'height': 86, 'html': html}
 
 # ==========================================
-# 6. 酷狗音乐 (Kugou Music) 解析器
+# 6. 酷狗音乐解析器
 # ==========================================
 class KugouMusicFinder(EmbedFinder):
     pattern = re.compile(r'kugou\.com/mixsong/([a-zA-Z0-9]+)\.html')
@@ -168,7 +169,7 @@ class KugouMusicFinder(EmbedFinder):
         return {'title': 'Kugou Music', 'provider_name': 'Kugou', 'type': 'rich', 'width': 1000, 'height': 100, 'html': html}
 
 # ==========================================
-# 7. 咪咕音乐 (Migu Music) 解析器
+# 7. 咪咕音乐解析器
 # ==========================================
 class MiguMusicFinder(EmbedFinder):
     pattern = re.compile(r'music\.migu\.cn/v3/music/song/([0-9]+)')

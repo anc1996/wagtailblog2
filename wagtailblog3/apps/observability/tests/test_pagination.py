@@ -1,3 +1,5 @@
+"""验证日志分页会话和签名游标的连续读取行为。"""
+
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -24,6 +26,7 @@ def _line(second):
 
 @override_settings(CACHES=TEST_CACHES)
 class LogPaginationTests(SimpleTestCase):
+    """验证基于签名游标的分页、跳页预算和会话隔离。"""
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
         self.addCleanup(self.tempdir.cleanup)

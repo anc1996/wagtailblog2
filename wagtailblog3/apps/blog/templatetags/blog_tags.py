@@ -1,4 +1,4 @@
-# blog/templatetags/blog_tags.py
+# 博客应用的模板标签
 from collections import Counter
 from django import template
 from wagtail.models import Site  # Site 用于获取站点根页面
@@ -56,7 +56,7 @@ def top_tags_sidebar(context):
 				tag_instance.num_times = count_num
 				top_tags_final_list.append(tag_instance)
 	except Exception as e:
-		# print(f"Error in top_tags_sidebar: {e}")
+		# 标签统计失败时保持侧栏为空，不影响正文页面渲染。
 		pass
 	
 	return {
@@ -95,13 +95,13 @@ def get_site_root_details(context):  #
 		if site and site.root_page:  #
 			site_root_page_obj = site.root_page.specific  # 获取 specific 实例 #
 			
-			# 判断与当前页面的关系 #
+			# 判断根页面是否就是当前页，或是否为当前页的祖先。
 			if site_root_page_obj and current_page_from_context:  #
-				# 确保 current_page_from_context 是一个有效的 Page 对象 #
+				# 只有具备主键的页面对象才参与关系判断。
 				if hasattr(current_page_from_context, 'pk'):  #
 					is_current = (site_root_page_obj.pk == current_page_from_context.pk)  #
 					is_ancestor = False  #
-					# 确保 site_root_page_obj 有 is_ancestor_of 方法 #
+					# 某些自定义页面可能没有祖先判断方法，需先检查再调用。
 					if hasattr(site_root_page_obj, 'is_ancestor_of'):  #
 						is_ancestor = site_root_page_obj.is_ancestor_of(current_page_from_context)  #
 					is_current_or_ancestor_of_root = is_current or is_ancestor  #
@@ -157,6 +157,5 @@ def get_tag_index_page():
     """
     一个简单的模板标签，用于获取项目中第一个公开的 BlogTagIndexPage 实例。
     """
-    # 返回第一个处于“live”状态的 BlogTagIndexPage 页面对象
-    # 如果不存在，则返回 None
+	# 返回第一个已发布的标签索引页；不存在时返回 None。
     return BlogTagIndexPage.objects.live().first()

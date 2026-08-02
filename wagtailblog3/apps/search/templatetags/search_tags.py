@@ -1,4 +1,4 @@
-# search/templatetags/search_tags.py
+# 搜索应用的模板过滤器
 from django import template
 
 register = template.Library()

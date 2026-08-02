@@ -1,4 +1,4 @@
-# archive/views.py
+# 归档应用的前台视图
 from django.http import JsonResponse
 from django.shortcuts import render
 from django.db.models import Count
@@ -32,7 +32,7 @@ def get_archive_data():
 		count=Count('id')
 	).order_by('-year', '-month')
 	
-	# 组织成树形结构
+	# 先建立年份节点，再把月份挂到对应年份，避免模板重复聚合数据库结果。
 	archive_tree = {}
 	
 	for item in yearly_archives:
@@ -62,7 +62,7 @@ def archives_api(request):
 	"""归档数据的JSON API"""
 	archive_data = get_archive_data()
 	
-	# 转换为可序列化的格式
+	# 将日期对象组成的树转换为纯数字和字符串，确保响应可以直接序列化为 JSON。
 	data = []
 	for year, year_data in archive_data.items():
 		year_obj = {
@@ -100,7 +100,7 @@ def year_archive(request, year):
 	# 按日期降序排序
 	pages_queryset = pages_queryset.order_by('-date')
 	
-	# 分页处理
+	# 分页处理；非法页码回退到第一页，超出范围则展示最后一页。
 	paginator = Paginator(pages_queryset, 10)  # 每页10篇
 	
 	try:
@@ -137,7 +137,7 @@ def month_archive(request, year, month):
 	search_query = request.GET.get('search', '').strip()
 	page_number = request.GET.get('page')
 	
-	# 计算日期范围
+	# 使用左闭右开区间覆盖整月，避免依赖月份最后一天的具体日期。
 	start_date = datetime.date(year, month, 1)
 	# 计算下个月的第一天
 	if month == 12:
@@ -159,7 +159,7 @@ def month_archive(request, year, month):
 	# 按日期降序排序
 	pages_queryset = pages_queryset.order_by('-date')
 	
-	# 分页处理
+	# 分页处理；非法页码回退到第一页，超出范围则展示最后一页。
 	paginator = Paginator(pages_queryset, 10)  # 每页10篇
 	
 	try:

@@ -1,9 +1,12 @@
+"""验证评论 Markdown 的清理、安全语法和回复提及处理。"""
+
 from django.test import SimpleTestCase
 
 from comments.markdown import render_comment_markdown, render_reply_markdown
 
 
 class CommentMarkdownTests(SimpleTestCase):
+    """验证评论 Markdown 的语法范围、清理规则和回复提及处理。"""
     def test_renders_gfm_style_table(self):
         rendered = render_comment_markdown(
             "| 名称 | 数量 |\n| --- | ---: |\n| 苹果 | 2 |"

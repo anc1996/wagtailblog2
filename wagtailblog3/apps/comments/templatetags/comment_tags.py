@@ -1,4 +1,4 @@
-# wagtailblog3/apps/comments/templatetags/comment_tags.py
+# 评论模板标签和安全 Markdown 过滤器。
 from django import template
 from django.utils.safestring import mark_safe
 from django.utils.html import conditional_escape
@@ -26,6 +26,7 @@ def render_comments(context, page):
 	paginator = Paginator(comments, 20)  # 每页20条
 	comments_page = paginator.get_page(1)  # 默认第一页
 
+	# 只查询当前页评论的反应，避免把整篇文章的点赞记录加载到内存。
 	# 获取用户反应状态
 	user_reactions = {}
 	if request.user.is_authenticated:
@@ -56,22 +57,23 @@ def render_comments(context, page):
 
 @register.filter(name='render_markdown')
 def render_markdown(value):
-	"""Render the restricted, sanitized Markdown dialect used by comments."""
+	"""渲染评论使用的受限且经过清理的 Markdown 方言。"""
 	return mark_safe(render_comment_markdown(value))
 
 
 @register.filter(name='render_reply_markdown')
 def render_reply_markdown(value, replied_to_username):
-	"""Render reply content while its structured @mention is shown separately."""
+	"""渲染回复正文；结构化的 @提及由模板单独展示。"""
 	return mark_safe(render_reply(value, replied_to_username))
 
 
 @register.filter(name='escape_attr')
 def escape_attr(value):
-	"""Escape raw Markdown before placing it in a data attribute."""
+	"""将原始 Markdown 转义后再放入 HTML 数据属性。"""
 	return conditional_escape(value or "")
 
 
 @register.filter(name='get_item')
 def get_item(dictionary, key):
+	"""按字符串键读取模板中传入的字典。"""
 	return dictionary.get(str(key))

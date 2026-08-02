@@ -1,3 +1,3 @@
 from django.contrib import admin
 
-# Register your models here.
+# 如需使用 Django 原生后台注册模型，可在此处添加。

@@ -1,4 +1,4 @@
-# comments/wagtail_hooks.py
+# 评论后台管理、批量操作和自定义管理路由。
 import logging
 from django.urls import path, reverse
 from django.utils.translation import gettext_lazy as _
@@ -83,6 +83,8 @@ class CommentButtonHelper(ButtonHelper):
 
 		btns = super().get_buttons_for_obj(obj, exclude, classnames_add, classnames_exclude)
 
+		# 先保留 ModelAdmin 默认按钮，再按评论状态追加审核、软删除和彻底删除。
+		# 这样可以复用 Wagtail 的权限和样式，同时避免对已完成状态显示无效操作。
 		# 添加额外按钮
 		pk = getattr(obj, self.opts.pk.attname)
 
@@ -153,6 +155,7 @@ class CommentAdmin(ModelAdmin):
 	def real_delete_comments(self, request, queryset):
 		"""批量真删除评论"""
 		count = 0
+		# 彻底删除包含递归清理和计数维护，不能直接 queryset.delete()，因此逐条调用模型方法。
 		for comment in queryset:
 			try:
 				comment.real_delete()
@@ -241,7 +244,7 @@ class CommentDashboardAdmin(ModelAdmin):
 	exclude_from_explorer = False
 
 	def get_admin_urls_for_registration(self):
-		"""Register the global dashboard without an object instance ID."""
+		"""注册不依赖具体对象 ID 的全局统计仪表板。"""
 		urls = super().get_admin_urls_for_registration()
 		urls += (
 			path(
@@ -264,6 +267,8 @@ class CommentDashboardAdmin(ModelAdmin):
 		last_week = today - timedelta(days=7)
 		last_month = today - timedelta(days=30)
 
+		# 各时间窗口使用创建日期统计，热门评论和页面排行则直接交给数据库排序，
+		# 只取前五条以控制后台仪表板的查询和渲染开销。
 		# 评论统计数据
 		context = {
 			'total_comments': BlogPageComment.objects.count(),
@@ -298,6 +303,7 @@ modeladmin_register(CommentManagementGroup)
 # 注册自定义操作URLs
 @hooks.register('register_admin_urls')
 def register_comment_actions_urls():
+	"""注册按钮使用的审核、软删除和彻底删除接口。"""
 
 	def approve_comment(request, pk):
 		"""审核通过评论"""
@@ -312,7 +318,7 @@ def register_comment_actions_urls():
 			logger.error(f"审核评论失败: ID={pk}, 错误={e}", exc_info=True)
 			messages.error(request, _("审核评论 #{} 时发生错误").format(pk))
 
-		# 使用绝对URL而不是命名空间
+		# 使用稳定的绝对管理路径，避免不同 Wagtail ModelAdmin 版本的命名空间差异。
 		return redirect('/admin/comments/blogpagecomment/')
 
 	def soft_delete_comment(request, pk):

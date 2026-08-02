@@ -1,4 +1,4 @@
-# apps/search/core.py
+# 搜索应用的核心检索引擎
 """
 搜索核心引擎（v4 终极版 - 动态映射 + 停用词拦截）
 
@@ -89,7 +89,7 @@ def _clean_query(query_string):
 
 
 # =============================================================================
-# 惰性 ES 结果代理：count 走 _count、切片走 from/size
+# 惰性搜索结果代理：总数走计数接口，分页走 from/size。
 # =============================================================================
 class ESLazyResults:
 	def __init__(self, es_client, index_name, dsl_query, dsl_filter):
@@ -100,6 +100,7 @@ class ESLazyResults:
 		self._count_cache = None
 
 	def _build_body(self, frm=0, size=20, source=False):
+		# 统一构造查询体，确保计数和分页使用完全相同的过滤条件。
 		bool_body = {"must": [self.query]}
 		if self.filter:
 			bool_body["filter"] = self.filter
@@ -112,6 +113,7 @@ class ESLazyResults:
 		}
 
 	def count(self):
+		# 计数结果只请求一次，避免分页流程重复访问搜索引擎。
 		if self._count_cache is None:
 			body = {"query": self._build_body()["query"]}
 			try:
@@ -127,6 +129,7 @@ class ESLazyResults:
 		return min(self.count(), MAX_RESULT_WINDOW)
 
 	def __getitem__(self, k):
+		# 将 Django 分页器的切片转换为搜索引擎的 from/size 参数。
 		if isinstance(k, slice):
 			start = k.start or 0
 			stop = k.stop if k.stop is not None else (start + 20)
@@ -136,6 +139,7 @@ class ESLazyResults:
 		return objs[0] if objs else None
 
 	def _fetch_slice(self, start, size):
+		# 搜索引擎返回 ID 后，再按原顺序从 Wagtail 查询具体页面对象。
 		if size <= 0:
 			return []
 		if start >= MAX_RESULT_WINDOW:
@@ -221,12 +225,12 @@ def _get_es_client_and_index():
 
 
 # =============================================================================
-# 核心 DSL 构造：字段加权 × 短语命中 × 分词 fallback
+# 核心查询构造：字段加权、短语命中与分词兜底。
 # =============================================================================
 def _build_search_dsl(clean_query, search_type, parsed_start, parsed_end):
 	should_clauses = []
 
-	# A. 字段级 match_phrase（精确连贯短语 × 字段权重 × 10）
+	# A. 字段级短语匹配：连续命中时叠加字段权重和短语加成。
 	for field, weight in FIELD_WEIGHTS.items():
 		should_clauses.append({
 			"match_phrase": {
@@ -238,14 +242,14 @@ def _build_search_dsl(clean_query, search_type, parsed_start, parsed_end):
 			}
 		})
 
-	# B. 分词 fallback（加入 75% 命中率防线）
+	# B. 分词兜底：要求至少命中 75% 的词，阻止低质量的满屏结果。
 	should_clauses.append({
 		"multi_match": {
 			"query": clean_query,
 			"fields": [f"{f}^{w}" for f, w in FIELD_WEIGHTS.items()],
 			"type": "best_fields",
 			"operator": "or",
-			"minimum_should_match": "75%",  # 核心拦截：搜4个词至少要命中3个，彻底告别单字满屏
+			"minimum_should_match": "75%",  # 例如四个词至少命中三个。
 			"boost": 1.0,
 		}
 	})
@@ -257,7 +261,7 @@ def _build_search_dsl(clean_query, search_type, parsed_start, parsed_end):
 		}
 	}
 
-	# C. 过滤条件
+	# C. 按内容类型过滤，保证“博客”和“普通页面”互斥。
 	dsl_filter = [
 		{"term": {"live_filter": True}},
 	]
@@ -269,7 +273,7 @@ def _build_search_dsl(clean_query, search_type, parsed_start, parsed_end):
 			"bool": {"must_not": [{"term": {"_django_content_type": "blog.BlogPage"}}]}
 		})
 
-	# D. 日期区间
+	# D. 日期区间过滤；博客使用自定义日期字段，其他页面使用发布时间字段。
 	if parsed_start or parsed_end:
 		range_q = {}
 		if parsed_start:
@@ -298,7 +302,7 @@ def perform_search(query_string, search_type='all', start_date=None, end_date=No
 
 	clean_query = _clean_query(query_string)
 
-	# 【新增应用层拦截】：如果是空字符、单字查询，或常见停用词，直接返回空查询集
+	# 空字符串、单字或停用词直接返回空结果，避免触发无意义的全表扫描。
 	if not clean_query or _is_meaningless_query(clean_query):
 		return _build_base_qs(search_type, parsed_start, parsed_end, order_by).none()
 
@@ -338,9 +342,10 @@ def perform_search(query_string, search_type='all', start_date=None, end_date=No
 
 
 # =============================================================================
-# JSON 网关
+# 接口结果转换
 # =============================================================================
 def format_search_results_for_api(search_results):
+	# 将页面对象转换为稳定的 JSON 字段，避免把 Wagtail 内部对象直接暴露给前端。
 	results_data = []
 	if not search_results:
 		return results_data

@@ -1,6 +1,6 @@
 #!/user/bin/env python3
 # -*- coding: utf-8 -*-
-# wagtailblog3/apps/blog/markdown_extensions.py
+# Markdown 链接扩展
 
 from markdown.extensions import Extension
 from markdown.treeprocessors import Treeprocessor
@@ -14,12 +14,13 @@ class WagtailLinkRewriter(Treeprocessor):
 	"""
 	
 	def run(self, root):
+		# Markdown 先生成临时 page:ID 链接，再在树处理阶段转换为真实页面地址。
 		for element in root.iter('a'):
 			href = element.get('href')
 			if href and href.startswith('page:'):
 				try:
 					page_id = int(href.split(':')[1])
-					# specific=False 提高性能，只获取 URL
+					# 直接查询基础 Page，只为生成 URL，避免额外构造具体页面对象。
 					page = Page.objects.get(id=page_id)
 					real_url = page.get_url()
 					
@@ -33,7 +34,7 @@ class WagtailLinkRewriter(Treeprocessor):
 					# 如果页面ID无效或页面被删除
 					element.set('href', '#broken-link')
 					element.set('title', '链接无效')
-					# 可选：标记为损坏的链接样式
+					# 添加样式标记，方便前端提示用户该链接已经失效。
 					element.set('class', 'broken-link')
 
 

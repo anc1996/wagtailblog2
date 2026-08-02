@@ -1,4 +1,4 @@
-# archive/wagtail_hooks.py
+# 归档应用的 Wagtail 后台扩展
 from wagtail import hooks
 from wagtail.admin.menu import MenuItem
 from django.urls import reverse, path

@@ -1,3 +1,5 @@
+"""验证日志概览缓存和清理审计的后台行为。"""
+
 from pathlib import Path
 import tempfile
 from unittest.mock import patch
@@ -11,6 +13,7 @@ from observability.services import OVERVIEW_CACHE_KEY, get_overview
 
 
 class BatchFiveOverviewAndAuditTests(TestCase):
+    """验证概览缓存、审计默认值和后台筛选上下文。"""
     def test_manual_refresh_invalidates_overview_cache(self):
         cache.set(OVERVIEW_CACHE_KEY, {"stale": True}, timeout=30)
         with patch("observability.services.read_logs", return_value=type("Result", (), {"records": []})()), patch(

@@ -14,9 +14,14 @@ from .views import (
 app_name = "observability"
 
 urlpatterns = [
+    # /admin/reports/system-logs/：日志概览首页，展示各日志域的大小、轮转和近期错误统计。
     path("", LogOverviewView.as_view(), name="overview"),
+    # /admin/reports/system-logs/records/：日志记录查询页，支持按域、类型、级别、时间和关键词筛选。
     path("records/", LogRecordsView.as_view(), name="records"),
+    # /admin/reports/system-logs/audits/：日志清理审计页，查看清理目标、状态、操作人和执行结果。
     path("audits/", LogAuditView.as_view(), name="audits"),
+    # /admin/reports/system-logs/clear/：日志清理确认页，提交前展示清理范围并要求二次确认。
     path("clear/", LogClearConfirmView.as_view(), name="clear"),
+    # /admin/reports/system-logs/clear/preview/：异步生成清理预览，返回匹配文件数和待释放容量。
     path("clear/preview/", LogClearPreviewView.as_view(), name="clear_preview"),
 ]

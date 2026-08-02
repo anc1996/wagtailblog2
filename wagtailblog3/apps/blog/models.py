@@ -1,4 +1,4 @@
-# blog/models.py
+# 博客应用的页面、媒体和统计模型
 import logging,uuid,json,re,time
 from datetime import datetime
 
@@ -92,6 +92,7 @@ class BlogTagIndexPage(Page):
 	items_per_page = 20
 	
 	def get_context(self, request, *args, **kwargs):
+		"""根据标签筛选或标签列表模式构造分页上下文。"""
 		context = super().get_context(request, *args, **kwargs)
 		
 		tag_slug_filter = request.GET.get('tag')  # ?tag=<slug>
@@ -109,7 +110,7 @@ class BlogTagIndexPage(Page):
 		context['mode'] = None  # "tag_detail" 或 "tag_list"
 		
 		if tag_slug_filter:
-			# --- 模式 A: 标签详情模式 (查看特定标签下的文章) ---
+			# 标签详情模式：先锁定一个标签，再在数据库中叠加标题和日期条件。
 			context['mode'] = "tag_detail"
 			try:
 				tag_object = Tag.objects.get(slug=tag_slug_filter)
@@ -144,7 +145,7 @@ class BlogTagIndexPage(Page):
 			except Tag.DoesNotExist:
 				context['paged_items'] = []  # 或者设置为空列表以避免错误
 		else:
-			# --- 模式 B: 标签列表模式 ---
+			# 标签列表模式：从标签表出发聚合公开文章数量，避免逐个标签查询造成 N+1。
 			context['mode'] = "tag_list"
 			
 			# =====================================================================
@@ -170,10 +171,10 @@ class BlogTagIndexPage(Page):
 			# 3. 整个流程零 Python 内存峰值，千万级标签同样稳定
 			# =====================================================================
 			
-			# Step 1: 描述"live+public 的 BlogPage ID"——注意 .values('id') 让它保持惰性子查询形态
+			# 第一步：只构造公开文章 ID 的惰性子查询，不提前加载到 Python。
 			live_public_page_ids = BlogPage.objects.live().public().values('id')
 			
-			# Step 2: 从 Tag 侧，经 BlogPageTag 中间表 JOIN，过滤并聚合计数
+			# 第二步：通过中间表连接标签和文章，并在数据库层完成计数。
 			#   blog_blogpagetag_items  是 taggit TaggedItemBase 在 Tag 上自动生成的反向关系名
 			#   命名规则: %(app_label)s_%(class)s_items → blog_blogpagetag_items
 			tags_qs = Tag.objects.filter(
@@ -182,14 +183,14 @@ class BlogTagIndexPage(Page):
 				count=Count('blog_blogpagetag_items')
 			)
 			
-			# Step 3: 标签名搜索（仍在数据库层面，不碰 Python）
+			# 第三步：继续在数据库层过滤标签名称。
 			if search_query:
 				tags_qs = tags_qs.filter(name__icontains=search_query)
 			
-			# Step 4: 数据库层面排序
+			# 第四步：按引用数量倒序，让最常用的标签优先展示。
 			tags_qs = tags_qs.order_by('-count')
 			
-			# Step 5: Paginator 直接消费 QuerySet（触发 LIMIT/OFFSET，只取当页 50 条）
+			# 第五步：分页器直接消费 QuerySet，只让数据库返回当前页数据。
 			paginator = Paginator(tags_qs, self.items_tag_page)
 			try:
 				context['paged_items'] = paginator.page(page_number)
@@ -355,7 +356,7 @@ class BlogIndexPage(Page):
 		verbose_name_plural = "博客索引页"
 
 
-# 💡 定义标签提示词常量（因为 tags 属于自定义业务，Agent中没有预设坑位）
+# 定义标签相关的 AI 提示词常量。
 PROMPT_TITLE = "极客标题生成"
 PROMPT_INTRO = "SEO描述生成"
 
@@ -363,7 +364,8 @@ PROMPT_INTRO = "SEO描述生成"
 class BlogPageForm(WagtailAdminPageForm):
 	@classmethod
 	def _summarize_validation_error(cls, error):
-		"""Expand Wagtail block errors without logging submitted values."""
+		"""递归展开 Wagtail 块错误，只记录路径、消息和校验代码。"""
+		# StreamField 错误可能嵌套多层；递归转换后日志可以定位块和字段，但不暴露正文。
 		if isinstance(error, (list, tuple)):
 			return [cls._summarize_validation_error(item) for item in error]
 
@@ -404,11 +406,11 @@ class BlogPageForm(WagtailAdminPageForm):
 				content = None
 				content_source = "none"
 				
-				# 【第一阶段】：直接越过脆弱的视图层，利用 Wagtail 4.0+ 的泛型关联管理器捞取最新快照
+			# 第一阶段：优先从最新 Revision 取得草稿指针，恢复编辑者最近保存的版本。
 				latest_revision = instance.revisions.order_by('-created_at').first()
 				if latest_revision:
 					try:
-						# 提取我们在 serializable_data 里刻录的跨集群外键暗号
+						# 从 Revision 元数据中读取 Mongo 草稿指针，而不是读取被清空的 body。
 						rev_data = latest_revision.content
 						if isinstance(rev_data, str):
 							rev_data = json.loads(rev_data)
@@ -416,20 +418,20 @@ class BlogPageForm(WagtailAdminPageForm):
 						if isinstance(rev_data, dict):
 							draft_pointer = rev_data.get('mongo_draft_pointer')
 							if draft_pointer:
-								# 去 MongoDB 专属草稿快照集合定点捞取大文本
+								# 根据指针读取草稿正文；该路径优先于正式发布内容。
 								content = mongo_manager.get_blog_revision_body(draft_pointer)
 								if content:
 									content_source = "revision"
 					except Exception as e:
 						logger.error(f"BlogPageForm 穿透解析历史快照遭遇异常: {e}", exc_info=True)
 				
-				# 【第二阶段】：如果快照没捞到（例如全新发布后清空了历史，或者老数据迁移残留），直接降级穿透到 Mongo 线上 Live 主表
+			# 第二阶段：草稿缺失时回退到 Mongo 正式内容，兼容新发布页面和旧数据。
 				if (not content or 'body' not in content) and getattr(instance, 'mongo_content_id', None):
 					content = mongo_manager.get_blog_content(instance.mongo_content_id)
 					if content:
 						content_source = "live"
 				
-				# 【第三阶段】：对捞出来的 MongoDB 松散字典实施 Hydration，重塑为严格的 React UI 渲染树
+			# 第三阶段：把 Mongo 字典转换为带块 ID 的 StreamValue，供后台编辑器渲染。
 				if content and 'body' in content:
 					# 直接调用模型内封装好的 UUID 补齐与 StreamValue 重建方法
 					raw_body = content['body']
@@ -459,7 +461,7 @@ class BlogPageForm(WagtailAdminPageForm):
 						getattr(instance, 'mongo_content_id', None),
 					)
 		
-		# 缝合完毕，将饱满的 instance 交还给 Django 核心表单，开始绑定字段渲染前端
+		# 正文恢复完成后再绑定表单，保证 Wagtail 初始字段读取到完整内容。
 		super().__init__(*args, **kwargs)
 		if instance and instance.pk:
 			logger.info(
@@ -470,7 +472,7 @@ class BlogPageForm(WagtailAdminPageForm):
 			)
 
 	def full_clean(self):
-		"""Log bound-form validation without recording submitted content."""
+		"""记录绑定表单的校验过程，不记录提交的正文内容。"""
 		if not self.is_bound:
 			return super().full_clean()
 
@@ -483,6 +485,7 @@ class BlogPageForm(WagtailAdminPageForm):
 			parsed_count = int(body_count or 0)
 		except (TypeError, ValueError):
 			parsed_count = 0
+		# 仅从管理表单元数据提取块类型和删除标记，用于诊断校验失败。
 		for index in range(parsed_count):
 			block_type = self.data.get(f'body-{index}-type', '<missing>')
 			deleted = bool(self.data.get(f'body-{index}-deleted'))
@@ -564,7 +567,7 @@ class BlogPage(Page):
 	
 	mongo_content_id = models.CharField("MongoDB内容ID", max_length=50, blank=True, null=True)
 	
-	# StreamField定义，用于编辑界面，实际内容存储在MongoDB
+	# StreamField 只负责后台结构和校验，正文实际持久化到 MongoDB。
 	body = StreamField([
 		# 富文本块 - 使用Wagtail内置编辑器
 		('rich_text', RichTextBlock(
@@ -614,10 +617,10 @@ class BlogPage(Page):
 		('video_block', VideoBlock(icon='media', label="视频块")),
 	], use_json_field=True, blank=True, null=True)
 	
-	# 【核心绑定】：强行让当前模型使用我们定制的穿透式缝合表单类
+	# 绑定自定义表单，使后台打开页面时能从 MongoDB 恢复正文并记录校验诊断。
 	base_form_class = BlogPageForm
 	
-	# 索引字段
+	# 索引字段：body_text 会按需从 MongoDB 拼接纯文本供搜索后端使用。
 	search_fields = Page.search_fields + [
 		index.SearchField('title', boost=10, partial_match=False),
 		index.SearchField('intro', boost=5),
@@ -671,7 +674,7 @@ class BlogPage(Page):
 		]
 	
 	def _hydrate_streamfield_from_mongo(self, body_data):
-		"""核心防线：从 Mongo 字典重建 Wagtail Draftail 所需的严格 StreamValue 对象"""
+		"""从 Mongo 字典重建后台编辑器需要的 StreamValue。"""
 		if not body_data or not isinstance(body_data, list):
 			logger.info(
 				"blog_body_hydrate_empty page_id=%s value_type=%s",
@@ -680,7 +683,7 @@ class BlogPage(Page):
 			)
 			return []
 		
-		# 黑客防线：为所有缺乏 id 的 block 自动补齐 uuid，防止前端 React 崩溃
+		# Wagtail 动态块依赖稳定 ID；历史 Mongo 数据缺少 ID 时先补齐，避免前端组件无法挂载。
 		missing_ids = 0
 		for block in body_data:
 			if isinstance(block, dict) and 'id' not in block:
@@ -700,6 +703,7 @@ class BlogPage(Page):
 		)
 		
 		try:
+			# 适配器负责把 Mongo 的普通字典转换成 Wagtail 块值；失败时保留原始数据做惰性回退。
 			stream_value = MongoDBStreamFieldAdapter.from_mongodb(body_data, self.body.stream_block)
 			logger.info(
 				"blog_body_hydrate_done page_id=%s hydrated_blocks=%s types=%s",
@@ -716,7 +720,7 @@ class BlogPage(Page):
 	# 网关 1：拦截快照序列化 (保存草稿、生成历史记录时自动触发)
 	# =========================================================================
 	def serializable_data(self):
-		"""拦截生成 Revision 的快照动作，截流大文本送入 MongoDB 历史草稿集合"""
+		"""生成 Revision 快照时把正文写入 Mongo 草稿集合，仅在 Revision 中保存指针。"""
 		started_at = time.monotonic()
 		logger.info(
 			"blog_body_revision_start page_id=%s blocks=%s types=%s",
@@ -731,13 +735,13 @@ class BlogPage(Page):
 		else:
 			draft_content = MongoDBStreamFieldAdapter.to_mongodb(self.body)
 		
-		# 【对齐调用】：把当前最新的草稿形态，送入无唯一索引限制的历史表，斩获专属快照 OID
+		# 先把当前 StreamField 转成 Mongo 结构，确保 Revision 与编辑器看到的是同一版本。
 		mongo_manager = MongoManager()
 		draft_pointer = mongo_manager.save_blog_revision_body(self.pk, draft_content)
 		
-		# 跨集群把这个特定版本的 OID 指针刻录进当前这条 MySQL Revision 记录里
+		# MySQL Revision 只保存指针，避免把大段正文写入关系数据库。
 		data['mongo_draft_pointer'] = str(draft_pointer)
-		# 将 MySQL 这边的单条行体积抽空，保持大版本跃迁后的轻量化
+		# 同时把 Revision 的 body 置为空字符串表示，保持历史行轻量。
 		data['body'] = '[]'
 		logger.info(
 			"blog_body_revision_done page_id=%s pointer=%s elapsed_ms=%s",
@@ -753,23 +757,22 @@ class BlogPage(Page):
 	# =========================================================================
 	@classmethod
 	def from_serializable_data(cls, data):
-		"""反序列化历史记录：优化为级联式全自动捞取，彻底打通草稿表与正式表的兜底链路"""
+		"""反序列化 Revision，并按草稿指针、正式内容的顺序恢复正文。"""
 		obj = super().from_serializable_data(data)
 		mongo_manager = MongoManager()
 		content = None
 		
-		# 1. 第一阶段：优先提取隐藏在历史记录里的暗号指针，去草稿/历史集合捞取
+		# 第一阶段：优先读取 Revision 中的 Mongo 草稿指针。
 		draft_pointer = data.get('mongo_draft_pointer')
 		if draft_pointer:
 			content = mongo_manager.get_blog_revision_body(draft_pointer)
 		
-		# 2. 第二阶段（核心修复点）：如果草稿没捞到，或者捞出来的 body 是空的
-		#    绝对不能用 elif 阻断！必须直接穿透到线上正式表（Live表）进行最终兜底！
+		# 第二阶段：草稿不存在或为空时，必须继续回退到正式内容，不能被 elif 截断。
 		is_content_empty = not content or 'body' not in content or not content['body']
 		if is_content_empty and obj.mongo_content_id:
 			content = mongo_manager.get_blog_content(obj.mongo_content_id)
 		
-		# 3. 第三阶段：完美回填并注入结构体
+		# 第三阶段：把恢复出的正文重新注入 StreamValue，供预览和历史页面使用。
 		if content and 'body' in content:
 			obj.body = obj._hydrate_streamfield_from_mongo(content['body'])
 		
@@ -782,8 +785,7 @@ class BlogPage(Page):
 		"""
 		obj = super().get_latest_revision_as_object()
 		
-		# 极为严苛的空值判定防线：有些 Wagtail 版本的空 StreamValue 在 bool() 下可能为 True
-		# 我们建立双重锁定：不仅看它本身，还要强行透视它内部包含的 block 长度是否为 0
+		# 同时检查布尔值和块数量，规避不同 Wagtail 版本对空 StreamValue 的 truthy 差异。
 		is_body_empty = not obj.body or (hasattr(obj.body, '__len__') and len(obj.body) == 0)
 		
 		if is_body_empty and self.mongo_content_id:
@@ -798,12 +800,12 @@ class BlogPage(Page):
 	# 网关 3：正式线上保存防线 (点击发布、或更新状态时触发)
 	# =========================================================================
 	def save(self, *args, **kwargs):
-		"""确保 MySQL 正式表体中维持 0 文本包袱"""
+		"""保存页面时同步 Mongo 正文，并确保 MySQL body 始终为空。"""
 		started_at = time.monotonic()
 		is_new = self.pk is None
 		update_fields = kwargs.get('update_fields')
 		
-		# 【核心防御】：识别是不是只是在存草稿（存草稿仅局部更新 has_unpublished_changes 等）
+		# update_fields 不含 body 时视为元数据更新，避免把不完整的表单正文覆盖到正式 Mongo 内容。
 		is_draft_metadata_update = update_fields is not None and 'body' not in update_fields
 		logger.info(
 			"blog_body_save_start page_id=%s is_new=%s draft_metadata=%s update_fields=%s",
@@ -814,7 +816,7 @@ class BlogPage(Page):
 		)
 		
 		if not is_draft_metadata_update:
-			# 只有明确的全量保存（例如点击“发布”），才推送到线上正式集合 blog_content
+			# 全量保存才写入正式集合；草稿正文已经由 serializable_data 保存到历史集合。
 			temp_body_raw = self.body.raw_data if hasattr(self.body, 'raw_data') else None
 			if temp_body_raw is None and self.body:
 				temp_body_raw = MongoDBStreamFieldAdapter.to_mongodb(self.body)
@@ -842,7 +844,7 @@ class BlogPage(Page):
 			except Exception as e:
 				logger.error(f"保存线上主内容至 MongoDB 失败: {e}", exc_info=True)
 		
-		# 黄金障眼法：永远清空 body 后再存入 MySQL，保持 blog_blogpage 表的绝对轻量
+		# 临时清空 body 后调用父类保存，确保关系数据库不落正文；finally 恢复内存对象供后续流程继续使用。
 		real_body = self.body
 		self.body = []
 		try:
@@ -856,7 +858,7 @@ class BlogPage(Page):
 			round((time.monotonic() - started_at) * 1000, 1),
 		)
 		
-		# 新页面发布后的自增外键反向回填
+		# 新页面先完成 MySQL 自增主键，再把 page_id 回填到 Mongo 正式文档。
 		if is_new and self.pk and not is_draft_metadata_update:
 			type(self).objects.filter(pk=self.pk).update(mongo_content_id=self.mongo_content_id)
 			try:
@@ -873,14 +875,14 @@ class BlogPage(Page):
 	# 核心网关 4：物理删除与异构集群同步 (在后台点击“删除页面”时触发)
 	# =========================================================================
 	def delete(self, *args, **kwargs):
-		"""彻底斩断异构数据库的数据残留"""
+		"""删除页面实体后同步清理 Mongo 正式内容和历史草稿。"""
 		page_id = self.pk
 		mongo_content_id = getattr(self, 'mongo_content_id', None)
 		
-		# 1. 优先执行原生删除
+		# 先删除页面及其关系数据；Mongo 清理放在后续独立步骤中，避免阻断 Wagtail 删除。
 		super().delete(*args, **kwargs)
 		
-		# 2. 接管分布式清理，调用封装好的 MongoDB 管理器方法
+		# 再清理两个 Mongo 集合，保证正式内容和 Revision 快照都不残留。
 		try:
 			mongo_manager = MongoManager()
 			
@@ -899,6 +901,7 @@ class BlogPage(Page):
 	# 网关 4：前台数据读取网关 (用于博客详情页 serve 渲染时提取真实数据)
 	# =========================================================================
 	def get_content_from_mongodb(self):
+		"""读取正式正文，并补齐前端 StreamField 所需的块 ID 和 value。"""
 		if not getattr(self, 'mongo_content_id', None):
 			return None
 		try:
@@ -908,7 +911,7 @@ class BlogPage(Page):
 			if not content or 'body' not in content or not isinstance(content['body'], list):
 				return None
 			
-			# 补齐前端 React/Draftail 需要的固有属性
+			# Mongo 中的历史块可能没有 id/value；这里仅补齐内存副本，不改变数据库原文。
 			for block in content['body']:
 				if isinstance(block, dict):
 					if 'id' not in block or not block['id']:
@@ -923,6 +926,7 @@ class BlogPage(Page):
 	# 核心安全补丁：修复 Django 5.x 严格类型校验，防止未发布页面预览引发 ValueError
 	# =========================================================================
 	def get_prev_post(self):
+		"""返回同分类中较早发布的文章；没有分类时回退到全站文章。"""
 		if not self.pk or not getattr(self, 'first_published_at', None): return None
 		if not self.categories.exists():
 			return BlogPage.objects.live().filter(first_published_at__lt=self.first_published_at).order_by(
@@ -932,6 +936,7 @@ class BlogPage(Page):
 			'-first_published_at').first()
 	
 	def get_next_post(self):
+		"""返回同分类中较晚发布的文章；没有分类时回退到全站文章。"""
 		if not self.pk or not getattr(self, 'first_published_at', None): return None
 		if not self.categories.exists():
 			return BlogPage.objects.live().filter(first_published_at__gt=self.first_published_at).order_by(
@@ -942,13 +947,14 @@ class BlogPage(Page):
 	
 	@staticmethod
 	def _strip_markdown_code(text):
-		"""Remove fenced and inline code before looking for maths markup."""
+		"""移除围栏代码和行内代码，避免把代码中的美元符误判为数学公式。"""
 		text = str(text or "")
 		text = re.sub(r"(?ms)^[ \t]*(`{3,}|~{3,}).*?^\s*\1\s*$", "", text)
 		return re.sub(r"`+[^`\n]*`+", "", text)
 
 	@classmethod
 	def _contains_math_markup(cls, text):
+		# 先排除代码，再识别块级公式、转义公式和常见运算符，降低误报带来的 KaTeX 资源加载。
 		text = cls._strip_markdown_code(text)
 		if re.search(r"\$\$[\s\S]+?\$\$|\\\([\s\S]+?\\\)|\\\[[\s\S]+?\\\]", text):
 			return True
@@ -960,7 +966,7 @@ class BlogPage(Page):
 
 	@classmethod
 	def get_frontend_resource_features(cls, body_data, has_gallery=False):
-		"""Derive article asset needs from the already-fetched MongoDB body."""
+		"""根据已读取的 Mongo 正文推导前端所需的资源开关。"""
 		features = {
 			'has_code': False, 'has_katex': False, 'has_mermaid': False,
 			'has_image': False, 'has_gallery': bool(has_gallery),
@@ -973,6 +979,7 @@ class BlogPage(Page):
 			'table_block': 'has_table', 'embed_block': 'has_embed',
 			'document_block': 'has_document',
 		}
+		# 只扫描一次原始块列表，模板即可按开关决定是否加载代码高亮、公式和媒体资源。
 		for block in body_data if isinstance(body_data, list) else []:
 			if not isinstance(block, dict):
 				continue
@@ -994,6 +1001,7 @@ class BlogPage(Page):
 		return features
 
 	def get_context(self, request, *args, **kwargs):
+		"""把标签页和正文资源开关加入页面模板上下文。"""
 		context = super().get_context(request, *args, **kwargs)
 		# 注入标签索引页，供模板生成标签跳转链接
 		context['blog_tag_index_page'] = BlogTagIndexPage.objects.live().first()
@@ -1001,11 +1009,11 @@ class BlogPage(Page):
 		return context
 
 	def serve(self, request):
-		# ✅ 记录访问，一行搞定
+		# 访问计数与正文读取分离；计数失败不应阻断文章渲染。
 		if self.pk:
 			PageViewCounter(self.pk).record(request)
 		
-		# 1. 从MongoDB获取正文，并复用这次读取计算前端资源需求。
+		# 读取一次 Mongo 正文，同时计算前端资源需求，避免模板阶段重复访问数据库。
 		mongo_content = self.get_content_from_mongodb()
 		body_data = mongo_content.get('body', []) if mongo_content else []
 		self._frontend_resource_features = self.get_frontend_resource_features(
@@ -1015,10 +1023,10 @@ class BlogPage(Page):
 		
 		if mongo_content and 'body' in mongo_content:
 			
-			# Keep MongoDB data raw here. Markdown is rendered by the block at output time.
+			# 保持 Mongo 原始值不变，Markdown 由块在输出阶段渲染。
 			source_body_data = mongo_content['body']
 			
-			# Rehydrate the raw StreamField blocks without changing their stored values.
+			# 只在内存中重建 StreamField，不修改 Mongo 中保存的值。
 			try:
 				self.body = MongoDBStreamFieldAdapter.from_mongodb(source_body_data, self.body.stream_block)
 			except Exception as e:
@@ -1026,7 +1034,7 @@ class BlogPage(Page):
 				logger.error(f"使用适配器创建StreamValue失败: {e}", exc_info=True)
 				self.body = StreamValue(self.body.stream_block, source_body_data, is_lazy=True)
 		
-		# 4. 调用父类的serve方法，使用我们准备好的body内容去渲染模板
+		# 父类负责站点、预览和模板选择；此时 self.body 已经是可渲染的 StreamValue。
 		return super().serve(request)
 	
 	@property
@@ -1035,6 +1043,7 @@ class BlogPage(Page):
 		return self.get_full_text_for_search()
 	
 	def get_full_text_for_search(self):
+		"""按块类型提取可搜索纯文本，不把 HTML 或 Markdown 标记送入索引。"""
 		content = self.get_content_from_mongodb()
 		if not content or 'body' not in content:
 			return ""
@@ -1042,6 +1051,7 @@ class BlogPage(Page):
 		if not isinstance(body, list):
 			return ""
 		text_parts = []
+		# 不同块的 value 结构不同，分别提取标题、代码、表格单元格等有意义文本。
 		for block in body:
 			if not isinstance(block, dict):
 				continue
@@ -1094,7 +1104,7 @@ class BlogPage(Page):
 			id=self.id  # 排除当前文章
 		).distinct()
 		
-		# 按相同标签数量和发布日期排序
+		# 先按重合标签数，再按发布时间排序，让关联度最高且较新的文章靠前。
 		related_posts = related_posts.annotate(
 			same_tags=models.Count('tagged_items', filter=models.Q(tagged_items__tag_id__in=tag_ids))
 		).order_by('-same_tags', '-first_published_at')[:max_posts]
@@ -1114,7 +1124,7 @@ class BlogPage(Page):
 		if not self.pk:
 			return []
 		
-		# 获取所有反应类型
+		# 先取完整反应类型列表，再用聚合结果补齐没有记录的类型为 0。
 		reaction_types = ReactionType.objects.all()
 		
 		# 获取该页面的反应计数

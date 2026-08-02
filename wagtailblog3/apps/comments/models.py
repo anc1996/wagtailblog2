@@ -1,4 +1,4 @@
-# comments/models.py
+# 评论数据模型。
 from django.utils import timezone
 from django.db import models
 from django.conf import settings
@@ -46,7 +46,7 @@ class Comment(models.Model):
 		ordering = ['-like_count', '-created_at']  # 默认按点赞数和时间排序
 	
 	def save(self, *args, **kwargs):
-		# 设置可编辑截止时间（发布后5分钟）
+		# 只在首次创建时设置截止时间，后续编辑不会把五分钟窗口重新计算。
 		if not self.id:
 			self.can_edit_until = timezone.now() + timezone.timedelta(minutes=5)
 		super().save(*args, **kwargs)
@@ -87,9 +87,10 @@ class BlogPageComment(Orderable, Comment):
 	def real_delete(self):
 		"""真实删除评论及其关联数据"""
 		try:
+			# 真实删除会影响父评论计数、反应记录和所有后代评论，必须按依赖顺序处理。
 			# 如果有父评论，更新父评论的回复计数
 			if self.parent:
-				# 使用F表达式防止并发问题
+				# 使用数据库 F 表达式在数据库端递减，避免并发请求覆盖彼此的计数。
 				self.parent.reply_count = models.F('reply_count') - 1
 				self.parent.save(update_fields=['reply_count'])
 				
@@ -105,7 +106,7 @@ class BlogPageComment(Orderable, Comment):
 			# 删除与此评论关联的所有反应
 			CommentReaction.objects.filter(comment=self).delete()
 			
-			# 查找并递归删除所有子评论
+			# 查找并递归删除所有子评论；递归调用会继续清理更深层的回复树。
 			children = type(self).objects.filter(parent=self)
 			for child in children:
 				child.real_delete()  # 递归删除每个子评论
@@ -133,6 +134,7 @@ class BlogPageComment(Orderable, Comment):
 	@property
 	def actual_reply_count(self):
 		"""获取实际回复数量"""
+		# 以 approved 记录实时统计，避免软删除后缓存计数仍显示旧值。
 		return type(self).objects.filter(parent=self, status='approved').count()
 
 
@@ -148,7 +150,8 @@ class CommentReaction(models.Model):
 	reaction_type = models.SmallIntegerField(choices=REACTION_CHOICES)
 	
 	class Meta:
-		unique_together = ('comment', 'user')  # 每个用户对每条评论只能有一个反应
+		# 每个用户对每条评论只保留一条记录，切换点赞/踩时更新这条记录。
+		unique_together = ('comment', 'user')
 		verbose_name = '评论反应'
 		verbose_name_plural = '评论反应'
 	

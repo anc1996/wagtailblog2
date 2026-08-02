@@ -1,4 +1,4 @@
-# blog/wagtail_hooks.py
+# 博客应用的 Wagtail 后台扩展
 
 import logging
 
@@ -31,14 +31,14 @@ from . import widget_adapters  # noqa: F401
 logger = logging.getLogger(__name__)
 
 
-# 在 Wagtailtail后台所有页面加载 Font Awesome 5 的 CSS。
+# 在 Wagtail 后台所有页面加载图标样式。
 @hooks.register("insert_global_admin_css")
 def global_admin_css():
 	"""
 	在 Wagtail 后台所有页面加载 Font Awesome 5 的 CSS。
 	项目的其他后台组件仍使用其中的图标类。
 	"""
-	# 动态路径替换，用 format_html 是最安全、最标准的做法
+	# 通过 static() 获取带缓存版本的路径，再用 format_html 安全插入 HTML 属性。
 	return format_html('<link rel="stylesheet" href="{}">', static("css/all.min.css"))
 
 
@@ -48,7 +48,7 @@ def fix_wagtail_ai_zindex():
 	架构师前端补丁：
 	解决 Wagtail-AI 的星号魔法棒被 RichTextField 工具栏物理遮挡导致无法点击的问题。
 	"""
-	# 纯静态 CSS，无动态变量，用 mark_safe 完美输出
+	# 这段样式没有用户输入，使用 mark_safe 输出固定的后台补丁。
 	return mark_safe(
 		"<style>\n"
 		".w-field--draftail_rich_text_area .wai-dropdown {\n"
@@ -60,7 +60,7 @@ def fix_wagtail_ai_zindex():
 	)
 
 
-# 添加JavaScript支持到编辑器
+# 为编辑器加载诊断和 AI 上下文脚本。
 @hooks.register('insert_editor_js')
 def editor_js():
 	"""添加JavaScript支持到编辑器"""
@@ -71,13 +71,13 @@ def editor_js():
 	)
 
 
-# 编辑页面后清空body字段，避免存入MySQL
+	# 编辑页面后清空 body 字段，避免正文再次写入 MySQL。
 @hooks.register('after_edit_page')
 def after_edit_page(request, page):
 	"""编辑页面后清空body字段，避免存入MySQL"""
 	if hasattr(page, 'mongo_content_id') and hasattr(page, 'body'):
 		try:
-			# 确保body内容已保存到MongoDB (save方法会处理)
+			# save() 已负责 Mongo 持久化，这里只修正关系库中的轻量占位值。
 			if page.id:
 				type(page).objects.filter(id=page.id).update(body=[])
 		except Exception as e:
@@ -94,7 +94,7 @@ def register_page_views_report_url():
 		header_icon = "site"
 		
 		def get_queryset(self):
-			# 基础查询
+			# 只查询存在聚合记录的页面，并在数据库层汇总总访问量和唯一访问量。
 			queryset = Page.objects.filter(
 				id__in=PageViewCount.objects.values('page').distinct()
 			).annotate(
@@ -102,13 +102,13 @@ def register_page_views_report_url():
 				total_unique_views=Sum('view_counts__unique_count')
 			)
 			
-			# 应用搜索筛选
+			# 标题筛选保持在数据库层执行，避免报告页加载全部页面后再过滤。
 			search_query = self.request.GET.get('q', '')
 			if search_query:
 				# 标题搜索
 				queryset = queryset.filter(title__icontains=search_query)
 			
-			# 数值范围筛选
+			# 只接受数字范围，忽略非法输入，避免把无效参数传给 ORM。
 			min_views = self.request.GET.get('min_views', '')
 			max_views = self.request.GET.get('max_views', '')
 			
@@ -118,7 +118,7 @@ def register_page_views_report_url():
 			if max_views and max_views.isdigit():
 				queryset = queryset.filter(total_views__lte=int(max_views))
 			
-			# 日期范围筛选
+			# 日期过滤使用页面首次发布时间，与报告中的时间维度保持一致。
 			start_date = self.request.GET.get('start_date', '')
 			end_date = self.request.GET.get('end_date', '')
 			
@@ -128,7 +128,7 @@ def register_page_views_report_url():
 			if end_date:
 				queryset = queryset.filter(first_published_at__lte=end_date)
 			
-			# 排序
+			# 排序字段采用白名单，防止用户直接控制 ORM order_by 表达式。
 			sort_by = self.request.GET.get('sort', '-total_views')
 			valid_sort_fields = ['total_views', '-total_views', 'total_unique_views',
 			                     '-total_unique_views', 'first_published_at', '-first_published_at', 'title', '-title']
@@ -141,7 +141,7 @@ def register_page_views_report_url():
 			return queryset
 		
 		def get_table(self, parent_context=None):
-			# 创建空表格以满足Wagtail需求
+			# 报告模板自行读取分页对象，这里提供符合 Wagtail 报告接口的空表格结构。
 			headers = [
 				Column('title', label="页面标题"),
 				Column('total_views', label="总访问量"),
@@ -152,7 +152,7 @@ def register_page_views_report_url():
 		def get_context_data(self, **kwargs):
 			context = super().get_context_data(**kwargs)
 			
-			# 添加分页
+			# 保留 Wagtail 已构造的分页对象，并把筛选条件传给模板。
 			paginator = context['paginator']
 			page_obj = context['page_obj']
 			
@@ -164,7 +164,7 @@ def register_page_views_report_url():
 			context['end_date'] = self.request.GET.get('end_date', '')
 			context['sort'] = self.request.GET.get('sort', '-total_views')
 			
-			# 分页URL参数保留
+			# 移除旧页码后重新编码其余参数，翻页时不会丢失当前筛选条件。
 			query_params = self.request.GET.copy()
 			if 'page' in query_params:
 				del query_params['page']
@@ -223,7 +223,7 @@ def register_page_views_report_menu_item():
 	)
 
 
-# 注册 `underline` (下划线) 功能.
+# 注册“下划线”富文本功能。
 @hooks.register('register_rich_text_features')
 def register_underline_feature(features):
 	"""
@@ -239,21 +239,21 @@ def register_underline_feature(features):
 		'type': type_,
 		'label': 'U',
 		'description': '下划线',
-		# 'style' 不是必需的，因为 Draftail 已有 UNDERLINE 的默认样式
+		# 不额外设置 style，Draftail 已经提供 UNDERLINE 的默认样式。
 	}
 	
-	# 2. 注册 Draftail 插件
+	# 第二步：注册 Draftail 工具栏插件。
 	features.register_editor_plugin(
 		'draftail', feature_name, draftail_features.InlineStyleFeature(control)
 	)
 	
-	# 3. 配置数据库转换规则
+	# 第三步：声明 Draft.js 数据与 HTML 之间的转换规则。
 	db_conversion = {
 		'from_database_format': {tag: InlineStyleElementHandler(type_)},
 		'to_database_format': {'style_map': {type_: tag}},
 	}
 	
-	# 4. 注册转换规则
+	# 第四步：把转换规则登记到 contentstate 转换器。
 	features.register_converter_rule('contentstate', feature_name, db_conversion)
 
 

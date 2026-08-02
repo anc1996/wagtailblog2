@@ -101,7 +101,7 @@ def confirmation_text(target_type: str) -> str:
 
 
 class LogClearSelectionForm(forms.Form):
-    """只接受 catalog 文件、日志域和固定清理范围。"""
+    """只接受注册表文件、日志域和固定清理范围。"""
 
     TARGET_TYPES = (("file", "单个文件"), ("domain", "单个模块"), ("business", "全部业务日志"), ("all", "全部运行日志"))
     target_type = forms.ChoiceField(label="目标类型", choices=TARGET_TYPES)

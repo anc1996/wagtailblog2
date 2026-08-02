@@ -1,4 +1,4 @@
-# base/models.py
+# 基础应用的数据模型
 from django.db import models
 from django.core.exceptions import ValidationError  # 添加 ValidationError 导入
 from django.core.validators import validate_email  # 添加 validate_email 导入
@@ -36,11 +36,11 @@ logger = logging.getLogger(__name__)
 @register_setting
 class NavigationSettings(BaseGenericSetting):
 	# 定义导航设置的字段
-	linkedin_url = models.URLField(verbose_name="LinkedIn URL", blank=True)  # LinkedIn URL
-	github_url = models.URLField(verbose_name="GitHub URL", blank=True)  # GitHub URL
-	bilibili_url = models.URLField(verbose_name="Bilibili URL", blank=True)  # 哔哩哔哩 URL
-	wechat_url = models.URLField(verbose_name="WeChat URL", blank=True)  # 微信 URL
-	instagram_url = models.URLField(verbose_name="Instagram URL", blank=True)  # Instagram URL
+	linkedin_url = models.URLField(verbose_name="LinkedIn URL", blank=True)  # 领英链接地址
+	github_url = models.URLField(verbose_name="GitHub URL", blank=True)  # GitHub 仓库链接地址
+	bilibili_url = models.URLField(verbose_name="Bilibili URL", blank=True)  # 哔哩哔哩链接地址
+	wechat_url = models.URLField(verbose_name="WeChat URL", blank=True)  # 微信链接地址
+	instagram_url = models.URLField(verbose_name="Instagram URL", blank=True)  # Instagram 链接地址
 	
 	panels = [
 		MultiFieldPanel(

@@ -1,4 +1,4 @@
-# blog/blocks.py
+# 博客正文使用的 StreamField 块
 
 import mimetypes
 
@@ -19,10 +19,11 @@ from .markdown_renderer import MarkdownRenderer
 
 
 class VditorMarkdownBlock(blocks.TextBlock):
-    """Project-owned Markdown block using Vditor in the Wagtail admin."""
+    """使用项目自有 Vditor 编辑器的 Markdown 块。"""
 
     @cached_property
     def field(self):
+        # 每个块实例复用同一个表单字段，隐藏文本域仍是提交和存储的唯一来源。
         field_kwargs = {
             "widget": VditorMarkdownWidget(attrs={"rows": self.rows})
         }
@@ -30,9 +31,10 @@ class VditorMarkdownBlock(blocks.TextBlock):
         return forms.CharField(**field_kwargs)
 
     def render_basic(self, value, context=None):
+        # 渲染时才把 Markdown 转成 HTML，避免改变 MongoDB 中保存的原始字符串。
         return MarkdownRenderer.render(value, context)
 
-# 🚀 架构师特制：纯净前端代码块（只改前台，不碰后台）
+# 纯净前端代码块：只替换前台模板，不改变后台编辑行为。
 class PureCodeBlock(CodeBlock):
     class Meta:
         # 强制指定前台输出的模板路径
@@ -103,7 +105,7 @@ class VideoBlock(VideoChooserBlock):
 
 	@staticmethod
 	def _get_video_type(value):
-		"""Keep old media records playable when content_type was not stored."""
+		"""在旧媒体记录缺少 content_type 时，根据文件名推断视频类型。"""
 		if not value:
 			return 'video/mp4'
 
@@ -121,6 +123,7 @@ class VideoBlock(VideoChooserBlock):
 			'.ogv': 'video/ogg',
 			'.ogg': 'video/ogg',
 		}
+		# 优先使用扩展名映射，覆盖对象元数据缺失但文件名可靠的历史数据。
 		for extension, video_type in extension_types.items():
 			if media_path.endswith(extension):
 				return video_type
@@ -143,7 +146,7 @@ class CustomTableBlock(WagtailTableBlock):
 		if not template or not value:
 			return ""
 
-		# 从 value 中提取数据
+		# 表格块的 value 同时包含数据、表头和合并单元格元数据，不能只传二维数组。
 		table_header = (
 			value["data"][0]
 			if value.get("data") and len(value["data"]) > 0 and value.get("first_row_is_table_header")
@@ -153,7 +156,7 @@ class CustomTableBlock(WagtailTableBlock):
 			value["data"][1:] if table_header else value.get("data", [])
 		)
 
-		# 准备一个新的上下文
+		# 复制调用方上下文，避免向 Wagtail 共享的上下文对象写入临时变量。
 		new_context = context.copy() if context else {}
 
 		# 更新上下文，加入表格所需的所有变量
@@ -167,7 +170,7 @@ class CustomTableBlock(WagtailTableBlock):
 			'table_caption': value.get("table_caption"),
 		})
 
-		# --- 新增的关键部分：处理单元格元数据 ---
+		# 补充单元格样式和合并范围，模板据此还原编辑器中的视觉结构。
 		# 处理单元格的 CSS 类名
 		if value.get("cell"):
 			new_context["classnames"] = {
@@ -175,7 +178,7 @@ class CustomTableBlock(WagtailTableBlock):
 				for meta in value["cell"] if "className" in meta
 			}
 
-		# 处理合并单元格 (rowspan/colspan)
+		# 处理合并单元格的行跨度和列跨度。
 		if value.get("mergeCells"):
 			new_context["spans"] = {
 				(merge["row"], merge["col"]): {
@@ -206,16 +209,16 @@ class CustomEmbedBlock(blocks.StructBlock):
         help_text="直接粘贴 B站、YouTube、优酷、腾讯、网易云、QQ音乐等平台的单页链接"
     )
 
-    # 👇 核心魔法：兼容旧数据的钩子函数
+    # 兼容旧数据：历史版本可能只保存了一个纯字符串 URL。
     def to_python(self, value):
         # 如果从数据库读出来的数据是一个纯字符串（旧版的纯 URL 数据）
         if isinstance(value, str):
-            # 强行包装成新的字典结构，实现无感热更新
+            # 包装成当前 StructBlock 所需的字典结构，避免迁移历史正文。
             value = {
                 'title': '历史媒体档案',  # 给以前的老视频一个默认的兜底标题
                 'embed_url': value
             }
-        # 交给 Wagtail 继续按正常流程处理
+        # 交给 Wagtail 完成字段级反序列化和校验。
         return super().to_python(value)
 
     class Meta:

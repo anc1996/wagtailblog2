@@ -1,4 +1,4 @@
-# base/management/commands/email_status.py
+"""查看 Celery 邮件任务状态和系统监控信息的管理命令。"""
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 from celery.result import AsyncResult
@@ -6,18 +6,10 @@ from celery import current_app
 import redis
 from django.conf import settings
 
-# 命令行工具：查看Celery邮件发送任务状态和系统监控信息
-"""
-命令：
-python manage.py email_status [--task-id <ID>] [--queue-status] [--workers] [--stats]
-如：
-第一种：python manage.py email_status --task-id 1234567890abcdef --queue-status --workers --stats
-第二种：python manage.py email_status --queue-status
-第三种：python manage.py email_status --workers
-
-"""
+"""支持查看单个任务、队列、工作进程和邮件统计等运行状态。"""
 
 class Command(BaseCommand):
+	"""聚合 Celery 邮件系统的诊断信息并输出到终端。"""
 	help = '查看邮件发送任务状态和系统监控信息'
 	
 	def add_arguments(self, parser):
@@ -43,6 +35,7 @@ class Command(BaseCommand):
 		)
 	
 	def handle(self, *args, **options):
+		# 各检查项彼此独立；某一项失败只显示错误，不阻止其他诊断项执行。
 		self.stdout.write(
 			self.style.SUCCESS('=== Celery 邮件系统状态监控 ===\n')
 		)
@@ -69,7 +62,7 @@ class Command(BaseCommand):
 			self.show_overview()
 	
 	def check_task_status(self, task_id):
-		"""检查特定任务状态"""
+		"""查询指定任务的状态、结果和完成时间。"""
 		self.stdout.write(f"\n--- 任务状态: {task_id} ---")
 		
 		try:
@@ -86,16 +79,16 @@ class Command(BaseCommand):
 			)
 	
 	def check_queue_status(self):
-		"""检查队列状态"""
+		"""读取 Redis 中各 Celery 队列的待处理数量。"""
 		self.stdout.write("\n--- 队列状态 ---")
 		
 		try:
-			# 连接Redis获取队列信息
+			# 使用消息代理对应的 Redis 数据库读取队列长度，不消费队列中的任务。
 			redis_client = redis.Redis(
 				host=settings.REDIS_HOST,
 				port=settings.REDIS_PORT,
 				password=settings.REDIS_PASSWORD,
-				db=2  # Celery broker使用的数据库
+				db=2  # Celery 消息代理使用的数据库
 			)
 			
 			queues = ['default', 'email', 'maintenance']
@@ -110,7 +103,7 @@ class Command(BaseCommand):
 			)
 	
 	def check_workers_status(self):
-		"""检查工作进程状态"""
+		"""通过 Celery inspect 查询活跃和已注册的工作进程。"""
 		self.stdout.write("\n--- 工作进程状态 ---")
 		
 		try:
@@ -144,18 +137,17 @@ class Command(BaseCommand):
 			)
 	
 	def show_statistics(self):
-		"""显示邮件发送统计"""
+		"""统计结果后端中保存的邮件任务数量。"""
 		self.stdout.write("\n--- 邮件发送统计 ---")
 		
 		try:
-			# 这里可以添加从数据库或Redis获取统计信息的逻辑
-			# 例如：成功发送数量、失败数量、重试次数等
+			# 这里读取结果键数量作为粗粒度任务总数；详细成功、失败和重试统计可另行扩展。
 			
 			redis_client = redis.Redis(
 				host=settings.REDIS_HOST,
 				port=settings.REDIS_PORT,
 				password=settings.REDIS_PASSWORD,
-				db=3  # Celery result backend使用的数据库
+				db=3  # Celery 结果后端使用的数据库
 			)
 			
 			# 获取所有结果键的数量作为总任务数
@@ -172,13 +164,13 @@ class Command(BaseCommand):
 			)
 	
 	def show_overview(self):
-		"""显示系统概览"""
+		"""显示当前时间、Redis 连通性和 Celery 基础配置。"""
 		self.stdout.write("\n--- 系统概览 ---")
 		
 		current_time = timezone.now()
 		self.stdout.write(f"当前时间: {current_time}")
 		
-		# 检查Redis连接
+		# 只执行连通性探测，不读取或修改业务数据。
 		try:
 			redis_client = redis.Redis(
 				host=settings.REDIS_HOST,
@@ -194,7 +186,7 @@ class Command(BaseCommand):
 				self.style.ERROR("✗ Redis连接失败")
 			)
 		
-		# 检查Celery应用配置
+		# 检查 Celery 应用配置
 		self.stdout.write(f"Celery应用名称: {current_app.main}")
 		self.stdout.write(f"消息代理: {current_app.conf.broker_url}")
 		self.stdout.write(f"结果后端: {current_app.conf.result_backend}")

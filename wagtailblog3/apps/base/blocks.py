@@ -1,10 +1,10 @@
-# base/blocks.py
+# 基础应用的 StreamField 块定义
 
 # 导入 Wagtail StreamField 中常用的块类型
 from wagtail.blocks import (
     CharBlock,  # 用于简单的文本输入框
     ChoiceBlock, # 用于下拉选择框
-    RichTextBlock, # 用于富文本编辑器 (WYSIWYG)
+    RichTextBlock, # 用于所见即所得的富文本编辑器
     StreamBlock, # 用于定义 StreamField，包含多个不同类型的块
     StructBlock, # 用于将多个字段组合成一个结构化的块
 )

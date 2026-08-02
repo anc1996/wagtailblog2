@@ -1,4 +1,4 @@
-# search/analytics.py
+# 搜索统计分析工具
 from wagtail.contrib.search_promotions.models import Query
 from django.db.models import Count, F, IntegerField
 from django.db.models.functions import Coalesce
@@ -14,6 +14,7 @@ class SearchAnalytics:
     @staticmethod
     def get_popular_searches(days=30, limit=10):
         """获取热门搜索词"""
+        # 通过 daily_hits 关联表统计时间范围内的真实点击记录。
         start_date = datetime.now() - timedelta(days=days)
 
         popular_searches = Query.objects.filter(
@@ -34,6 +35,7 @@ class SearchAnalytics:
     @staticmethod
     def get_search_trends(days=30, order_by=None):
         """获取搜索趋势，支持排序"""
+        # 先按天聚合，再使用白名单映射排序字段，避免把用户输入直接交给 ORM。
         start_date = datetime.now() - timedelta(days=days)
 
         # 首先按日期聚合获取每日的总搜索次数

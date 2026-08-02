@@ -1,4 +1,4 @@
-# base/utils.py
+# 基础应用的通用工具
 import hashlib
 import time
 from typing import Optional
@@ -24,12 +24,12 @@ class EmailRateLimit:
 		"""
 		生成缓存键
 
-		Args:
-			email: 用户邮箱
-			form_page_id: 表单页面ID
+		参数：
+			email：用户邮箱
+			form_page_id：表单页面 ID
 
-		Returns:
-			str: 缓存键
+		返回值：
+			str：缓存键
 		"""
 		# 使用邮箱和表单页面ID生成唯一键，避免不同表单之间的冲突
 		key_data = f"{email}:{form_page_id}"
@@ -43,13 +43,13 @@ class EmailRateLimit:
 		"""
 		检查邮件发送频率限制
 
-		Args:
-			email: 用户邮箱
-			form_page_id: 表单页面ID
-			limit_seconds: 限制时间（秒），默认为5分钟
+		参数：
+			email：用户邮箱
+			form_page_id：表单页面 ID
+			limit_seconds：限制时间（秒），默认为 5 分钟
 
-		Returns:
-			dict: 检查结果
+		返回值：
+			dict：检查结果
 				- allowed: bool 是否允许发送
 				- remaining_seconds: int 剩余等待时间（秒）
 				- last_sent_time: float 上次发送时间戳
@@ -114,13 +114,13 @@ class EmailRateLimit:
 		"""
 		记录邮件发送时间
 
-		Args:
-			email: 用户邮箱
-			form_page_id: 表单页面ID
-			limit_seconds: 限制时间（秒），用于设置缓存过期时间
+		参数：
+			email：用户邮箱
+			form_page_id：表单页面 ID
+			limit_seconds：限制时间（秒），用于设置缓存过期时间
 
-		Returns:
-			bool: 是否记录成功
+		返回值：
+			bool：是否记录成功
 		"""
 		if not email or not form_page_id:
 			return False
@@ -147,12 +147,12 @@ class EmailRateLimit:
 		"""
 		清除特定用户的频率限制记录（管理员功能）
 
-		Args:
-			email: 用户邮箱
-			form_page_id: 表单页面ID
+		参数：
+			email：用户邮箱
+			form_page_id：表单页面 ID
 
-		Returns:
-			bool: 是否清除成功
+		返回值：
+			bool：是否清除成功
 		"""
 		if not email or not form_page_id:
 			return False
@@ -173,11 +173,11 @@ class EmailRateLimit:
 		"""
 		生成剩余等待时间的友好提示信息
 
-		Args:
-			remaining_seconds: 剩余等待时间（秒）
+		参数：
+			remaining_seconds：剩余等待时间（秒）
 
-		Returns:
-			str: 友好的提示信息
+		返回值：
+			str：友好的提示信息
 		"""
 		if remaining_seconds <= 0:
 			return "现在可以发送邮件"
@@ -201,11 +201,11 @@ class EmailRateLimitSettings:
 		"""
 		获取邮件发送限制时间
 
-		Args:
-			form_page_id: 表单页面ID（可用于不同表单的个性化配置）
+		参数：
+			form_page_id：表单页面 ID（可用于不同表单的个性化配置）
 
-		Returns:
-			int: 限制时间（秒）
+		返回值：
+			int：限制时间（秒）
 		"""
 		# 可以从Django设置中获取配置
 		default_limit = getattr(settings, 'EMAIL_RATE_LIMIT_SECONDS', 300)  # 默认5分钟
@@ -222,7 +222,7 @@ class EmailRateLimitSettings:
 		"""
 		检查是否启用邮件频率限制
 
-		Returns:
-			bool: 是否启用
+		返回值：
+			bool：是否启用
 		"""
 		return getattr(settings, 'EMAIL_RATE_LIMIT_ENABLED', True)

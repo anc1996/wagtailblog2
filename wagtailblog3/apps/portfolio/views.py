@@ -1,3 +1,3 @@
 from django.shortcuts import render
 
-# Create your views here.
+# 作品集应用的视图可在此处补充。

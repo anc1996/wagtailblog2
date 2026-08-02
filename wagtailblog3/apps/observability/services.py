@@ -35,6 +35,7 @@ def get_overview(*, refresh: bool = False) -> dict:
     if cached is not None:
         return cached
 
+    # 概览数据短时缓存；刷新请求只清除概览缓存，不影响日志文件和分页游标。
     modules = []
     total_bytes = 0
     active_domains = 0
@@ -149,6 +150,7 @@ def clear_and_audit(
     """先抢占幂等键再清理，避免并发重复提交执行两次文件操作。"""
     from .models import LogClearAudit
 
+    # 先写入“运行中”审计记录并依赖唯一幂等键抢占执行权，重复请求直接返回旧记录。
     try:
         with transaction.atomic():
             audit = LogClearAudit.objects.create(
@@ -251,7 +253,7 @@ def clear_and_audit(
 
 
 def _write_wagtail_audit(audit, user, request_metadata):
-    """Write only a compact ModelLogEntry; file details remain in our audit row."""
+    """只写入精简的 ModelLogEntry，文件明细保留在本应用的审计记录中。"""
     try:
         from wagtail.models import ModelLogEntry
 

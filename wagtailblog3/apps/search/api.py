@@ -1,4 +1,4 @@
-# apps/search/api.py
+# 搜索应用的接口视图
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from .core import perform_search, format_search_results_for_api, get_search_suggestions
@@ -34,7 +34,7 @@ def search_api(request):
 			'query': '', 'total': 0, 'page': page, 'per_page': per_page, 'results': []
 		})
 	
-	# 1. 校验并读取 Redis 缓存
+	# 1. 先读取缓存，命中时直接返回，避免重复访问搜索引擎。
 	cached_results = SearchCache.get_cached_results(
 		query, search_type, page, start_date, end_date, order_by
 	)
@@ -43,7 +43,7 @@ def search_api(request):
 		return Response(cached_results)
 	
 	try:
-		# 2. 触发原生 ES 编译检索
+		# 2. 构造并执行原生搜索引擎查询。
 		search_results = perform_search(
 			query, search_type,
 			start_date=start_date,
@@ -51,17 +51,16 @@ def search_api(request):
 			order_by=order_by
 		)
 		
-		# 3. 针对 ES8 SearchResults 执行安全的延迟翻页切片
-		# 【架构避坑提示】不要频繁调用 search_results.count()，在大型并发下，使用切片和总数缓存更健壮
+		# 3. 先取总数，再按当前页切片；结果代理会复用总数缓存。
 		total_count = search_results.count()
 		
 		start = (page - 1) * per_page
 		end = start + per_page
 		
-		# 针对返回的抽象类型进行弹性截断
+		# 结果代理统一支持切片，超出搜索引擎窗口时由代理截断。
 		paginated_results = search_results[start:end]
 		
-		# 4. 格式化并灌入缓存
+		# 4. 转换为接口格式并写入缓存，供相同条件的请求复用。
 		results_data = format_search_results_for_api(paginated_results)
 		
 		data = {
@@ -98,7 +97,7 @@ def search_suggestions_api(request):
 		return Response({'suggestions': []})
 	
 	try:
-		# 调用 core.py 中保留的 get_search_suggestions 方法
+		# 调用核心模块统一的搜索建议逻辑。
 		suggestions = get_search_suggestions(query)
 		return Response({'suggestions': suggestions})
 	except Exception as e:

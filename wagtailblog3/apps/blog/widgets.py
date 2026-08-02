@@ -1,3 +1,4 @@
+# Vditor Markdown 后台控件
 from django import forms
 from django.conf import settings
 from wagtail.admin.staticfiles import versioned_static
@@ -7,17 +8,19 @@ VDITOR_ADMIN_ASSET_VERSION = "20260801.4"
 
 
 def vditor_admin_static(path):
+    # 用独立版本参数缓存静态资源；只要 JS/CSS 改动，后台页面即可绕过旧缓存。
     url = versioned_static(path)
     separator = "&" if "?" in url else "?"
     return f"{url}{separator}blog_vditor={VDITOR_ADMIN_ASSET_VERSION}"
 
 
 class VditorMarkdownWidget(forms.Textarea):
-    """Admin widget that keeps a plain Markdown textarea as the source of truth."""
+    """使用隐藏 Markdown 文本域作为唯一提交来源的后台控件。"""
 
     template_name = "blog/widgets/vditor_markdown.html"
 
     def build_attrs(self, base_attrs=None, extra_attrs=None):
+        # Vditor 只负责可视化编辑，所有动态块操作最终都写回这个文本域。
         attrs = super().build_attrs(base_attrs, extra_attrs)
         attrs["data-vditor-markdown"] = "true"
         attrs["data-vditor-cdn"] = (
@@ -34,6 +37,7 @@ class VditorMarkdownWidget(forms.Textarea):
 
     @property
     def media(self):
+        # 资源路径统一经过 Wagtail 版本化处理，并附加项目自己的缓存版本号。
         return forms.Media(
             css={
                 "all": (

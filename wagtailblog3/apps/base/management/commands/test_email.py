@@ -1,10 +1,10 @@
-# base/management/__init__.py
+# 管理命令包初始化文件
 # 此文件为空，但必须存在
 
-# base/management/commands/__init__.py
+# 管理命令子包初始化文件
 # 此文件为空，但必须存在
 
-# base/management/commands/test_email.py
+"""发送纯文本、HTML 或多格式测试邮件的管理命令。"""
 from django.core.management.base import BaseCommand
 from django.core.mail import send_mail, EmailMultiAlternatives
 from django.conf import settings
@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 class Command(BaseCommand):
+	"""根据命令参数构造并发送测试邮件。"""
 	help = '测试邮件发送功能'
 	
 	def add_arguments(self, parser):
@@ -33,6 +34,7 @@ class Command(BaseCommand):
 		)
 	
 	def handle(self, *args, **options):
+		# 收件人由逗号分隔并逐项去除空白，便于一次测试多个地址。
 		recipients = [email.strip() for email in options['to'].split(',')]
 		test_type = options['test_type']
 		
@@ -56,7 +58,7 @@ class Command(BaseCommand):
 			logger.error(f"邮件测试失败: {e}", exc_info=True)
 	
 	def test_simple_email(self, recipients):
-		"""测试纯文本邮件"""
+		"""发送仅包含纯文本正文的测试邮件。"""
 		subject = "Django邮件系统测试 - 纯文本"
 		message = """
 这是一封测试邮件。
@@ -89,7 +91,7 @@ class Command(BaseCommand):
 			)
 	
 	def test_html_email(self, recipients):
-		"""测试HTML邮件"""
+		"""发送带纯文本备选内容的 HTML 测试邮件。"""
 		html_content = """
         <!DOCTYPE html>
         <html>
@@ -134,7 +136,7 @@ class Command(BaseCommand):
 			)
 	
 	def test_multi_email(self, recipients):
-		"""测试多格式邮件（推荐方式）"""
+		"""发送同时包含纯文本和 HTML 正文的多格式测试邮件。"""
 		subject = "Django邮件系统测试 - 多格式"
 		
 		# 纯文本内容
@@ -151,7 +153,7 @@ class Command(BaseCommand):
 请不要回复此邮件。
         """.format(len(recipients))
 		
-		# HTML内容
+		# 构造 HTML 内容
 		html_content = """
         <!DOCTYPE html>
         <html>
@@ -183,7 +185,7 @@ class Command(BaseCommand):
         </html>
         """.format(len(recipients), ', '.join(recipients))
 		
-		# 创建多格式邮件
+		# 使用 EmailMultiAlternatives 保留纯文本兼容性，并附加 HTML 版本。
 		msg = EmailMultiAlternatives(
 			subject=subject,
 			body=text_content,

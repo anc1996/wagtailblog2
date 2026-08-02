@@ -1,4 +1,4 @@
-"""Small helpers for consistent contextual and exception logging."""
+"""用于统一上下文日志和异常日志的小型辅助函数。"""
 
 from __future__ import annotations
 
@@ -7,14 +7,14 @@ from functools import wraps
 
 
 class ContextLoggerAdapter(logging.LoggerAdapter):
-    """Append stable context without requiring custom format fields."""
+    """追加稳定上下文，不要求调用方修改日志格式字段。"""
 
     def process(self, msg, kwargs):
         return f"{msg} - Context: {self.extra}", kwargs
 
 
 def log_exceptions(logger=None, level=logging.ERROR, message=None):
-    """Log an exception with its traceback and re-raise it unchanged."""
+    """记录带回溯的异常，并原样重新抛出。"""
 
     def decorator(func):
         target_logger = logger or logging.getLogger(func.__module__)
@@ -40,5 +40,5 @@ def log_exceptions(logger=None, level=logging.ERROR, message=None):
 
 
 def get_context_logger(name, **context):
-    """Return a standard LoggerAdapter with stable structured context."""
+    """返回带稳定结构化上下文的标准 LoggerAdapter。"""
     return ContextLoggerAdapter(logging.getLogger(name), context)

@@ -10,8 +10,10 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ('blog', '0019_alter_blogpage_body'),
-        # Match the Wagtail 7.4.2 migration shipped in the local test env.
-        ('wagtailcore', '0098_merge_20260603_0945'),
+        # 不同 Wagtail 7.4.2 构建的 0098 合并迁移时间戳不同，
+        # 直接依赖共同父节点可同时兼容测试与生产环境，并保持等价的迁移顺序。
+        ('wagtailcore', '0097_baselogentry_uuid_action_timestamp_indexes'),
+        ('wagtailcore', '0097_merge_20250811_1740'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 

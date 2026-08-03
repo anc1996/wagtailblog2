@@ -1,10 +1,11 @@
 # Vditor Markdown 后台控件
 from django import forms
 from django.conf import settings
+from django.urls import reverse
 from wagtail.admin.staticfiles import versioned_static
 
 
-VDITOR_ADMIN_ASSET_VERSION = "20260801.4"
+VDITOR_ADMIN_ASSET_VERSION = "20260803.2"
 
 
 def vditor_admin_static(path):
@@ -28,6 +29,9 @@ class VditorMarkdownWidget(forms.Textarea):
         )
         attrs["data-vditor-mode"] = "sv"
         attrs["data-vditor-locale"] = "zh_CN"
+        attrs["data-vditor-page-chooser-url"] = reverse(
+            "wagtailadmin_choose_page"
+        )
         attrs["class"] = " ".join(
             value
             for value in (attrs.get("class", ""), "blog-vditor-source")
@@ -46,6 +50,7 @@ class VditorMarkdownWidget(forms.Textarea):
                 )
             },
             js=(
+                versioned_static("wagtailadmin/js/page-chooser-modal.js"),
                 versioned_static("vendor/vditor/dist/index.min.js"),
                 vditor_admin_static("blog/js/vditor_markdown.js"),
             ),

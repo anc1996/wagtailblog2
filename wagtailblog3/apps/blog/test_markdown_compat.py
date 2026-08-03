@@ -2,7 +2,9 @@
 
 import hashlib
 from types import SimpleNamespace
+from unittest.mock import patch
 
+from django.urls import reverse
 from django.test import SimpleTestCase
 
 from blog.blocks import VditorMarkdownBlock
@@ -64,8 +66,25 @@ class VditorWidgetCompatibilityTests(SimpleTestCase):
         self.assertIn('name="body"', html)
         self.assertIn('id="body-id"', html)
         self.assertIn('data-vditor-markdown="true"', html)
+        self.assertIn("data-vditor-page-chooser-url", html)
         self.assertNotIn('data-controller="easymde"', html)
         self.assertIn("blog-vditor-editor", html)
+
+    def test_widget_exposes_the_wagtail_page_chooser(self):
+        widget = VditorMarkdownWidget()
+        attrs = widget.build_attrs({})
+
+        self.assertEqual(
+            attrs["data-vditor-page-chooser-url"],
+            reverse("wagtailadmin_choose_page"),
+        )
+        with patch(
+            "blog.widgets.versioned_static",
+            side_effect=lambda path: f"/static/{path}",
+        ):
+            self.assertTrue(
+                any("page-chooser-modal.js" in path for path in widget.media._js)
+            )
 
     def test_vditor_block_uses_widget_without_changing_value_type(self):
         block = VditorMarkdownBlock()
@@ -113,3 +132,52 @@ class MarkdownRendererCompatibilityTests(SimpleTestCase):
         MarkdownRenderer.render(payload[0]["value"])
 
         self.assertEqual(payload[0]["value"], original)
+
+    @patch("blog.markdown_renderer.PageLinkHandler.expand_db_attributes_many")
+    def test_wagtail_page_link_uses_current_url_at_render_time(self, expand_pages):
+        source = '<a linktype="page" id="36" href="/stale-path/">python</a>'
+        expand_pages.return_value = ['<a href="/current-path/">']
+
+        html = MarkdownRenderer.render(source)
+
+        self.assertIn('<a href="/current-path/">python</a>', html)
+        self.assertNotIn("stale-path", html)
+        expand_pages.assert_called_once_with(
+            [{"linktype": "page", "id": "36", "href": "/stale-path/"}]
+        )
+
+    @patch("blog.markdown_renderer.PageLinkHandler.expand_db_attributes_many")
+    def test_invalid_wagtail_page_link_id_does_not_query_pages(self, expand_pages):
+        html = MarkdownRenderer.render(
+            '<a linktype="page" id="not-a-page-id" href="/stale-path/">python</a>'
+        )
+
+        self.assertIn("<a>python</a>", html)
+        self.assertNotIn("stale-path", html)
+        expand_pages.assert_not_called()
+
+    @patch("blog.markdown_renderer.PageLinkHandler.expand_db_attributes_many")
+    def test_wagtail_page_link_rendering_keeps_markdown_source_unchanged(
+        self, expand_pages
+    ):
+        source = '<a linktype="page" id="36" href="/stale-path/">python</a>'
+        before = hashlib.sha256(source.encode("utf-8")).hexdigest()
+        expand_pages.return_value = ['<a href="/current-path/">']
+
+        MarkdownRenderer.render(source)
+
+        after = hashlib.sha256(source.encode("utf-8")).hexdigest()
+        self.assertEqual(before, after)
+
+    @patch("blog.markdown_renderer.PageLinkHandler.expand_db_attributes_many")
+    def test_fenced_page_link_example_is_not_resolved(self, expand_pages):
+        source = (
+            "```html\n"
+            '<a linktype="page" id="36" href="/stale-path/">python</a>\n'
+            "```"
+        )
+
+        html = MarkdownRenderer.render(source)
+
+        self.assertIn("&lt;a linktype=", html)
+        expand_pages.assert_not_called()

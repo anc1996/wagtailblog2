@@ -2,6 +2,7 @@
     "use strict";
 
     var LOG_PREFIX = "[BlogVditor]";
+    var PAGE_LINK_ID_PATTERN = /^[1-9][0-9]{0,18}$/;
 
     function log(event, details) {
         console.info(LOG_PREFIX, event, details || {});
@@ -122,6 +123,10 @@
             this.editor = null;
             this.form = this.input.form;
             this.handleSubmit = this.handleSubmit.bind(this);
+            this.handlePageLinkPointerDown =
+                this.capturePageLinkSelection.bind(this);
+            this.pageLinkButton = null;
+            this.pageLinkSelection = null;
             this.initialValue = this.input.value || "";
             this.initialized = false;
             this.themeObserver = null;
@@ -186,6 +191,15 @@
                     "code",
                     "inline-code",
                     "link",
+                    {
+                        name: "blog-page-link",
+                        tip: "站内页面链接",
+                        tipPosition: "n",
+                        icon: '<svg><use xlink:href="#vditor-icon-link"></use></svg>',
+                        click: function (event) {
+                            widget.openPageChooser(event);
+                        },
+                    },
                     "table",
                     "undo",
                     "redo",
@@ -224,6 +238,7 @@
                     widget.root.dataset.vditorReady = "true";
                     widget.observeAdminTheme();
                     widget.observeFullscreenLayout();
+                    widget.bindPageLinkSelection();
                     log("widget:init:ready", {
                         name: widget.name,
                         value: summarizeValue(widget.initialValue),
@@ -373,6 +388,314 @@
             this.editor.setTheme(dark ? "dark" : "classic", dark ? "dark" : "light");
         }
 
+        bindPageLinkSelection() {
+            if (!this.editorElement) {
+                return;
+            }
+
+            var button = this.editorElement.querySelector(
+                'button[data-type="blog-page-link"]'
+            );
+            if (!button || this.pageLinkButton === button) {
+                return;
+            }
+
+            this.unbindPageLinkSelection();
+            this.pageLinkButton = button;
+            button.addEventListener(
+                "pointerdown",
+                this.handlePageLinkPointerDown,
+                true
+            );
+            button.addEventListener(
+                "mousedown",
+                this.handlePageLinkPointerDown,
+                true
+            );
+        }
+
+        unbindPageLinkSelection() {
+            if (!this.pageLinkButton) {
+                return;
+            }
+
+            this.pageLinkButton.removeEventListener(
+                "pointerdown",
+                this.handlePageLinkPointerDown,
+                true
+            );
+            this.pageLinkButton.removeEventListener(
+                "mousedown",
+                this.handlePageLinkPointerDown,
+                true
+            );
+            this.pageLinkButton = null;
+        }
+
+        capturePageLinkSelection() {
+            var selection = this.captureEditorSelection();
+            if (selection) {
+                this.pageLinkSelection = selection;
+            }
+        }
+
+        captureEditorSelection() {
+            if (
+                !this.editorElement ||
+                typeof window.getSelection !== "function"
+            ) {
+                return null;
+            }
+
+            var mode =
+                this.editor && typeof this.editor.getCurrentMode === "function"
+                    ? this.editor.getCurrentMode()
+                    : null;
+            var modeElement = this.getModeElement(mode);
+            if (!modeElement) {
+                return null;
+            }
+
+            var selection = window.getSelection();
+            var range =
+                selection && selection.rangeCount > 0
+                    ? selection.getRangeAt(0)
+                    : null;
+            if (!range || !modeElement.contains(range.commonAncestorContainer)) {
+                var modeState = this.editor && this.editor.vditor
+                    ? this.editor.vditor[mode]
+                    : null;
+                range = modeState && modeState.range ? modeState.range : null;
+            }
+            if (!range || !modeElement.contains(range.commonAncestorContainer)) {
+                return null;
+            }
+
+            var before = range.cloneRange();
+            before.selectNodeContents(modeElement);
+            before.setEnd(range.startContainer, range.startOffset);
+
+            return {
+                mode: mode,
+                start: before.toString().length,
+                end: before.toString().length + range.toString().length,
+                text: range.toString(),
+            };
+        }
+
+        getModeElement(mode) {
+            if (!this.editor || !this.editor.vditor || !mode) {
+                return null;
+            }
+
+            var modeState = this.editor.vditor[mode];
+            return modeState && modeState.element ? modeState.element : null;
+        }
+
+        buildRangeFromOffsets(element, start, end) {
+            if (!element) {
+                return null;
+            }
+
+            var range = element.ownerDocument.createRange();
+            var walker = element.ownerDocument.createTreeWalker(
+                element,
+                NodeFilter.SHOW_TEXT
+            );
+            var textLength = 0;
+            var startPoint = null;
+            var endPoint = null;
+            var node;
+
+            while ((node = walker.nextNode())) {
+                var nextLength = textLength + node.data.length;
+                if (!startPoint && start <= nextLength) {
+                    startPoint = {
+                        node: node,
+                        offset: Math.max(0, start - textLength),
+                    };
+                }
+                if (!endPoint && end <= nextLength) {
+                    endPoint = {
+                        node: node,
+                        offset: Math.max(0, end - textLength),
+                    };
+                    break;
+                }
+                textLength = nextLength;
+            }
+
+            if (!startPoint) {
+                range.selectNodeContents(element);
+                range.collapse(false);
+                return range;
+            }
+
+            endPoint = endPoint || startPoint;
+            range.setStart(startPoint.node, startPoint.offset);
+            range.setEnd(endPoint.node, endPoint.offset);
+            return range;
+        }
+
+        restoreEditorSelection(savedSelection) {
+            if (
+                !savedSelection ||
+                typeof window.getSelection !== "function" ||
+                (this.editor &&
+                    typeof this.editor.getCurrentMode === "function" &&
+                    this.editor.getCurrentMode() !== savedSelection.mode)
+            ) {
+                return false;
+            }
+
+            var modeElement = this.getModeElement(savedSelection.mode);
+            var range = this.buildRangeFromOffsets(
+                modeElement,
+                savedSelection.start,
+                savedSelection.end
+            );
+            var selection = window.getSelection();
+            if (!range || !selection) {
+                return false;
+            }
+
+            try {
+                selection.removeAllRanges();
+                selection.addRange(range);
+                var modeState = this.editor.vditor[savedSelection.mode];
+                modeState.range = range.cloneRange();
+                return true;
+            } catch (error) {
+                logError("page-link:selection:restore-failed", error, {
+                    name: this.name,
+                });
+                return false;
+            }
+        }
+
+        buildPageLinkMarkup(page, linkText) {
+            var pageId = page && page.id != null ? String(page.id) : "";
+            if (!PAGE_LINK_ID_PATTERN.test(pageId)) {
+                return null;
+            }
+
+            var title = typeof linkText === "string" ? linkText.trim() : "";
+            if (!title && page && typeof page.title === "string") {
+                title = page.title.trim();
+            }
+            if (!title && page && typeof page.adminTitle === "string") {
+                title = page.adminTitle.trim();
+            }
+            if (!title) {
+                title = pageId;
+            }
+
+            var anchor = document.createElement("a");
+            anchor.setAttribute("linktype", "page");
+            anchor.setAttribute("id", pageId);
+            if (page && typeof page.url === "string" && page.url) {
+                anchor.setAttribute("href", page.url);
+            }
+            anchor.textContent = title;
+            return anchor.outerHTML;
+        }
+
+        openPageChooser(event) {
+            var chooserUrl = this.input.dataset.vditorPageChooserUrl;
+            if (!chooserUrl) {
+                logError(
+                    "page-link:chooser:url-missing",
+                    new Error("Wagtail page chooser URL is unavailable"),
+                    { name: this.name }
+                );
+                return;
+            }
+
+            if (
+                typeof window.ModalWorkflow !== "function" ||
+                !window.PAGE_CHOOSER_MODAL_ONLOAD_HANDLERS
+            ) {
+                logError(
+                    "page-link:chooser:unavailable",
+                    new Error("Wagtail page chooser assets are unavailable"),
+                    { name: this.name }
+                );
+                return;
+            }
+
+            var widget = this;
+            var selection = this.pageLinkSelection || this.captureEditorSelection();
+            this.pageLinkSelection = null;
+            var triggerElement = event && event.currentTarget;
+
+            try {
+                window.ModalWorkflow({
+                    url: chooserUrl,
+                    triggerElement: triggerElement || document.activeElement,
+                    onload: window.PAGE_CHOOSER_MODAL_ONLOAD_HANDLERS,
+                    responses: {
+                        pageChosen: function (page) {
+                            widget.insertChosenPageLink(page, selection);
+                        },
+                    },
+                });
+                log("page-link:chooser:open", { name: this.name });
+            } catch (error) {
+                logError("page-link:chooser:open-failed", error, {
+                    name: this.name,
+                });
+            }
+        }
+
+        insertChosenPageLink(page, selection) {
+            var pageId = page && page.id != null ? String(page.id) : "";
+            var markup = this.buildPageLinkMarkup(
+                page,
+                selection && selection.text
+            );
+            if (!markup) {
+                logError(
+                    "page-link:chosen:invalid",
+                    new Error("Wagtail page chooser returned an invalid page ID"),
+                    { name: this.name, pageId: pageId }
+                );
+                return;
+            }
+
+            if (!this.editor) {
+                logError(
+                    "page-link:insert:editor-unavailable",
+                    new Error("Vditor is unavailable"),
+                    { name: this.name, pageId: pageId }
+                );
+                return;
+            }
+
+            try {
+                this.editor.focus();
+                this.restoreEditorSelection(selection);
+                if (
+                    typeof this.editor.getCurrentMode === "function" &&
+                    this.editor.getCurrentMode() === "sv" &&
+                    typeof this.editor.insertMD === "function"
+                ) {
+                    this.editor.insertMD(markup);
+                } else {
+                    this.editor.insertValue(markup);
+                }
+                this.syncValue(this.editor.getValue());
+                log("page-link:inserted", {
+                    name: this.name,
+                    pageId: pageId,
+                });
+            } catch (error) {
+                logError("page-link:insert:failed", error, {
+                    name: this.name,
+                    pageId: pageId,
+                });
+            }
+        }
+
         syncValue(value) {
             this.input.value = value || "";
             this.input.dispatchEvent(new Event("input", { bubbles: true }));
@@ -466,6 +789,7 @@
                 window.cancelAnimationFrame(this.fullscreenFrame);
                 this.fullscreenFrame = null;
             }
+            this.unbindPageLinkSelection();
             window.removeEventListener("resize", this.handleFullscreenLayoutChange);
             if (this.editor) {
                 this.editor.destroy();
@@ -540,7 +864,7 @@
     });
 
     window.BlogVditorDebug = {
-        version: "2026-08-01.3",
+        version: "2026-08-03.2",
         inspect: function () {
             return Array.from(document.querySelectorAll("[data-vditor-field]")).map(
                 function (field) {

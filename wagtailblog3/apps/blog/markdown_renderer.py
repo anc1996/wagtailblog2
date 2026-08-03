@@ -9,6 +9,18 @@ import nh3
 from django.conf import settings
 from django.utils.encoding import smart_str
 from django.utils.safestring import mark_safe
+from wagtail.rich_text import LinkRewriter
+from wagtail.rich_text.pages import PageLinkHandler
+
+
+_WAGTAIL_PAGE_LINK_ID_RE = re.compile(r"^[1-9][0-9]{0,18}$")
+
+
+class _PageLinkRewriter(LinkRewriter):
+    """Only resolve the Wagtail page links emitted by the Vditor widget."""
+
+    def get_tag_type_from_attrs(self, attrs):
+        return "page" if attrs.get("linktype") == "page" else None
 
 
 class MarkdownRenderer:
@@ -107,6 +119,36 @@ class MarkdownRenderer:
         return kwargs
 
     @classmethod
+    def expand_wagtail_page_links(cls, html):
+        """Resolve page-link IDs at render time without touching other anchors."""
+
+        def expand_page_links(attrs_list):
+            replacements = ["<a>"] * len(attrs_list)
+            valid_indexes = []
+            valid_attrs = []
+
+            for index, attrs in enumerate(attrs_list):
+                page_id = attrs.get("id", "")
+                if _WAGTAIL_PAGE_LINK_ID_RE.fullmatch(page_id):
+                    valid_indexes.append(index)
+                    valid_attrs.append(attrs)
+
+            if not valid_attrs:
+                return replacements
+
+            for index, replacement in zip(
+                valid_indexes,
+                PageLinkHandler.expand_db_attributes_many(valid_attrs),
+            ):
+                replacements[index] = replacement
+
+            return replacements
+
+        return _PageLinkRewriter(
+            bulk_rules={"page": expand_page_links}
+        )(html)
+
+    @classmethod
     def render(cls, source, context=None):
         # 保留 Wagtail 块渲染签名，但渲染规则只依赖正文和全局配置。
         del context
@@ -115,4 +157,5 @@ class MarkdownRenderer:
             cls.prepare_source(source),
             **cls.markdown_kwargs(),
         )
+        rendered = cls.expand_wagtail_page_links(rendered)
         return mark_safe(nh3.clean(rendered, **cls.nh3_kwargs()))

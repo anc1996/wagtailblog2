@@ -243,6 +243,34 @@ MEDIA_URL = "/media/" # 媒体文件的 URL 前缀
 WAGTAILDOCS_DOCUMENT_MODEL = 'blog.BlogDocument' # 自定义文档模型
 
 WAGTAILIMAGES_IMAGE_MODEL = 'blog.BlogImage' # 自定义图片模型
+WAGTAILIMAGES_EXTENSIONS = [
+    "avif",
+    "gif",
+    "jpg",
+    "jpeg",
+    "png",
+    "webp",
+    "heic",
+    "tiff",
+    "bmp",
+]
+WAGTAILIMAGES_FORMAT_CONVERSIONS = {
+    "bmp": "png",
+    "heic": "jpeg",
+    "tiff": "jpeg",
+}
+
+# Vditor 自动粘贴图片时使用的默认 Wagtail collection。未配置且当前用户
+# 有多个可写 collection 时，上传端点会返回 collection_required。
+_vditor_image_collection_id = os.environ.get(
+    "BLOG_VDITOR_IMAGE_UPLOAD_COLLECTION_ID", ""
+).strip()
+BLOG_VDITOR_IMAGE_UPLOAD_COLLECTION_ID = (
+    int(_vditor_image_collection_id)
+    if _vditor_image_collection_id.isdigit()
+    and int(_vditor_image_collection_id) > 0
+    else None
+)
 
 # Django 默认将每个表单的最大字段数设置为 1000，但特别复杂的页面模型
 # 可能会在 Wagtail 的页面编辑器中超出此限制。

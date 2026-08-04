@@ -4,6 +4,7 @@ import hashlib
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from django.conf import settings
 from django.urls import reverse
 from django.test import SimpleTestCase
 
@@ -12,6 +13,8 @@ from blog.models import BlogPage
 from blog.widgets import VditorMarkdownWidget
 from blog.markdown_renderer import MarkdownRenderer
 from wagtailblog3.mongodb import MongoDBStreamFieldAdapter
+from wagtail.images.formats import get_image_format
+from wagtail.images.forms import ImageInsertionForm
 
 
 class MarkdownStorageCompatibilityTests(SimpleTestCase):
@@ -67,6 +70,8 @@ class VditorWidgetCompatibilityTests(SimpleTestCase):
         self.assertIn('id="body-id"', html)
         self.assertIn('data-vditor-markdown="true"', html)
         self.assertIn("data-vditor-page-chooser-url", html)
+        self.assertIn("data-vditor-image-chooser-url", html)
+        self.assertIn("data-vditor-image-upload-url", html)
         self.assertNotIn('data-controller="easymde"', html)
         self.assertIn("blog-vditor-editor", html)
 
@@ -86,6 +91,26 @@ class VditorWidgetCompatibilityTests(SimpleTestCase):
                 any("page-chooser-modal.js" in path for path in widget.media._js)
             )
 
+    def test_widget_exposes_wagtail_image_chooser_and_upload_urls(self):
+        widget = VditorMarkdownWidget()
+        attrs = widget.build_attrs({})
+
+        self.assertEqual(
+            attrs["data-vditor-image-chooser-url"],
+            f'{reverse("wagtailimages_chooser:choose")}?select_format=true',
+        )
+        self.assertEqual(
+            attrs["data-vditor-image-upload-url"],
+            reverse("blog_vditor_image_upload"),
+        )
+        with patch(
+            "blog.widgets.versioned_static",
+            side_effect=lambda path: f"/static/{path}",
+        ):
+            self.assertTrue(
+                any("image-chooser-modal.js" in path for path in widget.media._js)
+            )
+
     def test_vditor_block_uses_widget_without_changing_value_type(self):
         block = VditorMarkdownBlock()
 
@@ -97,6 +122,40 @@ class VditorWidgetCompatibilityTests(SimpleTestCase):
 
         self.assertIsInstance(block, VditorMarkdownBlock)
         self.assertIsInstance(block.field.widget, VditorMarkdownWidget)
+
+    def test_extended_image_upload_formats_are_shared_with_wagtail(self):
+        self.assertEqual(
+            settings.WAGTAILIMAGES_EXTENSIONS,
+            [
+                "avif",
+                "gif",
+                "jpg",
+                "jpeg",
+                "png",
+                "webp",
+                "heic",
+                "tiff",
+                "bmp",
+            ],
+        )
+        self.assertEqual(
+            settings.WAGTAILIMAGES_FORMAT_CONVERSIONS,
+            {
+                "bmp": "png",
+                "heic": "jpeg",
+                "tiff": "jpeg",
+            },
+        )
+
+    def test_web_compatible_fullwidth_image_format_is_registered(self):
+        image_format = get_image_format("fullwidth_web")
+        rich_text_choices = dict(
+            ImageInsertionForm.base_fields["format"].choices
+        )
+
+        self.assertEqual(image_format.classname, "richtext-image full-width")
+        self.assertEqual(image_format.filter_spec, "width-800|format-jpeg")
+        self.assertEqual(rich_text_choices["fullwidth_web"], "全宽（网页兼容）")
 
 
 class MarkdownRendererCompatibilityTests(SimpleTestCase):
@@ -181,3 +240,87 @@ class MarkdownRendererCompatibilityTests(SimpleTestCase):
 
         self.assertIn("&lt;a linktype=", html)
         expand_pages.assert_not_called()
+
+    @patch("blog.markdown_renderer.ImageEmbedHandler.expand_db_attributes_many")
+    def test_wagtail_image_embed_uses_current_rendition_at_render_time(
+        self, expand_images
+    ):
+        source = (
+            '<embed embedtype="image" id="42" format="fullwidth" '
+            'alt="diagram" src="/stale-image.jpg" width="800" height="450" />'
+        )
+        expand_images.return_value = [
+            '<img src="/current-rendition.jpg" alt="diagram" width="800">'
+        ]
+
+        html = MarkdownRenderer.render(source)
+
+        self.assertIn('src="/current-rendition.jpg"', html)
+        self.assertNotIn("stale-image", html)
+        expand_images.assert_called_once_with(
+            [
+                {
+                    "embedtype": "image",
+                    "id": "42",
+                    "format": "fullwidth",
+                    "alt": "diagram",
+                    "src": "/stale-image.jpg",
+                    "width": "800",
+                    "height": "450",
+                }
+            ]
+        )
+
+    @patch("blog.markdown_renderer.ImageEmbedHandler.expand_db_attributes_many")
+    def test_invalid_wagtail_image_embed_does_not_query_images(
+        self, expand_images
+    ):
+        html = MarkdownRenderer.render(
+            '<embed embedtype="image" id="not-an-id" format="fullwidth" '
+            'alt="bad" src="https://attacker.invalid/image.jpg" />'
+        )
+
+        self.assertNotIn("attacker.invalid", html)
+        expand_images.assert_not_called()
+
+    @patch("blog.markdown_renderer.ImageEmbedHandler.expand_db_attributes_many")
+    def test_unknown_wagtail_image_format_does_not_query_images(
+        self, expand_images
+    ):
+        html = MarkdownRenderer.render(
+            '<embed embedtype="image" id="42" format="not-registered" '
+            'alt="bad" src="/stale.jpg" />'
+        )
+
+        self.assertNotIn("stale.jpg", html)
+        expand_images.assert_not_called()
+
+    @patch("blog.markdown_renderer.ImageEmbedHandler.expand_db_attributes_many")
+    def test_wagtail_image_rendering_keeps_markdown_source_unchanged(
+        self, expand_images
+    ):
+        source = (
+            '<embed embedtype="image" id="42" format="fullwidth" '
+            'alt="diagram" src="/stale.jpg" />'
+        )
+        before = hashlib.sha256(source.encode("utf-8")).hexdigest()
+        expand_images.return_value = ['<img src="/current.jpg" alt="diagram">']
+
+        MarkdownRenderer.render(source)
+
+        after = hashlib.sha256(source.encode("utf-8")).hexdigest()
+        self.assertEqual(before, after)
+
+    @patch("blog.markdown_renderer.ImageEmbedHandler.expand_db_attributes_many")
+    def test_fenced_image_embed_example_is_not_resolved(self, expand_images):
+        source = (
+            "```html\n"
+            '<embed embedtype="image" id="42" format="fullwidth" '
+            'alt="diagram" src="/stale.jpg" />\n'
+            "```"
+        )
+
+        html = MarkdownRenderer.render(source)
+
+        self.assertIn("&lt;embed embedtype=", html)
+        expand_images.assert_not_called()

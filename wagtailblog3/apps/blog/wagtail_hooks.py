@@ -25,10 +25,22 @@ from wagtail.snippets.models import register_snippet
 from .admin import TagsSnippetViewSet
 from .models import PageViewCount
 from .forms import PageViewCountForm
+from .admin_image_upload import upload_vditor_image
 from . import widget_adapters  # noqa: F401
 
 # 设置日志记录器
 logger = logging.getLogger(__name__)
+
+
+@hooks.register("register_admin_urls")
+def register_vditor_image_upload_url():
+	return [
+		path(
+			"blog/vditor/images/upload/",
+			upload_vditor_image,
+			name="blog_vditor_image_upload",
+		),
+	]
 
 
 # 在 Wagtail 后台所有页面加载图标样式。

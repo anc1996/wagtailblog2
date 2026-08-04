@@ -3,6 +3,12 @@
 
     var LOG_PREFIX = "[BlogVditor]";
     var PAGE_LINK_ID_PATTERN = /^[1-9][0-9]{0,18}$/;
+    var IMAGE_ID_PATTERN = /^[1-9][0-9]{0,18}$/;
+    var IMAGE_FORMAT_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+    var IMAGE_UPLOAD_TOKEN_PATTERN =
+        /<!--blog-vditor-upload:[A-Za-z0-9]+-->/g;
+    var IMAGE_UPLOAD_CONCURRENCY = 2;
+    var formUploadStates = new WeakMap();
 
     function log(event, details) {
         console.info(LOG_PREFIX, event, details || {});
@@ -18,6 +24,87 @@
             characters: text.length,
             lines: text ? text.split(/\r?\n/).length : 0,
         };
+    }
+
+    function updateFormUploadState(form, delta) {
+        if (!form) {
+            return;
+        }
+        var state = formUploadStates.get(form);
+        if (!state) {
+            state = { count: 0, controls: [] };
+            formUploadStates.set(form, state);
+        }
+        state.count = Math.max(0, state.count + delta);
+
+        if (state.count > 0 && state.controls.length === 0) {
+            state.controls = Array.from(
+                form.querySelectorAll('button[type="submit"], input[type="submit"]')
+            ).map(function (control) {
+                var saved = {
+                    element: control,
+                    disabled: control.disabled,
+                    ariaBusy: control.getAttribute("aria-busy"),
+                };
+                control.disabled = true;
+                control.setAttribute("aria-busy", "true");
+                return saved;
+            });
+        } else if (state.count === 0 && state.controls.length > 0) {
+            state.controls.forEach(function (saved) {
+                if (!saved.element.isConnected) {
+                    return;
+                }
+                saved.element.disabled = saved.disabled;
+                if (saved.ariaBusy == null) {
+                    saved.element.removeAttribute("aria-busy");
+                } else {
+                    saved.element.setAttribute("aria-busy", saved.ariaBusy);
+                }
+            });
+            state.controls = [];
+        }
+    }
+
+    function createUploadIdentity() {
+        if (window.crypto && typeof window.crypto.randomUUID === "function") {
+            return window.crypto.randomUUID().replace(/-/g, "");
+        }
+        return (
+            Date.now().toString(36) +
+            Math.random().toString(36).slice(2) +
+            Math.random().toString(36).slice(2)
+        );
+    }
+
+    function dataUrlToImageFile(dataUrl, identity) {
+        var match = /^data:(image\/[A-Za-z0-9.+-]+)(;base64)?,([\s\S]+)$/.exec(
+            dataUrl || ""
+        );
+        if (!match) {
+            return null;
+        }
+        try {
+            var bytes;
+            if (match[2]) {
+                var binary = window.atob(match[3]);
+                bytes = new Uint8Array(binary.length);
+                for (var index = 0; index < binary.length; index += 1) {
+                    bytes[index] = binary.charCodeAt(index);
+                }
+            } else {
+                bytes = new TextEncoder().encode(decodeURIComponent(match[3]));
+            }
+            var extension = match[1].split("/")[1].replace(/[^A-Za-z0-9]/g, "");
+            return new File(
+                [bytes],
+                "pasted-image-" + identity + "." + (extension || "png"),
+                { type: match[1] }
+            );
+        } catch (error) {
+            logError("image-paste:data-url-invalid", error);
+            return null;
+        }
     }
 
     function findNamedInput(element, name) {
@@ -125,8 +212,17 @@
             this.handleSubmit = this.handleSubmit.bind(this);
             this.handlePageLinkPointerDown =
                 this.capturePageLinkSelection.bind(this);
+            this.handleImagePointerDown =
+                this.captureImageSelection.bind(this);
+            this.handlePaste = this.handlePaste.bind(this);
             this.pageLinkButton = null;
             this.pageLinkSelection = null;
+            this.imageButton = null;
+            this.imageSelection = null;
+            this.pendingUploadCount = 0;
+            this.uploadAbortControllers = new Set();
+            this.uploadStatusElement = null;
+            this.destroyed = false;
             this.initialValue = this.input.value || "";
             this.initialized = false;
             this.themeObserver = null;
@@ -144,7 +240,7 @@
             });
 
             if (this.form) {
-                this.form.addEventListener("submit", this.handleSubmit);
+                this.form.addEventListener("submit", this.handleSubmit, true);
             }
 
             this.init();
@@ -200,6 +296,15 @@
                             widget.openPageChooser(event);
                         },
                     },
+                    {
+                        name: "blog-image",
+                        tip: "图片",
+                        tipPosition: "n",
+                        icon: '<svg class="icon icon-image" aria-hidden="true"><use href="#icon-image"></use></svg>',
+                        click: function (event) {
+                            widget.openImageChooser(event);
+                        },
+                    },
                     "table",
                     "undo",
                     "redo",
@@ -207,6 +312,9 @@
                     "fullscreen",
                 ],
                 preview: {
+                    transform: function (html) {
+                        return widget.transformPreview(html);
+                    },
                     markdown: {
                         breaks: true,
                         footnotes: true,
@@ -239,6 +347,8 @@
                     widget.observeAdminTheme();
                     widget.observeFullscreenLayout();
                     widget.bindPageLinkSelection();
+                    widget.bindImageSelection();
+                    widget.bindPasteHandler();
                     log("widget:init:ready", {
                         name: widget.name,
                         value: summarizeValue(widget.initialValue),
@@ -388,6 +498,46 @@
             this.editor.setTheme(dark ? "dark" : "classic", dark ? "dark" : "light");
         }
 
+        transformPreview(html) {
+            var template = document.createElement("template");
+            template.innerHTML = html || "";
+            template.content
+                .querySelectorAll('embed[embedtype="image"]')
+                .forEach(function (embed) {
+                    var imageId = embed.getAttribute("id") || "";
+                    var formatName = embed.getAttribute("format") || "";
+                    var source = embed.getAttribute("src") || "";
+                    if (
+                        !IMAGE_ID_PATTERN.test(imageId) ||
+                        !IMAGE_FORMAT_PATTERN.test(formatName) ||
+                        !source
+                    ) {
+                        embed.remove();
+                        return;
+                    }
+                    var image = document.createElement("img");
+                    image.src = source;
+                    image.alt = embed.getAttribute("alt") || "";
+                    image.loading = "lazy";
+                    if (
+                        formatName === "fullwidth" ||
+                        formatName === "fullwidth_web"
+                    ) {
+                        image.className = "richtext-image full-width";
+                    } else if (formatName === "left" || formatName === "right") {
+                        image.className = "richtext-image " + formatName;
+                    }
+                    ["width", "height"].forEach(function (attribute) {
+                        var value = embed.getAttribute(attribute) || "";
+                        if (/^[1-9][0-9]{0,5}$/.test(value)) {
+                            image.setAttribute(attribute, value);
+                        }
+                    });
+                    embed.replaceWith(image);
+                });
+            return template.innerHTML;
+        }
+
         bindPageLinkSelection() {
             if (!this.editorElement) {
                 return;
@@ -432,10 +582,74 @@
             this.pageLinkButton = null;
         }
 
+        bindImageSelection() {
+            if (!this.editorElement) {
+                return;
+            }
+            var button = this.editorElement.querySelector(
+                'button[data-type="blog-image"]'
+            );
+            if (!button || this.imageButton === button) {
+                return;
+            }
+            this.unbindImageSelection();
+            this.imageButton = button;
+            button.addEventListener(
+                "pointerdown",
+                this.handleImagePointerDown,
+                true
+            );
+            button.addEventListener(
+                "mousedown",
+                this.handleImagePointerDown,
+                true
+            );
+        }
+
+        unbindImageSelection() {
+            if (!this.imageButton) {
+                return;
+            }
+            this.imageButton.removeEventListener(
+                "pointerdown",
+                this.handleImagePointerDown,
+                true
+            );
+            this.imageButton.removeEventListener(
+                "mousedown",
+                this.handleImagePointerDown,
+                true
+            );
+            this.imageButton = null;
+        }
+
+        bindPasteHandler() {
+            if (this.editorElement) {
+                this.editorElement.addEventListener("paste", this.handlePaste, true);
+            }
+        }
+
+        unbindPasteHandler() {
+            if (this.editorElement) {
+                this.editorElement.removeEventListener(
+                    "paste",
+                    this.handlePaste,
+                    true
+                );
+            }
+        }
+
         capturePageLinkSelection() {
             var selection = this.captureEditorSelection();
             if (selection) {
                 this.pageLinkSelection = selection;
+            }
+        }
+
+        captureImageSelection() {
+            var selection = this.captureEditorSelection();
+            if (selection) {
+                this.imageSelection = selection;
             }
         }
 
@@ -696,12 +910,447 @@
             }
         }
 
+        buildImageMarkup(image) {
+            var imageId = image && image.id != null ? String(image.id) : "";
+            var formatName = image && typeof image.format === "string"
+                ? image.format
+                : "";
+            if (
+                !IMAGE_ID_PATTERN.test(imageId) ||
+                !IMAGE_FORMAT_PATTERN.test(formatName)
+            ) {
+                return null;
+            }
+
+            var embed = document.createElement("embed");
+            embed.setAttribute("embedtype", "image");
+            embed.setAttribute("id", imageId);
+            embed.setAttribute("format", formatName);
+            embed.setAttribute(
+                "alt",
+                image && typeof image.alt === "string" ? image.alt : ""
+            );
+
+            var preview = image && image.preview;
+            if (preview && typeof preview.url === "string" && preview.url) {
+                embed.setAttribute("src", preview.url);
+                ["width", "height"].forEach(function (attribute) {
+                    var value = Number(preview[attribute]);
+                    if (Number.isInteger(value) && value > 0 && value <= 999999) {
+                        embed.setAttribute(attribute, String(value));
+                    }
+                });
+            }
+            return embed.outerHTML.replace(/\s*\/?>(?:<\/embed>)?$/, " />");
+        }
+
+        openImageChooser(event) {
+            var chooserUrl = this.input.dataset.vditorImageChooserUrl;
+            if (!chooserUrl) {
+                logError(
+                    "image:chooser:url-missing",
+                    new Error("Wagtail image chooser URL is unavailable"),
+                    { name: this.name }
+                );
+                return;
+            }
+            if (typeof window.ImageChooserModal !== "function") {
+                logError(
+                    "image:chooser:unavailable",
+                    new Error("Wagtail image chooser assets are unavailable"),
+                    { name: this.name }
+                );
+                return;
+            }
+
+            var widget = this;
+            var selection = this.imageSelection || this.captureEditorSelection();
+            this.imageSelection = null;
+            try {
+                new window.ImageChooserModal(chooserUrl).open(
+                    {
+                        triggerElement:
+                            (event && event.currentTarget) || document.activeElement,
+                    },
+                    function (image) {
+                        widget.insertChosenImage(image, selection);
+                    }
+                );
+                log("image:chooser:open", { name: this.name });
+            } catch (error) {
+                logError("image:chooser:open-failed", error, { name: this.name });
+            }
+        }
+
+        insertChosenImage(image, selection) {
+            var markup = this.buildImageMarkup(image);
+            if (!markup || !this.editor) {
+                logError(
+                    "image:chosen:invalid",
+                    new Error("Wagtail image chooser returned invalid image data"),
+                    { name: this.name, imageId: image && image.id }
+                );
+                return;
+            }
+            try {
+                this.editor.focus();
+                if (selection) {
+                    this.restoreEditorSelection({
+                        mode: selection.mode,
+                        start: selection.end,
+                        end: selection.end,
+                    });
+                }
+                this.insertMarkdown(markup);
+                log("image:inserted", {
+                    name: this.name,
+                    imageId: String(image.id),
+                    format: image.format,
+                });
+            } catch (error) {
+                logError("image:insert:failed", error, {
+                    name: this.name,
+                    imageId: image && image.id,
+                });
+            }
+        }
+
+        insertMarkdown(markdown, selection) {
+            if (!this.editor) {
+                return;
+            }
+            this.editor.focus();
+            if (selection) {
+                this.restoreEditorSelection(selection);
+            }
+            if (typeof this.editor.insertMD === "function") {
+                this.editor.insertMD(markdown);
+            } else {
+                this.editor.insertValue(markdown);
+            }
+            this.syncValue(this.editor.getValue());
+        }
+
+        buildClipboardPayload(clipboardData) {
+            if (!clipboardData) {
+                return null;
+            }
+            var files = Array.from(clipboardData.files || []).filter(function (file) {
+                return file && /^image\//i.test(file.type || "");
+            });
+            var html = clipboardData.getData("text/html") || "";
+            var plainText = clipboardData.getData("text/plain") || "";
+            var entries = [];
+            var markdown = plainText;
+
+            if (html) {
+                var documentFromClipboard = new DOMParser().parseFromString(
+                    html,
+                    "text/html"
+                );
+                Array.from(documentFromClipboard.querySelectorAll("img")).forEach(
+                    function (imageNode) {
+                        var source = imageNode.getAttribute("src") || "";
+                        var identity = createUploadIdentity();
+                        var file = null;
+                        if (files.length > 0 && (
+                            /^data:image\//i.test(source) ||
+                            /^(?:file|blob|cid):/i.test(source) ||
+                            !source
+                        )) {
+                            file = files.shift();
+                        } else if (/^data:image\//i.test(source)) {
+                            file = dataUrlToImageFile(source, identity);
+                        }
+                        if (!file) {
+                            return;
+                        }
+                        var sentinel = "BLOGVDITORUPLOAD" + identity + "TOKEN";
+                        var token = "<!--blog-vditor-upload:" + identity + "-->";
+                        entries.push({
+                            file: file,
+                            alt: imageNode.getAttribute("alt") || "",
+                            sentinel: sentinel,
+                            token: token,
+                        });
+                        imageNode.replaceWith(
+                            documentFromClipboard.createTextNode(sentinel)
+                        );
+                    }
+                );
+
+                if (this.editor && typeof this.editor.html2md === "function") {
+                    markdown = this.editor.html2md(
+                        documentFromClipboard.body.innerHTML
+                    );
+                }
+            }
+
+            files.forEach(function (file) {
+                var identity = createUploadIdentity();
+                var token = "<!--blog-vditor-upload:" + identity + "-->";
+                entries.push({
+                    file: file,
+                    alt: "",
+                    sentinel: null,
+                    token: token,
+                });
+                markdown += (markdown ? "\n\n" : "") + token;
+            });
+
+            entries.forEach(function (entry) {
+                if (entry.sentinel && markdown.indexOf(entry.sentinel) !== -1) {
+                    markdown = markdown.split(entry.sentinel).join(entry.token);
+                } else if (markdown.indexOf(entry.token) === -1) {
+                    markdown += (markdown ? "\n\n" : "") + entry.token;
+                }
+            });
+            return entries.length > 0 ? { markdown: markdown, entries: entries } : null;
+        }
+
+        handlePaste(event) {
+            var payload;
+            try {
+                payload = this.buildClipboardPayload(event.clipboardData);
+            } catch (error) {
+                logError("image-paste:parse-failed", error, { name: this.name });
+                return;
+            }
+            if (!payload) {
+                return;
+            }
+
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            var selection = this.captureEditorSelection();
+            this.insertMarkdown(payload.markdown, selection);
+            log("image-paste:captured", {
+                name: this.name,
+                imageCount: payload.entries.length,
+            });
+            this.startUploadBatch(payload.entries);
+        }
+
+        ensureUploadStatus() {
+            if (this.uploadStatusElement) {
+                return this.uploadStatusElement;
+            }
+            var status = document.createElement("div");
+            status.className = "blog-vditor-upload-status";
+            status.setAttribute("role", "status");
+            status.setAttribute("aria-live", "polite");
+            status.hidden = true;
+            this.root.appendChild(status);
+            this.uploadStatusElement = status;
+            return status;
+        }
+
+        setUploadStatus(message, isError) {
+            var status = this.ensureUploadStatus();
+            status.textContent = message || "";
+            status.hidden = !message;
+            status.classList.toggle("blog-vditor-upload-status--error", Boolean(isError));
+        }
+
+        startUploadBatch(entries) {
+            if (!entries.length) {
+                return;
+            }
+            var widget = this;
+            var nextIndex = 0;
+            var failedCount = 0;
+            this.pendingUploadCount += entries.length;
+            updateFormUploadState(this.form, entries.length);
+            this.setUploadStatus(
+                "正在上传 " + this.pendingUploadCount + " 张图片…",
+                false
+            );
+
+            async function worker() {
+                while (nextIndex < entries.length && !widget.destroyed) {
+                    var entry = entries[nextIndex];
+                    nextIndex += 1;
+                    try {
+                        var image = await widget.uploadClipboardImage(entry);
+                        var markup = widget.buildImageMarkup(image);
+                        if (!markup) {
+                            throw new Error("The upload response is invalid");
+                        }
+                        widget.replaceUploadToken(entry.token, markup);
+                        log("image-paste:upload-complete", {
+                            name: widget.name,
+                            imageId: String(image.id),
+                            fileType: entry.file.type || "",
+                            fileSize: entry.file.size,
+                        });
+                    } catch (error) {
+                        failedCount += 1;
+                        widget.replaceUploadToken(entry.token, "");
+                        logError("image-paste:upload-failed", error, {
+                            name: widget.name,
+                            fileType: entry.file.type || "",
+                            fileSize: entry.file.size,
+                        });
+                    } finally {
+                        widget.pendingUploadCount = Math.max(
+                            0,
+                            widget.pendingUploadCount - 1
+                        );
+                        updateFormUploadState(widget.form, -1);
+                        if (widget.pendingUploadCount > 0) {
+                            widget.setUploadStatus(
+                                "正在上传 " + widget.pendingUploadCount + " 张图片…",
+                                false
+                            );
+                        }
+                    }
+                }
+            }
+
+            var workerCount = Math.min(IMAGE_UPLOAD_CONCURRENCY, entries.length);
+            var workers = [];
+            for (var index = 0; index < workerCount; index += 1) {
+                workers.push(worker());
+            }
+            Promise.all(workers).then(function () {
+                if (failedCount > 0) {
+                    widget.setUploadStatus(
+                        failedCount + " 张图片上传失败，请重新粘贴或使用图片按钮。",
+                        true
+                    );
+                } else if (widget.pendingUploadCount === 0) {
+                    widget.setUploadStatus("", false);
+                }
+            });
+        }
+
+        async uploadClipboardImage(entry) {
+            var uploadUrl = this.input.dataset.vditorImageUploadUrl;
+            if (!uploadUrl) {
+                throw new Error("Wagtail image upload URL is unavailable");
+            }
+            var maxSize = Number(this.input.dataset.vditorMaxImageSize) ||
+                10 * 1024 * 1024;
+            if (!/^image\//i.test(entry.file.type || "")) {
+                throw new Error("The clipboard file is not an image");
+            }
+            if (entry.file.size > maxSize) {
+                throw new Error("The clipboard image exceeds the upload size limit");
+            }
+
+            var lastError = null;
+            for (var attempt = 0; attempt < 2; attempt += 1) {
+                var controller = new AbortController();
+                this.uploadAbortControllers.add(controller);
+                try {
+                    var formData = new FormData();
+                    formData.append(
+                        "file",
+                        entry.file,
+                        entry.file.name || "pasted-image"
+                    );
+                    formData.append("alt", entry.alt || "");
+                    formData.append("format", "fullwidth_web");
+                    var headers = {};
+                    var wagtailConfig = window.wagtailConfig || {};
+                    if (wagtailConfig.CSRF_TOKEN) {
+                        headers[
+                            wagtailConfig.CSRF_HEADER_NAME || "X-CSRFToken"
+                        ] = wagtailConfig.CSRF_TOKEN;
+                    }
+                    var response = await window.fetch(uploadUrl, {
+                        method: "POST",
+                        body: formData,
+                        headers: headers,
+                        credentials: "same-origin",
+                        signal: controller.signal,
+                    });
+                    var payload = null;
+                    try {
+                        payload = await response.json();
+                    } catch (parseError) {
+                        lastError = parseError;
+                    }
+                    if (!response.ok) {
+                        var responseError = new Error(
+                            payload && payload.error && payload.error.code
+                                ? payload.error.code
+                                : "Image upload failed with status " + response.status
+                        );
+                        responseError.retryable = response.status >= 500;
+                        throw responseError;
+                    }
+                    if (
+                        !payload ||
+                        !payload.image ||
+                        !IMAGE_ID_PATTERN.test(String(payload.image.id || ""))
+                    ) {
+                        throw new Error("The image upload response is invalid");
+                    }
+                    return {
+                        id: payload.image.id,
+                        format: payload.image.format,
+                        alt: payload.image.alt || "",
+                        preview: payload.preview,
+                    };
+                } catch (error) {
+                    lastError = error;
+                    if (
+                        controller.signal.aborted ||
+                        this.destroyed ||
+                        attempt > 0 ||
+                        error.retryable !== true
+                    ) {
+                        throw error;
+                    }
+                } finally {
+                    this.uploadAbortControllers.delete(controller);
+                }
+            }
+            throw lastError || new Error("Image upload failed");
+        }
+
+        replaceUploadToken(token, replacement) {
+            if (!this.editor) {
+                return false;
+            }
+            var currentValue = this.editor.getValue();
+            if (currentValue.indexOf(token) === -1) {
+                log("image-paste:token-removed", { name: this.name });
+                return false;
+            }
+            var nextValue = currentValue.split(token).join(replacement);
+            this.editor.setValue(nextValue);
+            this.syncValue(nextValue);
+            return true;
+        }
+
         syncValue(value) {
-            this.input.value = value || "";
+            // Wagtail autosave reads this textarea without submitting the form.
+            // Keep transient upload tokens inside Vditor only, never in revisions.
+            this.input.value = String(value || "").replace(
+                IMAGE_UPLOAD_TOKEN_PATTERN,
+                ""
+            );
             this.input.dispatchEvent(new Event("input", { bubbles: true }));
         }
 
-        handleSubmit() {
+        handleSubmit(event) {
+            if (this.pendingUploadCount > 0) {
+                if (event) {
+                    event.preventDefault();
+                    event.stopImmediatePropagation();
+                }
+                this.setUploadStatus(
+                    "图片仍在上传，请等待上传完成后再保存。",
+                    true
+                );
+                log("widget:submit:blocked", {
+                    name: this.name,
+                    pendingImages: this.pendingUploadCount,
+                });
+                return;
+            }
             if (this.editor) {
                 this.syncValue(this.editor.getValue());
                 log("widget:submit:sync", {
@@ -770,8 +1419,9 @@
         }
 
         destroy() {
+            this.destroyed = true;
             if (this.form) {
-                this.form.removeEventListener("submit", this.handleSubmit);
+                this.form.removeEventListener("submit", this.handleSubmit, true);
             }
             if (this.themeObserver) {
                 this.themeObserver.disconnect();
@@ -790,6 +1440,16 @@
                 this.fullscreenFrame = null;
             }
             this.unbindPageLinkSelection();
+            this.unbindImageSelection();
+            this.unbindPasteHandler();
+            this.uploadAbortControllers.forEach(function (controller) {
+                controller.abort();
+            });
+            this.uploadAbortControllers.clear();
+            if (this.pendingUploadCount > 0) {
+                updateFormUploadState(this.form, -this.pendingUploadCount);
+                this.pendingUploadCount = 0;
+            }
             window.removeEventListener("resize", this.handleFullscreenLayoutChange);
             if (this.editor) {
                 this.editor.destroy();
@@ -864,7 +1524,7 @@
     });
 
     window.BlogVditorDebug = {
-        version: "2026-08-03.2",
+        version: "2026-08-04.1",
         inspect: function () {
             return Array.from(document.querySelectorAll("[data-vditor-field]")).map(
                 function (field) {

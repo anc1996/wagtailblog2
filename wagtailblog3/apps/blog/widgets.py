@@ -5,7 +5,7 @@ from django.urls import reverse
 from wagtail.admin.staticfiles import versioned_static
 
 
-VDITOR_ADMIN_ASSET_VERSION = "20260803.2"
+VDITOR_ADMIN_ASSET_VERSION = "20260804.1"
 
 
 def vditor_admin_static(path):
@@ -32,6 +32,15 @@ class VditorMarkdownWidget(forms.Textarea):
         attrs["data-vditor-page-chooser-url"] = reverse(
             "wagtailadmin_choose_page"
         )
+        attrs["data-vditor-image-chooser-url"] = (
+            f'{reverse("wagtailimages_chooser:choose")}?select_format=true'
+        )
+        attrs["data-vditor-image-upload-url"] = reverse(
+            "blog_vditor_image_upload"
+        )
+        attrs["data-vditor-max-image-size"] = str(
+            getattr(settings, "WAGTAILIMAGES_MAX_UPLOAD_SIZE", 10 * 1024 * 1024)
+        )
         attrs["class"] = " ".join(
             value
             for value in (attrs.get("class", ""), "blog-vditor-source")
@@ -51,6 +60,7 @@ class VditorMarkdownWidget(forms.Textarea):
             },
             js=(
                 versioned_static("wagtailadmin/js/page-chooser-modal.js"),
+                versioned_static("wagtailimages/js/image-chooser-modal.js"),
                 versioned_static("vendor/vditor/dist/index.min.js"),
                 vditor_admin_static("blog/js/vditor_markdown.js"),
             ),

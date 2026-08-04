@@ -13,6 +13,16 @@
     font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
 }
 
+.blog-vditor-upload-status {
+    margin-top: 0.5rem;
+    color: var(--w-color-text-meta, #666);
+    font-size: 0.875rem;
+}
+
+.blog-vditor-upload-status--error {
+    color: var(--w-color-critical-200, #b42318);
+}
+
 .blog-vditor-field[data-vditor-ready="true"] .blog-vditor-source {
     position: absolute;
     width: 1px;

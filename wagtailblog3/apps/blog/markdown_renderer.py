@@ -9,11 +9,14 @@ import nh3
 from django.conf import settings
 from django.utils.encoding import smart_str
 from django.utils.safestring import mark_safe
-from wagtail.rich_text import LinkRewriter
+from wagtail.rich_text import EmbedRewriter, LinkRewriter
+from wagtail.images.formats import get_image_format
+from wagtail.images.rich_text import ImageEmbedHandler
 from wagtail.rich_text.pages import PageLinkHandler
 
 
 _WAGTAIL_PAGE_LINK_ID_RE = re.compile(r"^[1-9][0-9]{0,18}$")
+_WAGTAIL_IMAGE_ID_RE = re.compile(r"^[1-9][0-9]{0,18}$")
 
 
 class _PageLinkRewriter(LinkRewriter):
@@ -21,6 +24,42 @@ class _PageLinkRewriter(LinkRewriter):
 
     def get_tag_type_from_attrs(self, attrs):
         return "page" if attrs.get("linktype") == "page" else None
+
+
+class _ImageEmbedRewriter(EmbedRewriter):
+    """Expand only valid Wagtail image embeds and leave other embeds alone."""
+
+    def get_tag_type_from_attrs(self, attrs):
+        return "image" if attrs.get("embedtype") == "image" else None
+
+    def get_tag_replacements(self, tag_type, attrs_list):
+        # EmbedRewriter drops unknown embed types by default. Markdown may contain
+        # project-specific embeds, so leave those untouched for nh3 to handle.
+        if tag_type is None:
+            return []
+
+        replacements = [""] * len(attrs_list)
+        valid_indexes = []
+        valid_attrs = []
+        for index, attrs in enumerate(attrs_list):
+            image_id = attrs.get("id", "")
+            format_name = attrs.get("format", "")
+            if not _WAGTAIL_IMAGE_ID_RE.fullmatch(image_id):
+                continue
+            try:
+                get_image_format(format_name)
+            except (KeyError, TypeError):
+                continue
+            valid_indexes.append(index)
+            valid_attrs.append(attrs)
+
+        if not valid_attrs:
+            return replacements
+
+        expanded = ImageEmbedHandler.expand_db_attributes_many(valid_attrs)
+        for index, replacement in zip(valid_indexes, expanded):
+            replacements[index] = replacement
+        return replacements
 
 
 class MarkdownRenderer:
@@ -149,6 +188,10 @@ class MarkdownRenderer:
         )(html)
 
     @classmethod
+    def expand_wagtail_image_embeds(cls, html):
+        return _ImageEmbedRewriter()(html)
+
+    @classmethod
     def render(cls, source, context=None):
         # 保留 Wagtail 块渲染签名，但渲染规则只依赖正文和全局配置。
         del context
@@ -158,4 +201,5 @@ class MarkdownRenderer:
             **cls.markdown_kwargs(),
         )
         rendered = cls.expand_wagtail_page_links(rendered)
+        rendered = cls.expand_wagtail_image_embeds(rendered)
         return mark_safe(nh3.clean(rendered, **cls.nh3_kwargs()))

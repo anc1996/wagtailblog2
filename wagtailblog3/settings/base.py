@@ -69,6 +69,7 @@ INSTALLED_APPS = [
     "wagtail",  # Wagtail 核心模块
     "modelcluster",  # Django 模型集群模块
     "taggit",  # Django 标签模块
+    "django.forms",  # 让项目级模板引擎能够查找 Django 内置表单模板
     "django.contrib.admin",  # Django 管理后台模块
     "django.contrib.auth",  # Django 认证模块
     "django.contrib.contenttypes",  # Django 内容类型模块
@@ -146,6 +147,10 @@ TEMPLATES = [  # Django 模板系统配置列表，可配置多个模板引擎
         },
     },
 ]
+
+# 表单控件与普通页面共用上面的项目级模板引擎，使自定义控件模板可以统一放在
+# wagtailblog3/templates，同时仍可从已安装的 django.forms 应用加载内置模板。
+FORM_RENDERER = "django.forms.renderers.TemplatesSetting"
 
 """
 wagtail.contrib.settings ：提供的一个上下文处理器。

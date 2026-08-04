@@ -5,7 +5,7 @@ from django.urls import reverse
 from wagtail.admin.staticfiles import versioned_static
 
 
-VDITOR_ADMIN_ASSET_VERSION = "20260804.1"
+VDITOR_ADMIN_ASSET_VERSION = "20260804.2"
 
 
 def vditor_admin_static(path):

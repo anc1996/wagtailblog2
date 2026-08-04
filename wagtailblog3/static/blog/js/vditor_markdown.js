@@ -30,6 +30,14 @@
         if (!form) {
             return;
         }
+        var sharedCoordinator = window.BlogEditorUploadCoordinator;
+        if (
+            sharedCoordinator &&
+            typeof sharedCoordinator.update === "function"
+        ) {
+            sharedCoordinator.update(form, delta);
+            return;
+        }
         var state = formUploadStates.get(form);
         if (!state) {
             state = { count: 0, controls: [] };

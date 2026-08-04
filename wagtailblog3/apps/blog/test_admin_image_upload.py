@@ -7,8 +7,10 @@ from unittest.mock import MagicMock, patch
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import RequestFactory, SimpleTestCase, override_settings
 from django.urls import reverse
+from wagtail.admin.rich_text.editors.draftail import DraftailRichTextArea
 
 from blog.admin_image_upload import _safe_upload_title, _upload_vditor_image
+from blog.wagtail_hooks import editor_js
 
 
 class VditorImageUploadTests(SimpleTestCase):
@@ -45,6 +47,61 @@ class VditorImageUploadTests(SimpleTestCase):
         response = self.client.post(reverse("blog_vditor_image_upload"))
 
         self.assertEqual(response.status_code, 302)
+
+    @override_settings(WAGTAILIMAGES_MAX_UPLOAD_SIZE=12345)
+    def test_editor_js_configures_rich_text_clipboard_upload(self):
+        with patch(
+            "blog.wagtail_hooks.static",
+            side_effect=lambda path: "/static/" + path,
+        ):
+            markup = str(editor_js())
+
+        self.assertIn("blog/js/rich_text_image_paste.js", markup)
+        self.assertIn(
+            'data-upload-url="/admin/blog/vditor/images/upload/"',
+            markup,
+        )
+        self.assertIn('data-max-image-size="12345"', markup)
+
+    def test_draftail_image_entity_serializes_as_left_decorative_embed(self):
+        raw_content_state = json.dumps(
+            {
+                "blocks": [
+                    {
+                        "key": "image1",
+                        "text": " ",
+                        "type": "atomic",
+                        "depth": 0,
+                        "inlineStyleRanges": [],
+                        "entityRanges": [{"offset": 0, "length": 1, "key": 0}],
+                        "data": {},
+                    }
+                ],
+                "entityMap": {
+                    "0": {
+                        "type": "IMAGE",
+                        "mutability": "IMMUTABLE",
+                        "data": {
+                            "id": 43,
+                            "src": "/media/renditions/left.jpg",
+                            "alt": "",
+                            "format": "left",
+                        },
+                    }
+                },
+            }
+        )
+        widget = DraftailRichTextArea(features=["image"])
+
+        value = widget.value_from_datadict(
+            {"rich_text": raw_content_state},
+            {},
+            "rich_text",
+        )
+
+        self.assertIn('embedtype="image"', value)
+        self.assertIn('format="left"', value)
+        self.assertIn('alt=""', value)
 
     def test_add_permission_is_required(self):
         request = self.make_request()
@@ -141,6 +198,59 @@ class VditorImageUploadTests(SimpleTestCase):
         saved_image.get_rendition.assert_called_once_with(
             "width-800|format-jpeg"
         )
+
+    @override_settings(BLOG_VDITOR_IMAGE_UPLOAD_COLLECTION_ID=7)
+    def test_rich_text_upload_uses_left_format_and_decorative_alt(self):
+        request = self.make_request(format="left", alt="")
+        collection = SimpleNamespace(pk=7)
+        collections = MagicMock()
+        collections.filter.return_value.first.return_value = collection
+        image_format = SimpleNamespace(name="left", filter_spec="width-500")
+        rendition = SimpleNamespace(
+            url="/media/renditions/left.jpg", width=500, height=281
+        )
+        saved_image = SimpleNamespace(
+            pk=43,
+            title="clipboard",
+            get_rendition=MagicMock(return_value=rendition),
+        )
+        form = MagicMock()
+        form.is_valid.return_value = True
+        form.save.return_value = saved_image
+        form_class = MagicMock(return_value=form)
+        image_model = MagicMock(return_value=SimpleNamespace())
+        image_model.objects.filter.return_value.exists.return_value = False
+
+        with (
+            patch(
+                "blog.admin_image_upload.permission_policy.user_has_permission",
+                return_value=True,
+            ),
+            patch(
+                "blog.admin_image_upload.permission_policy.collections_user_has_permission_for",
+                return_value=collections,
+            ),
+            patch(
+                "blog.admin_image_upload.get_image_format",
+                return_value=image_format,
+            ) as get_image_format_mock,
+            patch(
+                "blog.admin_image_upload.get_image_model",
+                return_value=image_model,
+            ),
+            patch(
+                "blog.admin_image_upload.get_image_form",
+                return_value=form_class,
+            ),
+        ):
+            response = self.call_view_logic(request)
+
+        self.assertEqual(response.status_code, 201)
+        payload = json.loads(response.content)
+        self.assertEqual(payload["image"]["alt"], "")
+        self.assertEqual(payload["image"]["format"], "left")
+        get_image_format_mock.assert_called_once_with("left")
+        saved_image.get_rendition.assert_called_once_with("width-500")
 
     def test_generated_title_uses_filename_without_extension(self):
         image_model = MagicMock()

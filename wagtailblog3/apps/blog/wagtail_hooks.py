@@ -2,6 +2,7 @@
 
 import logging
 
+from django.conf import settings
 from django.templatetags.static import static
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
@@ -77,9 +78,15 @@ def fix_wagtail_ai_zindex():
 def editor_js():
 	"""添加JavaScript支持到编辑器"""
 	return format_html(
-		'<script src="{}"></script>\n<script src="{}"></script>',
+		'<script src="{}"></script>\n'
+		'<script src="{}"></script>\n'
+		'<script src="{}" data-blog-rich-text-image-paste '
+		'data-upload-url="{}" data-max-image-size="{}"></script>',
 		f"{static('blog/js/editor-enhancements.js')}?blog_editor=20260801.2",
-		static('blog/js/wagtail_ai_context.js')
+		static('blog/js/wagtail_ai_context.js'),
+		f"{static('blog/js/rich_text_image_paste.js')}?blog_editor=20260804.1",
+		reverse('blog_vditor_image_upload'),
+		getattr(settings, 'WAGTAILIMAGES_MAX_UPLOAD_SIZE', 10 * 1024 * 1024),
 	)
 
 

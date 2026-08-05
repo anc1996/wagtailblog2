@@ -1,121 +1,155 @@
-针对你的需求（**开机自启、多项目共存、安全稳定**），我给出的最佳建议是：**弃用 Shell 脚本 (`start.sh`)，直接使用 Linux 原生的 Systemd 服务。**
+# WagtailBlog3 生产维护手册
 
-这是目前生产环境（Production）的标准做法。它比 crontab 更智能，比 Supervisor 更底层（不需要额安装软件），且能完美解决你担心的“多项目冲突”问题。
+本文档对应生产服务器 `192.168.20.2` 的当前部署方式。项目目录为
+`/home/source/Django/wagtail/wagtailblog3`，Conda 环境为
+`/root/anaconda3/envs/wagtailblog`。应用由 systemd 管理，不使用
+`start.sh` 或 Django `runserver`。
 
-### 为什么 Systemd 是最佳方案？
+## 服务拓扑
 
-1. **多项目隔离**：每个项目对应一个 `.service` 配置文件，互不干扰。
-2. **自动重启**：如果 uWSGI 进程崩溃，Systemd 会自动把它拉起来。
-3. **依赖管理**：它会确保在网络服务启动后再启动你的网站，避免报错。
-4. **日志标准化**：使用 `journalctl` 统一管理日志，不用到处找 `.log` 文件。
+浏览器访问 `http://192.168.20.2:6050`，宝塔 Nginx 监听 6050，并通过
+`/home/source/Django/wagtail/wagtailblog3/wagtailblog3.sock` 转发给 uWSGI。
+uWSGI 的 6051 是仅供本机诊断的 HTTP 端口，不作为对外入口。
 
----
+必须运行的应用服务如下：
 
-### 操作步骤 (请严格按照以下步骤执行)
+| 服务 | 职责 | 是否开机启动 |
+| --- | --- | --- |
+| `wagtailblog3.service` | uWSGI / Django 网站 | 是 |
+| `wagtailblog3-celery-maintenance.service` | 日志索引同步和维护队列 | 是 |
+| `wagtailblog3-celery-beat.service` | 每 30 秒补偿日志索引 outbox | 是 |
+| `wagtailblog3-filebeat.service` | 采集项目日志并写入 Elasticsearch | 是 |
 
-#### 第一步：修改 `uwsgi.ini` (关键！)
+依赖服务也必须可用：`mysqld.service`、`redis.service`、
+`mongodb-home.service`、`minio.service`、`docker.service` 和 Nginx。
+Elasticsearch 与 Kibana 由 Docker 管理，Elasticsearch 容器设置为
+`restart=always`。
 
-在使用 Systemd 时，**必须**让 uWSGI 在前台运行，由 Systemd 来管理后台化。如果 uWSGI 自己后台化了（daemonize），Systemd 会认为服务启动后就退出了，从而导致启动失败或无限重启。
+不要启动只消费 `email` 或 `default` 队列的 Celery Worker，除非已经检查
+Redis 中没有历史邮件任务，并明确需要处理这些任务。当前 Worker 只监听
+`maintenance` 队列。
 
-请编辑你的 `uwsgi.ini`，**注释掉** `daemonize` 这一行：
+## 常用命令
 
-```ini
-# 编辑文件
-nano /home/source/Django/wagtail/wagtailblog3/uwsgi.ini
-
-# 找到这一行，在前面加 # 注释掉，或者直接删除
-# daemonize=logs/uwsgi.log  <-- 必须注释掉！！
-
-```
-
-*注意：日志将由 Systemd 接管，后续我会教你怎么看。*
-
-#### 第二步：创建 Systemd 服务文件
-
-我们不需要 `start.sh` 脚本了，直接让 Systemd 调用 Conda 环境里的 uWSGI。
-
-创建服务文件：
+以下命令可在任意目录以 root 执行：
 
 ```bash
-sudo nano /etc/systemd/system/wagtailblog3.service
+systemctl status wagtailblog3.service
+systemctl status wagtailblog3-celery-maintenance.service
+systemctl status wagtailblog3-celery-beat.service
+systemctl status wagtailblog3-filebeat.service
 
+systemctl restart wagtailblog3.service
+systemctl restart wagtailblog3-celery-maintenance.service
+systemctl restart wagtailblog3-celery-beat.service
+systemctl restart wagtailblog3-filebeat.service
+
+systemctl is-active wagtailblog3.service wagtailblog3-celery-maintenance.service wagtailblog3-celery-beat.service wagtailblog3-filebeat.service
+systemctl is-enabled wagtailblog3.service wagtailblog3-celery-maintenance.service wagtailblog3-celery-beat.service wagtailblog3-filebeat.service
 ```
 
-粘贴以下内容（已根据你的文件路径配置好）：
-
-```ini
-[Unit]
-# 服务描述
-Description=uWSGI instance for WagtailBlog3
-# 在网络启动后才启动本服务
-After=network.target
-
-[Service]
-# 用户和组 (根据你的 start.sh，你似乎是用 root 运行的)
-User=root
-Group=root
-
-# 项目根目录
-WorkingDirectory=/home/source/Django/wagtail/wagtailblog3
-
-# 环境变量：确保使用 Conda 环境的 PATH
-Environment="PATH=/root/anaconda3/envs/wagtailblog/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-
-# 启动命令：直接指向 Conda 环境中的 uwsgi 可执行文件
-# Systemd 会自动加载上面的 Environment，所以直接运行 uwsgi 即可
-ExecStart=/root/anaconda3/envs/wagtailblog/bin/uwsgi --ini uwsgi.ini
-
-# 进程挂掉后自动重启
-Restart=always
-# 杀进程的信号 (uWSGI 特有，保证优雅退出)
-KillSignal=SIGQUIT
-Type=notify
-NotifyAccess=all
-
-# 标准输出和错误日志记录到系统日志
-StandardError=syslog
-
-[Install]
-WantedBy=multi-user.target
-
-```
-
-#### 第三步：启动并设置开机自启
-
-执行以下命令让配置生效：
+服务文件修改后执行：
 
 ```bash
-# 1. 重载系统服务配置
-sudo systemctl daemon-reload
-
-# 2. 启动服务
-sudo systemctl start wagtailblog3
-
-# 3. 设置开机自启
-sudo systemctl enable wagtailblog3
-
-# 4. 检查状态 (看到绿色的 active (running) 即为成功)
-sudo systemctl status wagtailblog3
-
+systemctl daemon-reload
+systemctl enable wagtailblog3.service wagtailblog3-celery-maintenance.service wagtailblog3-celery-beat.service wagtailblog3-filebeat.service
 ```
 
----
+uWSGI 使用 `SIGTERM` 和 `die-on-term=true` 优雅停止。不要把 service 改回
+`SIGQUIT`，否则可能触发重载并导致 systemd 停止超时。
 
-### 如何管理多个项目？
+## 日志与可观测性
 
-你提到有多个项目，Systemd 方案处理起来非常清晰安全：
+项目文件日志位于 `logs/`，systemd 运行日志通过 journald 查看：
 
-假设你有一个新项目叫 `shop_project`：
+```bash
+journalctl -u wagtailblog3.service -f
+journalctl -u wagtailblog3-celery-maintenance.service -f
+journalctl -u wagtailblog3-celery-beat.service -f
+journalctl -u wagtailblog3-filebeat.service -f
+```
 
-1. 确保 `shop_project` 的 `uwsgi.ini` 里的 `socket` 文件路径不要和 `wagtailblog3` 冲突（例如用 `shop.sock`）。
-2. 复制一份服务文件：`cp /etc/systemd/system/wagtailblog3.service /etc/systemd/system/shop_project.service`。
-3. 修改 `shop_project.service` 里的 `WorkingDirectory`（项目路径）和 `Environment`（如果用了不同的 Conda 环境）。
-4. 执行 `systemctl enable shop_project`。
+Elasticsearch 日志索引使用：
 
-这样，**每个项目都是独立的进程**，一个挂了不会影响另一个，重启其中一个也不会影响其他的。
+```text
+wagtailblog-logs-000001
+wagtailblog-logs-read
+wagtailblog-logs-write
+wagtailblog-logs-normalize-v2
+```
 
-### 常用维护命令
+Filebeat 程序与数据目录：
 
-* **重启项目**：
-`sudo systemctl restart wagtailblog3`
-* **停止项目**�
+```text
+/home/software/filebeat/current
+/home/software/filebeat/config/filebeat.yml
+/home/software/filebeat/data
+```
+
+`data/` 保存采集 registry，不能在正常维护中删除。Filebeat 重启后 ES 尚未
+就绪时会自行退避重试；看到短暂连接错误是正常恢复过程，不要马上重启服务。
+
+Celery Beat 状态文件位于：
+
+```text
+/home/source/Django/wagtail/wagtailblog3/logs/celery/celerybeat-schedule
+```
+
+如果宿主机异常断电后 Beat 无法启动，先停止 Beat，再将损坏的 schedule 文件
+改名留存，最后重新启动 Beat；不要直接删除日志或数据库数据。
+
+## 健康检查
+
+在项目目录执行：
+
+```bash
+cd /home/source/Django/wagtail/wagtailblog3
+set -a
+. ./observability.env
+set +a
+
+/root/anaconda3/envs/wagtailblog/bin/python manage.py check
+/root/anaconda3/envs/wagtailblog/bin/python -m celery -A wagtailblog3 inspect ping -d maintenance@ziliao --timeout=10
+curl -fsS http://127.0.0.1:9200/_cluster/health
+curl -fsS http://127.0.0.1:9200/wagtailblog-logs-read/_count
+curl -I -H 'Host: wagtailblog.docs' http://127.0.0.1:6050/admin/login/
+```
+
+单节点 Elasticsearch 因其他索引副本未分配而显示 `yellow` 是预期状态；
+`wagtailblog-logs-000001` 本身应为 `green`，因为它使用 1 分片、0 副本。
+
+## 发布与静态文件
+
+生产环境采用文件清单部署，不对生产目录执行 `git pull` 或 `rsync --delete`。
+部署必须保留生产的 `wagtailblog3/settings/database.py`、`observability.env`、
+`logs/`、`media/` 和 socket 文件。
+
+代码切换后，在项目目录执行：
+
+```bash
+set -a
+. ./observability.env
+set +a
+
+/root/anaconda3/envs/wagtailblog/bin/python manage.py check
+/root/anaconda3/envs/wagtailblog/bin/python manage.py collectstatic --noinput
+systemctl restart wagtailblog3.service
+```
+
+迁移、索引创建、数据库恢复、日志清理和页面发布都会改变生产数据，必须在明确
+授权后单独执行。不要把 BlogPage 正文、MongoDB 草稿或 revision pointer 当作
+普通 MySQL 字段处理。
+
+## 重启验收
+
+服务器重启后，先等待 Docker 和 Elasticsearch 完成恢复，再检查：
+
+```bash
+systemctl --failed --no-pager
+systemctl is-active mysqld.service redis.service mongodb-home.service minio.service docker.service nginx.service
+systemctl is-active wagtailblog3.service wagtailblog3-celery-maintenance.service wagtailblog3-celery-beat.service wagtailblog3-filebeat.service
+docker ps --format '{{.Names}} {{.Status}}'
+```
+
+随后执行“健康检查”章节命令。ES 启动期间 Filebeat 可能先输出连接错误；当日志
+中出现 `Connection to backoff ... established` 后，采集会自动恢复。

@@ -193,6 +193,7 @@ class LogAuditView(LogAdminView):
             "kind": query.get("kind", "").strip(),
             "scope": query.get("scope", "").strip(),
             "state": query.get("state", "").strip(),
+            "index_sync_state": query.get("index_sync_state", "").strip(),
             "q": query.get("q", "").strip(),
             "start": query.get("start", "").strip(),
             "end": query.get("end", "").strip(),
@@ -204,6 +205,16 @@ class LogAuditView(LogAdminView):
         for field in ("target_type", "kind", "scope", "state"):
             if filters[field] in {"activity", "error", "current", "rotated", "all", "completed", "partial", "failed", "file", "domain", "business", "legacy"}:
                 audits = audits.filter(**{field: filters[field]})
+        if filters["index_sync_state"] in {
+            "not_required",
+            "pending",
+            "running",
+            "completed",
+            "partial",
+            "failed",
+            "dead_letter",
+        }:
+            audits = audits.filter(index_sync_state=filters["index_sync_state"])
         if filters["target"]:
             audits = audits.filter(target__icontains=filters["target"])
         if filters["module"]:
@@ -357,7 +368,24 @@ class LogClearConfirmView(LogAdminView):
                     f"释放 {audit.bytes_freed} 字节。",
                 )
         elif audit.succeeded:
-            messages.success(request, f"日志清理完成，处理 {audit.files_before} 个文件，释放 {audit.bytes_freed} 字节。")
+            if audit.index_sync_state in {"pending", "running"}:
+                messages.warning(
+                    request,
+                    f"本地日志已清理，处理 {audit.files_before} 个文件，释放 "
+                    f"{audit.bytes_freed} 字节；Elasticsearch 索引正在同步。",
+                )
+            elif audit.index_sync_state in {"failed", "dead_letter"}:
+                messages.warning(
+                    request,
+                    f"本地日志已清理，处理 {audit.files_before} 个文件；"
+                    "Elasticsearch 索引同步失败，请查看清理记录。",
+                )
+            else:
+                messages.success(
+                    request,
+                    f"日志清理完成，处理 {audit.files_before} 个文件，释放 "
+                    f"{audit.bytes_freed} 字节。",
+                )
         else:
             failed = audit.details.get("failed_files", [])
             summary = "；".join(

@@ -25,6 +25,7 @@ TEST_STORAGES = {
 
 
 @override_settings(STORAGES=TEST_STORAGES)
+@override_settings(ELASTICSEARCH_LOGGING={"ENABLED": False})
 class LogAdminViewTests(TestCase):
     """验证日志后台页面的权限、预览、确认和审计流程。"""
     def setUp(self):

@@ -12,6 +12,7 @@
     <div class="field"><label for="audit-kind">日志类型</label><select id="audit-kind" name="kind"><option value="">全部</option><option value="activity"{% if audit_filters.kind == "activity" %} selected{% endif %}>活动</option><option value="error"{% if audit_filters.kind == "error" %} selected{% endif %}>错误</option></select></div>
     <div class="field"><label for="audit-scope">清理范围</label><select id="audit-scope" name="scope"><option value="">全部</option><option value="current"{% if audit_filters.scope == "current" %} selected{% endif %}>当前</option><option value="rotated"{% if audit_filters.scope == "rotated" %} selected{% endif %}>轮转</option><option value="all"{% if audit_filters.scope == "all" %} selected{% endif %}>全部范围</option></select></div>
     <div class="field"><label for="audit-state">状态</label><select id="audit-state" name="state"><option value="">全部</option><option value="completed"{% if audit_filters.state == "completed" %} selected{% endif %}>成功</option><option value="partial"{% if audit_filters.state == "partial" %} selected{% endif %}>部分失败</option><option value="failed"{% if audit_filters.state == "failed" %} selected{% endif %}>失败</option></select></div>
+    <div class="field"><label for="audit-index-state">ES 同步</label><select id="audit-index-state" name="index_sync_state"><option value="">全部</option><option value="not_required"{% if audit_filters.index_sync_state == "not_required" %} selected{% endif %}>未启用</option><option value="pending"{% if audit_filters.index_sync_state == "pending" %} selected{% endif %}>等待中</option><option value="running"{% if audit_filters.index_sync_state == "running" %} selected{% endif %}>同步中</option><option value="completed"{% if audit_filters.index_sync_state == "completed" %} selected{% endif %}>已完成</option><option value="dead_letter"{% if audit_filters.index_sync_state == "dead_letter" %} selected{% endif %}>需人工处理</option></select></div>
     <div class="field"><label for="audit-target">目标</label><input id="audit-target" name="target" value="{{ audit_filters.target }}"></div>
     <div class="field"><label for="audit-q">目标或文件关键字</label><input id="audit-q" name="q" value="{{ audit_filters.q }}"></div>
     <div class="log-filter-actions"><button type="submit" class="button">筛选</button><a class="button button-secondary" href="{% url 'observability:audits' %}">重置</a></div>
@@ -19,7 +20,7 @@
 
   <div class="listing log-listing">
     <table class="listing">
-      <thead><tr><th>操作时间</th><th>完成时间</th><th>操作人/IP</th><th>目标类型</th><th>目标</th><th>日志类型</th><th>范围</th><th>文件总数</th><th>成功</th><th>失败</th><th>清理前</th><th>释放</th><th>状态</th></tr></thead>
+      <thead><tr><th>操作时间</th><th>完成时间</th><th>操作人/IP</th><th>目标类型</th><th>目标</th><th>日志类型</th><th>范围</th><th>文件总数</th><th>成功</th><th>失败</th><th>清理前</th><th>释放</th><th>文件状态</th><th>ES 同步</th></tr></thead>
       <tbody>
         {% for audit in audit_page %}
           <tr>
@@ -39,8 +40,9 @@
               <span class="{% if audit.state == 'completed' %}log-success{% else %}log-failed{% endif %}">{{ audit.state }}</span>
               <details class="log-audit-details"><summary>查看逐文件明细</summary><pre>{{ audit.details|pprint }}</pre></details>
             </td>
+            <td><span class="{% if audit.index_sync_state == 'completed' or audit.index_sync_state == 'not_required' %}log-success{% else %}log-failed{% endif %}">{{ audit.index_sync_state }}</span><small>删除 {{ audit.index_sync_deleted }} 条；尝试 {{ audit.index_sync_attempts }} 次</small></td>
           </tr>
-        {% empty %}<tr><td colspan="13">当前筛选条件下没有清理记录。</td></tr>{% endfor %}
+        {% empty %}<tr><td colspan="14">当前筛选条件下没有清理记录。</td></tr>{% endfor %}
       </tbody>
     </table>
   </div>

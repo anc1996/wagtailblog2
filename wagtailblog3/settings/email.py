@@ -15,7 +15,7 @@ EMAIL_PORT = 465
 EMAIL_USE_SSL = True
 EMAIL_USE_TLS = False
 EMAIL_HOST_USER = '834195283@qq.com'
-EMAIL_HOST_PASSWORD =  'uuqbaqrmowknbdff'
+EMAIL_HOST_PASSWORD = 'zmevrjqtgshkbeij'
 DEFAULT_FROM_EMAIL = '834195283@qq.com'
 
 # 邮件发送相关设置

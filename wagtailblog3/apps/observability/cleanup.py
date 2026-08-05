@@ -29,18 +29,26 @@ class CleanupResult:
 
     @property
     def files_before(self) -> int:
+        """返回执行前实际存在的文件数。
+
+        返回值只统计已经存在的候选文件；不存在的轮转编号是安全的空操作，
+        不应让预览或审计误报为已清理文件。
+        """
         return sum(int(result["pre_exists"]) for result in self.file_results)
 
     @property
     def bytes_before(self) -> int:
+        """返回清理前实际存在日志文件的总字节数。"""
         return sum(result["bytes_before"] for result in self.file_results)
 
     @property
     def bytes_freed(self) -> int:
+        """返回截断或删除后释放的磁盘字节数。"""
         return sum(result["bytes_freed"] for result in self.file_results)
 
     @property
     def failed_files(self) -> list[dict[str, str]]:
+        """返回失败文件及原因，供审计记录和后台错误提示使用。"""
         return [
             {"file": result["file"], "error": result["error"]}
             for result in self.file_results
@@ -49,6 +57,7 @@ class CleanupResult:
 
     @property
     def changed_files(self) -> list[str]:
+        """返回实际被截断或删除的文件名，不包含本来不存在的候选项。"""
         return [
             result["file"]
             for result in self.file_results
@@ -57,15 +66,28 @@ class CleanupResult:
 
     @property
     def succeeded(self) -> bool:
+        """所有候选操作均未失败时返回 ``True``。"""
         return not self.failed_files
 
 
 def _validate_scope(scope: str) -> None:
+    """校验清理范围。
+
+    参数：``scope`` 为 current、rotated 或 all。
+    返回：无。
+    异常：范围不在白名单中时抛出 ``ValueError``，防止调用方扩大删除面。
+    """
     if scope not in VALID_SCOPES:
         raise ValueError("不支持的清理范围")
 
 
 def _selected_rotations(spec: LogFileSpec, scope: str):
+    """按范围产出一个注册日志允许处理的轮转编号。
+
+    参数：``spec`` 定义最大备份数，``scope`` 定义当前/历史范围。
+    返回：生成器，0 表示当前文件，正数表示 ``.N`` 轮转文件。
+    异常：``scope`` 非法时由 ``_validate_scope`` 抛出 ``ValueError``。
+    """
     _validate_scope(scope)
     if scope in {"current", "all"}:
         yield 0
@@ -74,10 +96,25 @@ def _selected_rotations(spec: LogFileSpec, scope: str):
 
 
 def _relative_name(spec: LogFileSpec, rotation: int) -> str:
+    """根据注册项与轮转编号生成相对文件名。
+
+    参数：``spec`` 为注册项，``rotation`` 为 0 或允许的备份编号。
+    返回：不含日志根目录的 POSIX 相对路径。
+    异常：无；编号边界由调用方校验。
+    """
     return spec.relative_path if rotation == 0 else f"{spec.relative_path}.{rotation}"
 
 
 def _registered_candidate(spec: LogFileSpec, rotation: int) -> Path:
+    """返回已验证的注册日志候选路径。
+
+    参数：``spec`` 只能来自日志注册表，``rotation`` 只能在其备份范围内。
+    返回：位于 ``settings.LOG_DIR`` 下的候选路径。
+    异常：路径越界、符号链接目录、非目录父级或编号越界时抛出
+    ``UnsafeLogTarget``。
+
+    该函数刻意不接受客户端路径，避免清理功能变成任意文件删除入口。
+    """
     # 清理目标只能来自注册表，随后逐级检查父目录，阻断路径穿越和符号链接跳转。
     if rotation < 0 or rotation > spec.backup_count:
         raise UnsafeLogTarget("轮转编号超出 catalog 允许范围")
@@ -106,6 +143,12 @@ def _registered_candidate(spec: LogFileSpec, rotation: int) -> Path:
 
 
 def _safe_lstat(path: Path):
+    """读取路径元数据并把不存在转换为 ``None``。
+
+    参数：``path`` 为待检查路径。
+    返回：``os.stat_result`` 或 ``None``。
+    异常：除文件不存在外的系统错误继续交给调用方处理。
+    """
     try:
         return os.lstat(path)
     except FileNotFoundError:
@@ -113,10 +156,18 @@ def _safe_lstat(path: Path):
 
 
 def _identity(file_stat) -> tuple[int, int]:
+    """提取设备号与 inode，作为文件身份而非路径身份。"""
     return file_stat.st_dev, file_stat.st_ino
 
 
 def _assert_regular(file_stat) -> None:
+    """确认目标是普通文件。
+
+    参数：``file_stat`` 为 ``lstat`` 或 ``fstat`` 的结果。
+    返回：无。
+    异常：符号链接或非普通文件时抛出 ``UnsafeLogTarget``；这样不会误处理
+    FIFO、设备文件或被替换的链接。
+    """
     if stat.S_ISLNK(file_stat.st_mode):
         raise UnsafeLogTarget("拒绝清理符号链接")
     if not stat.S_ISREG(file_stat.st_mode):
@@ -124,7 +175,15 @@ def _assert_regular(file_stat) -> None:
 
 
 def _base_result(spec: LogFileSpec, rotation: int, action: str) -> dict:
+    """创建统一的逐文件审计结果骨架。
+
+    参数：``spec``、``rotation`` 和 ``action`` 描述受控目标与操作。
+    返回：包含清理前后身份、字节数、结果和错误字段的字典。
+    异常：无。
+    """
     return {
+        "source_key": spec.key,
+        "source_path": spec.relative_path,
         "file": _relative_name(spec, rotation),
         "rotation": rotation,
         "action": action,
@@ -145,6 +204,7 @@ def _base_result(spec: LogFileSpec, rotation: int, action: str) -> dict:
 
 
 def _mark_failure(result: dict, exc: Exception) -> dict:
+    """将预初始化结果标记为失败并保留可审计的错误文本。"""
     result["succeeded"] = False
     result["outcome"] = "failed"
     result["error"] = str(exc)
@@ -162,6 +222,15 @@ def _restore_quarantined(path: Path, quarantine: Path) -> bool:
 
 
 def _truncate_current(spec: LogFileSpec) -> dict:
+    """安全地原地截断当前日志文件。
+
+    参数：``spec`` 为注册日志项。
+    返回：逐文件执行结果；文件缺失时返回成功的 ``already_absent`` 结果。
+    异常：预期的文件与安全错误被写入结果而非向上抛出。
+
+    当前文件必须保留 inode，避免正在写入的 Django/Celery handler 继续指向
+    已删除文件；因此此处不用 rename 或 unlink。
+    """
     result = _base_result(spec, 0, "truncate")
     descriptor = None
     try:
@@ -232,6 +301,15 @@ def _truncate_current(spec: LogFileSpec) -> dict:
 
 
 def _unlink_rotation(spec: LogFileSpec, rotation: int) -> dict:
+    """隔离并删除一个轮转历史文件。
+
+    参数：``spec`` 为注册日志项，``rotation`` 为大于 0 的允许轮转编号。
+    返回：逐文件执行结果；不存在的历史文件是成功空操作。
+    异常：安全或文件系统错误记录在返回结果中。
+
+    先原子改名到随机隔离名，再删除隔离文件，避免并发轮转在路径复用时误删
+    新产生的同名文件。
+    """
     result = _base_result(spec, rotation, "unlink")
     quarantine = None
     try:
@@ -308,6 +386,14 @@ def preview_cleanup(
     kind: str,
     scope: str,
 ) -> dict:
+    """只读取文件元数据并生成清理预览。
+
+    参数：``specs`` 为受控注册项，目标字段用于回显，``scope`` 决定预计范围。
+    返回：当前文件、轮转文件、各轮转编号及合计的数量和字节数。
+    异常：注册路径不安全或范围非法时抛出相应异常。
+
+    预览与实际执行使用同一轮转上限，避免确认页显示的删除面和实际删除面不一致。
+    """
     _validate_scope(scope)
     if not specs:
         raise ValueError("没有匹配的注册日志")
@@ -356,6 +442,13 @@ def preview_cleanup(
 
 
 def execute_cleanup(specs: tuple[LogFileSpec, ...], scope: str) -> CleanupResult:
+    """执行受控日志清理并汇总逐文件结果。
+
+    参数：``specs`` 必须来自注册表，``scope`` 为合法清理范围。
+    返回：``CleanupResult``，其中保留每个候选文件的执行证据。
+    异常：没有目标或范围非法时抛出 ``ValueError``；单文件安全失败不会中断
+    其他文件的处理，而会记录在结果中。
+    """
     _validate_scope(scope)
     if not specs:
         raise ValueError("没有匹配的注册日志")

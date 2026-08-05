@@ -7,6 +7,15 @@ from .permissions import VIEW_PERMISSION
 from .urls import urlpatterns as observability_urlpatterns
 
 
+@hooks.register("register_log_actions")
+def register_observability_log_actions(actions):
+    actions.register_action(
+        "observability.clear_logs",
+        "System log cleanup",
+        "Cleared system logs",
+    )
+
+
 class SystemLogsMenuItem(MenuItem):
     def is_shown(self, request):
         return request.user.has_perm(VIEW_PERMISSION)

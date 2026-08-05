@@ -38,7 +38,7 @@ class ObservabilityAppConfigTests(TestCase):
                     "model", flat=True
                 )
             ),
-            ["logclearaudit"],
+            ["logclearaudit", "logindexsyncjob"],
         )
         self.assertEqual(
             set(
@@ -48,10 +48,14 @@ class ObservabilityAppConfigTests(TestCase):
             ),
             {
                 "add_logclearaudit",
+                "add_logindexsyncjob",
                 "change_logclearaudit",
+                "change_logindexsyncjob",
                 "delete_logclearaudit",
+                "delete_logindexsyncjob",
                 "manage_logs",
                 "view_logclearaudit",
+                "view_logindexsyncjob",
                 "view_logs",
             },
         )

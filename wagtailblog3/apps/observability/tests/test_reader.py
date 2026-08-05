@@ -134,6 +134,20 @@ class LogReaderTests(SimpleTestCase):
         self.assertEqual([record.message for record in result.records], ["deep needle 0"])
         self.assertGreater(result.bytes_read, 64 * 1024)
 
+    def test_dense_tail_stops_after_the_initial_window(self):
+        path = self.root / "blog/blog_error.log"
+        path.write_text(
+            "".join(_line(i % 60, "ERROR", f"dense tail {i}") for i in range(5000)),
+            encoding="utf-8",
+        )
+        self.assertGreater(path.stat().st_size, 2 * 64 * 1024)
+
+        with override_settings(LOG_DIR=self.root):
+            result = read_logs(domain="blog", kind="error", page_size=10)
+
+        self.assertEqual(len(result.records), 10)
+        self.assertEqual(result.bytes_read, 64 * 1024)
+
     def test_time_filter_scans_past_tail_without_matches(self):
         path = self.root / "blog/blog_error.log"
         older = _line(0, "ERROR", "inside time window")

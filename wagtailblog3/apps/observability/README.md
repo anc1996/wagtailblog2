@@ -61,6 +61,12 @@ python manage.py view_logs --module mongo --kind activity --lines 50
 
 清理目标只接受 `registry.py` 注册项。当前文件使用原地截断以保留 writer 的文件描述符，轮转历史按 catalog 范围删除；服务会验证普通文件、符号链接、设备号和 inode，并把逐文件结果写入 `LogClearAudit.details`。执行 POST 必须携带短时签名预览和唯一幂等键。
 
+启用 Elasticsearch 日志读模型后，成功的文件清理会创建持久化
+`LogIndexSyncJob`。当前文件仍原地截断、轮转文件仍删除；后台任务只按
+注册表生成的 source/path/rotation/identity/cutoff 条件删除 ES 文档，并在
+Filebeat 缓冲窗口后补偿一次。文件清理状态和 ES 同步状态独立记录，ES
+故障不会回滚已经完成的文件操作。
+
 ## 轮转
 
 本地文件使用 `ConcurrentRotatingFileHandler`，支持 uWSGI/Celery 多进程安全轮转。默认单文件 10 MiB、保留 5 份、UTF-8、延迟创建；没有记录时不会生成空文件。

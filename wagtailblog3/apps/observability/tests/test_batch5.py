@@ -12,6 +12,15 @@ from observability.models import LogClearAudit
 from observability.services import OVERVIEW_CACHE_KEY, get_overview
 
 
+TEST_STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.InMemoryStorage"},
+    "staticfiles": {
+        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"
+    },
+}
+
+
+@override_settings(STORAGES=TEST_STORAGES)
 class BatchFiveOverviewAndAuditTests(TestCase):
     """验证概览缓存、审计默认值和后台筛选上下文。"""
     def test_manual_refresh_invalidates_overview_cache(self):

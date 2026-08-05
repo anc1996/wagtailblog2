@@ -10,6 +10,12 @@ from django.core.cache import cache
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
+from .elasticsearch_logs import (
+    LogSearchUnavailable,
+    build_cleanup_plan,
+    get_log_summary,
+    is_enabled,
+)
 from .reader import read_logs, resolve_registered_path
 from .registry import LOG_DOMAIN_KEYS, LOG_FILE_BY_KEY, LogFileSpec, iter_log_files
 from .cleanup import CleanupResult, execute_cleanup, preview_cleanup
@@ -22,6 +28,12 @@ ClearResult = CleanupResult
 
 
 def _file_versions(spec: LogFileSpec):
+    """枚举一个注册日志当前文件及允许的轮转版本。
+
+    参数：``spec`` 为日志注册项。
+    返回：``(rotation, path)`` 生成器，仅包含实际存在的普通文件。
+    异常：路径不安全时由 ``resolve_registered_path`` 抛出 ``ValueError``。
+    """
     for rotation in range(spec.backup_count + 1):
         path = resolve_registered_path(spec, rotation)
         if path.exists() and path.is_file():
@@ -29,6 +41,15 @@ def _file_versions(spec: LogFileSpec):
 
 
 def get_overview(*, refresh: bool = False) -> dict:
+    """汇总日志中心概览数据。
+
+    参数：``refresh`` 为真时先失效短期概览缓存。
+    返回：域级字节数、近期错误/警告计数与刷新时间。
+    异常：ES 读取模型不可用时不向上抛出，而退回受限文件读取；文件路径异常
+    仍由底层安全校验抛出。
+
+    ES 只是读模型，概览不能因其暂时故障而让后台日志页面不可用。
+    """
     if refresh:
         cache.delete(OVERVIEW_CACHE_KEY)
     cached = cache.get(OVERVIEW_CACHE_KEY)
@@ -40,6 +61,14 @@ def get_overview(*, refresh: bool = False) -> dict:
     total_bytes = 0
     active_domains = 0
     since = timezone.localtime(timezone.now() - timedelta(hours=1)).replace(tzinfo=None)
+    search_summary = None
+    if is_enabled():
+        try:
+            search_summary = get_log_summary(since=since)
+        except LogSearchUnavailable:
+            # The ES index is an optional read model; file statistics remain
+            # available when the cluster or index is unavailable.
+            search_summary = None
     for domain in LOG_DOMAIN_KEYS:
         activity_bytes = 0
         error_bytes = 0
@@ -58,12 +87,17 @@ def get_overview(*, refresh: bool = False) -> dict:
                 last_modified = max(filter(None, (last_modified, modified)), default=modified)
         if activity_bytes or error_bytes:
             active_domains += 1
-        recent_error_records = read_logs(
-            domain=domain,
-            kind="error",
-            since=since,
-            page_size=200,
-        ).records
+        if search_summary is not None:
+            recent_error_count = search_summary["errors_by_domain"].get(domain, 0)
+        else:
+            recent_error_count = len(
+                read_logs(
+                    domain=domain,
+                    kind="error",
+                    since=since,
+                    page_size=200,
+                ).records
+            )
         modules.append(
             {
                 "key": domain,
@@ -79,15 +113,21 @@ def get_overview(*, refresh: bool = False) -> dict:
                 "error_bytes": error_bytes,
                 "rotation_count": rotations,
                 "last_modified": last_modified,
-                "recent_error_count": len(recent_error_records),
+                "recent_error_count": recent_error_count,
             }
         )
 
-    errors = read_logs(kind="error", since=since, page_size=200).records
-    warnings = read_logs(kind="activity", level="WARNING", since=since, page_size=200).records
+    if search_summary is not None:
+        error_count = search_summary["error_count"]
+        warning_count = search_summary["warning_count"]
+    else:
+        error_count = len(read_logs(kind="error", since=since, page_size=200).records)
+        warning_count = len(
+            read_logs(kind="activity", level="WARNING", since=since, page_size=200).records
+        )
     result = {
-        "error_count": len(errors),
-        "warning_count": len(warnings),
+        "error_count": error_count,
+        "warning_count": warning_count,
         "active_domains": active_domains,
         "domain_count": len(LOG_DOMAIN_KEYS),
         "total_bytes": total_bytes,
@@ -120,6 +160,12 @@ def describe_clear(
     target: str = "",
     kind: str = "",
 ) -> dict:
+    """为确认页构造不修改文件的清理预览。
+
+    参数：``specs`` 为注册目标，其他字段用于描述用户选择，``scope`` 为范围。
+    返回：与确认对话框对应的当前/轮转文件数量和大小。
+    异常：范围或注册路径不安全时由 ``preview_cleanup`` 抛出。
+    """
     return preview_cleanup(
         specs,
         target_type=target_type,
@@ -130,6 +176,14 @@ def describe_clear(
 
 
 def clear_logs(specs: tuple[LogFileSpec, ...], scope: str) -> ClearResult:
+    """执行文件清理并失效概览缓存。
+
+    参数：``specs`` 必须为注册表项，``scope`` 为合法清理范围。
+    返回：包含逐文件结果的 ``CleanupResult``。
+    异常：目标或范围非法时由 ``execute_cleanup`` 抛出。
+
+    缓存只保存展示统计；在文件变化后立即失效，避免管理员看到旧容量。
+    """
     result = execute_cleanup(specs, scope)
     cache.delete(OVERVIEW_CACHE_KEY)
     return result
@@ -170,6 +224,7 @@ def clear_and_audit(
         return audit, False
 
     started_at = monotonic()
+    cleanup_cutoff = timezone.now()
     try:
         result = clear_logs(specs, scope)
     except Exception as exc:
@@ -248,6 +303,29 @@ def clear_and_audit(
             "details",
         )
     )
+    if is_enabled():
+        plan = build_cleanup_plan(specs, result, cutoff=cleanup_cutoff)
+        if plan.selectors:
+            try:
+                from .tasks import enqueue_log_index_sync
+
+                enqueue_log_index_sync(audit, plan)
+            except Exception as exc:
+                audit.index_sync_state = "failed"
+                audit.index_sync_last_error = f"{type(exc).__name__}: {exc}"[:4000]
+                details = dict(audit.details or {})
+                details["index_sync"] = {
+                    "state": "failed",
+                    "last_error": audit.index_sync_last_error,
+                }
+                audit.details = details
+                audit.save(
+                    update_fields=(
+                        "index_sync_state",
+                        "index_sync_last_error",
+                        "details",
+                    )
+                )
     _write_wagtail_audit(audit, user, request_metadata)
     return audit, True
 
@@ -268,6 +346,7 @@ def _write_wagtail_audit(audit, user, request_metadata):
                 "kind": audit.kind,
                 "scope": audit.scope,
                 "state": audit.state,
+                "index_sync_state": audit.index_sync_state,
                 "files": audit.files_before,
                 "bytes_freed": audit.bytes_freed,
                 "request_id": (request_metadata or {}).get("request_id", ""),

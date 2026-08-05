@@ -1,6 +1,38 @@
 #!/user/bin/env python3
 # -*- coding: utf-8 -*-
 
+import os
+import sys
+
+
+def _env_bool(name, default=False):
+	"""Parse a boolean environment value without failing Django startup."""
+	value = os.environ.get(name)
+	if value is None:
+		return default
+	value = value.strip().lower()
+	if value in {"1", "true", "yes", "on"}:
+		return True
+	if value in {"0", "false", "no", "off"}:
+		return False
+	return default
+
+
+def _env_int(name, default):
+	"""Parse an integer environment value with a safe fallback."""
+	try:
+		return int(os.environ.get(name, default))
+	except (TypeError, ValueError):
+		return default
+
+
+def _env_float(name, default):
+	"""Parse a float environment value with a safe fallback."""
+	try:
+		return float(os.environ.get(name, default))
+	except (TypeError, ValueError):
+		return default
+
 
 # ==========================================================
 # 远程开发依赖服务
@@ -336,6 +368,11 @@ def get_celery_config(time_zone, redis_host, redis_port, redis_password):
 				# 任务选项：指定使用 maintenance 队列
 				# 维护任务在低优先级队列执行，不影响核心业务
 			},
+			'dispatch-pending-log-index-sync': {
+				'task': 'observability.tasks.dispatch_pending_log_index_sync_jobs',
+				'schedule': 30,
+				'options': {'queue': 'maintenance'},
+			},
 			
 			# 可以在这里添加更多定时任务
 			# 例如：
@@ -407,23 +444,69 @@ WAGTAILSEARCH_BACKENDS = {
 	}
 }
 
+# 日志检索使用独立的 Elasticsearch 命名空间，不与 Wagtail 内容索引混用。
+# 默认关闭，保持现有文件读取链路；配置索引和采集器后再通过环境变量启用。
+ELASTICSEARCH_LOGGING = {
+	"ENABLED": _env_bool("ELASTICSEARCH_LOG_ENABLED", False),
+	"URLS": [
+		os.environ.get(
+			"ELASTICSEARCH_LOG_URL",
+			f"http://{SERVICE_HOST}:9200",
+		)
+	],
+	"READ_INDEX": os.environ.get(
+		"ELASTICSEARCH_LOG_READ_INDEX",
+		"wagtailblog-test-logs-read",
+	),
+	"WRITE_INDEX": os.environ.get(
+		"ELASTICSEARCH_LOG_WRITE_INDEX",
+		"wagtailblog-test-logs-write",
+	),
+	"INGEST_PIPELINE": os.environ.get(
+		"ELASTICSEARCH_LOG_INGEST_PIPELINE",
+		"wagtailblog-test-logs-normalize-v2",
+	),
+	"TIMEZONE": os.environ.get("ELASTICSEARCH_LOG_TIMEZONE", "Asia/Shanghai"),
+	"TIMEOUT": _env_float("ELASTICSEARCH_LOG_TIMEOUT", 2.0),
+	"VERIFY_CERTS": _env_bool("ELASTICSEARCH_LOG_VERIFY_CERTS", True),
+	"FAILURE_COOLDOWN": _env_int("ELASTICSEARCH_LOG_FAILURE_COOLDOWN", 5),
+	"DELETE_SYNC_MAX_BYTES": _env_int(
+		"ELASTICSEARCH_LOG_DELETE_SYNC_MAX_BYTES",
+		10 * 1024 * 1024,
+	),
+	"DELETE_SYNC_MAX_SELECTORS": _env_int(
+		"ELASTICSEARCH_LOG_DELETE_SYNC_MAX_SELECTORS",
+		12,
+	),
+	"CA_CERTS": os.environ.get("ELASTICSEARCH_LOG_CA_CERTS", ""),
+	"AUTH_MODE": os.environ.get("ELASTICSEARCH_LOG_AUTH_MODE", "").strip().lower(),
+	"API_KEY": os.environ.get("ELASTICSEARCH_LOG_API_KEY", ""),
+	"USERNAME": os.environ.get("ELASTICSEARCH_LOG_USERNAME", ""),
+	"PASSWORD": os.environ.get("ELASTICSEARCH_LOG_PASSWORD", ""),
+	"NUMBER_OF_SHARDS": _env_int("ELASTICSEARCH_LOG_SHARDS", 1),
+	"NUMBER_OF_REPLICAS": _env_int("ELASTICSEARCH_LOG_REPLICAS", 0),
+	"ILM_POLICY": os.environ.get("ELASTICSEARCH_LOG_ILM_POLICY", ""),
+}
+
 # ==========================================================
 # 数据库连接信息打印函数
 # ==========================================================
-def print_database_config():
-	"""打印当前数据库配置信息，用于启动时确认环境"""
-	print("=" * 60)
-	print("     系统核心引擎与数据库配置     ")
-	print(f"  [MySQL]  数据库: {DATABASES['default']['NAME']}")
+def print_database_config(stream=None):
+	"""打印当前数据库配置信息；诊断输出默认走 stderr。"""
+	stream = stream or sys.stderr
+	write = lambda value="": print(value, file=stream)
+	write("=" * 60)
+	write("     系统核心引擎与数据库配置     ")
+	write(f"  [MySQL]  数据库: {DATABASES['default']['NAME']}")
 	
 	# 假设你定义了 MONGO_DB 字典，如果没有请根据你的实际变量名调整
 	mongo_db_name = globals().get('MONGO_DB', {}).get('NAME', '未配置')
-	print(f"  [MongoDB] 数据库: {mongo_db_name}")
-	print(f"  [Redis]  主机: {REDIS_HOST}:{REDIS_PORT}")
+	write(f"  [MongoDB] 数据库: {mongo_db_name}")
+	write(f"  [Redis]  主机: {REDIS_HOST}:{REDIS_PORT}")
 	
 	# 假设你定义了 AWS_STORAGE_BUCKET_NAME 变量
 	minio_bucket = globals().get('AWS_STORAGE_BUCKET_NAME', '未配置')
-	print(f"  [MinIO]  Bucket: {minio_bucket}")
+	write(f"  [MinIO]  Bucket: {minio_bucket}")
 	
 	# 🌟 新增：动态侦测并打印 Wagtail 搜索引擎 (Elasticsearch) 的加载状态
 	es_config = WAGTAILSEARCH_BACKENDS.get('default', {})
@@ -432,7 +515,7 @@ def print_database_config():
 	es_url = es_config.get('URLS', ['未配置'])[0]
 	es_index = es_config.get('INDEX_PREFIX', '未配置')
 	
-	print(f"  [Search] 引擎: {es_backend.upper()}")
-	print(f"           节点: {es_url}")
-	print(f"           索引前缀: {es_index}")
-	print("=" * 60)
+	write(f"  [Search] 引擎: {es_backend.upper()}")
+	write(f"           节点: {es_url}")
+	write(f"           索引前缀: {es_index}")
+	write("=" * 60)

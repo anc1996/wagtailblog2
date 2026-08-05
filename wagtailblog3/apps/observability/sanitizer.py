@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+from functools import lru_cache
 from pathlib import Path
 
 from colorlog import ColoredFormatter
@@ -53,6 +54,15 @@ SERVER_PATH_RE = re.compile(
 WINDOWS_PATH_RE = re.compile(r"(?i)(?P<path>[A-Z]:\\(?:[^\s\"'<>:,]+\\)*[^\s\"'<>:,]+)")
 
 
+@lru_cache(maxsize=32)
+def _resolved_project_root(base_dir: str) -> Path | None:
+    """Resolve each configured project root once, not once per log field."""
+    try:
+        return Path(base_dir).resolve()
+    except (OSError, TypeError, ValueError):
+        return None
+
+
 def _project_root(base_dir=None) -> Path | None:
     # 未显式传入根目录时从 Django 配置读取；脱离 Django 环境则返回空值，
     # 让调用方仍可进行不依赖项目配置的基础路径清洗。
@@ -63,10 +73,7 @@ def _project_root(base_dir=None) -> Path | None:
             base_dir = settings.BASE_DIR
         except Exception:
             return None
-    try:
-        return Path(base_dir).resolve()
-    except (OSError, TypeError, ValueError):
-        return None
+    return _resolved_project_root(str(base_dir))
 
 
 def project_relative_path(pathname: str, base_dir=None) -> str:
@@ -85,9 +92,18 @@ def project_relative_path(pathname: str, base_dir=None) -> str:
         # resolve 只用于规范化比较，不要求目标文件实际存在。
         path = path.resolve(strict=False)
         if root is not None:
-            relative = path.relative_to(root)
-            if ".." not in relative.parts:
+            try:
+                relative = path.relative_to(root)
+            except ValueError:
+                relative = None
+            if relative is not None and ".." not in relative.parts:
                 return relative.as_posix()
+        # Logs can be copied between test and production hosts with different
+        # absolute roots. Keep only the project package suffix in that case.
+        parts = path.parts
+        if "wagtailblog3" in parts:
+            package_index = parts.index("wagtailblog3")
+            return Path(*parts[package_index:]).as_posix()
         return path.name
     except (OSError, TypeError, ValueError):
         return Path(str(pathname)).name

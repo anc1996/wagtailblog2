@@ -12,6 +12,7 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.test import TestCase, override_settings
+from wagtail.models import ModelLogEntry
 
 from observability.models import LogClearAudit
 from observability.registry import LOG_FILE_BY_KEY
@@ -25,6 +26,7 @@ from observability.services import (
 )
 
 
+@override_settings(ELASTICSEARCH_LOGGING={"ENABLED": False})
 class LogClearServiceTests(TestCase):
     """验证日志清理服务、预览结果和幂等审计记录。"""
     def setUp(self):
@@ -255,6 +257,9 @@ class LogClearServiceTests(TestCase):
         self.assertEqual(first.details["spec_keys"], [self.spec.key])
         self.assertEqual(first.details["file_results"][0]["outcome"], "truncated")
         self.assertIn("duration_ms", first.details)
+        entry = ModelLogEntry.objects.get(action="observability.clear_logs")
+        self.assertEqual(entry.user, user)
+        self.assertEqual(entry.data["audit_id"], first.pk)
 
     def test_unexpected_failure_finishes_audit_and_keeps_idempotency_claim(self):
         user = get_user_model().objects.create_user(username="claim-operator", password="test")

@@ -52,6 +52,12 @@ class SourceScan:
 
 
 def _log_root() -> Path:
+    """返回解析后的日志根目录。
+
+    参数：无。
+    返回：``settings.LOG_DIR`` 的绝对路径。
+    异常：无；后续路径校验负责阻止根目录外访问。
+    """
     return Path(settings.LOG_DIR).resolve()
 
 
@@ -76,6 +82,12 @@ def _source_id(spec: LogFileSpec, identity: tuple[int, int]) -> str:
 
 
 def _parse_source_id(source: str) -> tuple[LogFileSpec, tuple[int, int]]:
+    """解析游标中的注册项、设备号和 inode。
+
+    参数：``source`` 为 ``key|device|inode`` 格式的来源标识。
+    返回：注册项与文件身份元组。
+    异常：格式错误、未知注册项或非整数身份时抛出 ``ValueError``。
+    """
     try:
         key, device, inode = source.rsplit("|", 2)
         spec = LOG_FILE_BY_KEY[key]
@@ -86,6 +98,14 @@ def _parse_source_id(source: str) -> tuple[LogFileSpec, tuple[int, int]]:
 
 
 def _decode_cursor(value: str) -> dict[str, CursorState]:
+    """验证并解码文件读取游标。
+
+    参数：``value`` 为浏览器传回的签名游标，空值表示第一页。
+    返回：来源标识到 ``CursorState`` 的映射。
+    异常：签名无效、过期、版本不匹配或字段不安全时抛出 ``ValueError``。
+
+    游标绑定 inode 和内容锚点，而不是仅绑定路径，以识别轮转和 copytruncate。
+    """
     if not value:
         return {}
     try:
@@ -128,6 +148,12 @@ def _decode_cursor(value: str) -> dict[str, CursorState]:
 
 
 def _encode_cursor(states: dict[str, CursorState]) -> str:
+    """将多来源读取状态编码为带版本的签名游标。
+
+    参数：``states`` 为来源身份到偏移和快照锚点的映射。
+    返回：可传回客户端的 Django 签名字符串。
+    异常：签名序列化错误向上抛出。
+    """
     payload = {
         "version": CURSOR_VERSION,
         "sources": {
@@ -144,6 +170,12 @@ def _encode_cursor(states: dict[str, CursorState]) -> str:
 
 
 def _open_verified(path: Path, identity: tuple[int, int]):
+    """打开文件并再次确认其身份未在检查后被替换。
+
+    参数：``path`` 为注册路径，``identity`` 为预期设备号和 inode。
+    返回：``(descriptor, stat)``，打开失败或身份变化时返回 ``None``。
+    异常：无；调用方把读取竞态视为快照失效而非页面崩溃。
+    """
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     try:
         descriptor = os.open(path, flags)
@@ -232,6 +264,12 @@ def _unknown_records(data: bytes, start: int, end: int) -> list[LogRecord]:
 
 
 def _parse_segment(data: bytes, start: int, end: int) -> tuple[list[LogRecord], int]:
+    """解析一个字节片段，并保留末尾不完整记录的位置。
+
+    参数：``data`` 为读取块，``start``/``end`` 为其在源文件中的偏移范围。
+    返回：解析出的记录和可安全继续读取的偏移量。
+    异常：解析器异常由调用方处理为受控未知记录。
+    """
     records = parse_bytes(data, base_offset=start)
     structured = any(record.level != "UNKNOWN" for record in records)
     if not structured:
@@ -253,6 +291,12 @@ def _matches(
     since: datetime | None,
     until: datetime | None,
 ) -> bool:
+    """判断单条日志是否满足时间、级别和关键字筛选。
+
+    参数：记录及可选筛选条件。
+    返回：记录可展示时为 ``True``。
+    异常：无；缺失时间按筛选语义处理，而不猜测时间。
+    """
     if level and record.level != level:
         return False
     if since and (record.timestamp is None or record.timestamp < since):
@@ -276,7 +320,7 @@ def _scan_source(
     since: datetime | None,
     until: datetime | None,
 ) -> SourceScan:
-    """向前扫描并在扫描过程中筛选，直到匹配数或字节预算满足。"""
+    """向前扫描，足够填满一页后立即停止，始终受字节预算约束。"""
     # 先按设备号和 inode 验证文件，再在受限字节预算内从尾部向前扫描，避免读入整文件。
     opened = _open_verified(path, expected_identity)
     if not opened:
@@ -291,43 +335,35 @@ def _scan_source(
     data = b""
     bytes_read = 0
     records: list[LogRecord] = []
+    matched_records: list[LogRecord] = []
     resume_offset = end
     try:
         while start > 0 and bytes_read < budget:
-            # 窗口指数扩展，避免深层无匹配时反复解析 64KB 递增的全部缓冲区。
-            # 最终累计解析量小于末次窗口的两倍，实际文件读取量仍受 budget 限制。
+            # The first window keeps common, match-rich pages inexpensive.
+            # Later windows double, capping the number of re-parses for a
+            # no-match query while preserving a bounded total scan.
             window = CHUNK_SIZE if bytes_read == 0 else bytes_read
             amount = min(window, start, budget - bytes_read)
             start -= amount
             data = os.pread(descriptor, amount, start) + data
             bytes_read += amount
             records, resume_offset = _parse_segment(data, start, end)
-            matched = sum(
-                _matches(
+            matched_records = [
+                record
+                for record in reversed(records)
+                if _matches(
                     record,
                     level=level,
                     keyword=keyword,
                     since=since,
                     until=until,
                 )
-                for record in records
-            )
-            if matched >= target_matches:
+            ]
+            if len(matched_records) >= target_matches:
                 break
     finally:
         os.close(descriptor)
 
-    matched_records = [
-        record
-        for record in reversed(records)
-        if _matches(
-            record,
-            level=level,
-            keyword=keyword,
-            since=since,
-            until=until,
-        )
-    ]
     return SourceScan(matched_records, resume_offset, bytes_read)
 
 
@@ -415,6 +451,14 @@ def _state_for_offset(
     offset: int,
     snapshot: CursorState,
 ) -> CursorState | None:
+    """构造给定偏移处的可验证游标状态。
+
+    参数：注册项、文件身份、偏移和原快照状态。
+    返回：包含局部内容锚点和快照锚点的 ``CursorState``，失效时返回 ``None``。
+    异常：文件读取错误被底层辅助函数转换为 ``None``。
+
+    双重锚点用于区分正常追加、轮转后继续读取与 inode 未变的 copytruncate。
+    """
     if offset <= 0:
         return None
     located = _find_snapshot_file(spec, identity)

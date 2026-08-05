@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from django.test import SimpleTestCase, override_settings
 
+from observability.elasticsearch_logs import ElasticsearchPage
 from observability.pagination import read_log_page
 
 
@@ -117,3 +118,29 @@ class LogPaginationTests(SimpleTestCase):
         refreshed = self._page(2, second.session_token)
         self.assertEqual(refreshed.page, 1)
         self.assertEqual([item.message for item in refreshed.records], ["record 59"])
+
+    def test_enabled_elasticsearch_backend_uses_search_after_session(self):
+        first_record = object()
+        second_record = object()
+        first = ElasticsearchPage([first_record], "cursor-for-page-two", True)
+        second = ElasticsearchPage([second_record], "", False)
+        with patch("observability.pagination.is_enabled", return_value=True), patch(
+            "observability.pagination.search_logs", side_effect=[first, second]
+        ) as search:
+            page_one = read_log_page(
+                owner_id=7,
+                requested_page=1,
+                page_size=1,
+                filters=self.filters,
+            )
+            page_two = read_log_page(
+                owner_id=7,
+                requested_page=2,
+                page_size=1,
+                session_token=page_one.session_token,
+                filters=self.filters,
+            )
+
+        self.assertEqual(page_one.records, [first_record])
+        self.assertEqual(page_two.records, [second_record])
+        self.assertEqual(search.call_args_list[1].kwargs["cursor"], "cursor-for-page-two")

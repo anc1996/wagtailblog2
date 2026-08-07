@@ -20,6 +20,31 @@ uWSGI 的 6051 是仅供本机诊断的 HTTP 端口，不作为对外入口。
 | `wagtailblog3-celery-beat.service` | 每 30 秒补偿日志索引 outbox | 是 |
 | `wagtailblog3-filebeat.service` | 采集项目日志并写入 Elasticsearch | 是 |
 
+## 服务变更登记规则
+
+以后每次功能更新、异步任务更新、定时任务更新、日志链路更新或外部依赖更新，
+都必须先检查本次变更是否新增或改变了运行服务。只要涉及以下任一项，就必须
+在本手册中同步登记后才能部署：
+
+- 新增或修改 systemd service、timer、socket；
+- 新增 Celery worker 队列或 Celery Beat 任务；
+- 新增日志采集器、索引同步器或其他常驻进程；
+- 新增数据库、缓存、消息队列、对象存储或容器依赖；
+- 修改服务启动顺序、环境变量、数据目录、日志目录或健康检查方式。
+
+每个新增服务必须在本手册至少记录：服务名、职责、监听的队列或端口、项目目录、
+运行环境、数据和日志路径、依赖服务、是否开机启动、启动/停止/重启命令、健康检查
+命令、失败重试策略和回滚处理。新增服务未登记时，不得宣布部署完成。
+
+当前日志系统改造涉及并必须启动的服务为：
+
+- `wagtailblog3-celery-maintenance.service`：消费 `maintenance` 队列，执行日志索引同步和维护任务；
+- `wagtailblog3-celery-beat.service`：调度定时任务和失败补偿；
+- `wagtailblog3-filebeat.service`：采集项目日志并写入 Elasticsearch。
+
+后续如果新增其他服务，必须把它加入“必须运行的应用服务”表、重启验收命令、
+日志查看命令和开机启动命令，并同时更新对应的 systemd unit 文件和部署记录。
+
 依赖服务也必须可用：`mysqld.service`、`redis.service`、
 `mongodb-home.service`、`minio.service`、`docker.service` 和 Nginx。
 Elasticsearch 与 Kibana 由 Docker 管理，Elasticsearch 容器设置为

@@ -176,7 +176,6 @@
     /* The outer pre clips the inner scroller and must never create a second bar. */
     max-height: 242px;
     overflow: hidden !important;
-    overscroll-behavior: contain;
 }
 
 .code-collapse-fade {

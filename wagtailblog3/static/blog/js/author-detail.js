@@ -1,58 +1,15 @@
 (function () {
     'use strict';
 
-    var secondaryOptions = {
-        title: [
-            { value: 'title_asc', text: '标题 (A→Z)' },
-            { value: 'title_desc', text: '标题 (Z→A)' }
-        ],
-        date: [
-            { value: 'date_desc', text: '时间 (新→旧)' },
-            { value: 'date_asc', text: '时间 (旧→新)' }
-        ]
-    };
-
-    function updateSecondaryOptions(root) {
-        var primary = root.querySelector('#sort_primary');
-        var secondary = root.querySelector('#sort_secondary');
-        if (!primary || !secondary) {
-            return;
-        }
-
-        var selectedValue = secondary.value;
-        var optionGroup = primary.value.indexOf('date_') === 0 ? 'title' : 'date';
-        var options = secondaryOptions[optionGroup];
-        secondary.replaceChildren();
-
-        options.forEach(function (optionDefinition) {
-            var option = document.createElement('option');
-            option.value = optionDefinition.value;
-            option.textContent = optionDefinition.text;
-            option.selected = optionDefinition.value === selectedValue;
-            secondary.appendChild(option);
-        });
-    }
-
-    function initialiseBlogIndexResults() {
-        var root = document.getElementById('blog-index-results');
-        if (!root) {
-            return;
-        }
-
-        updateSecondaryOptions(root);
-        root.addEventListener('change', function (event) {
-            if (event.target.matches('#sort_primary')) {
-                updateSecondaryOptions(root);
-            }
-        });
-
-        if (!window.axios) {
+    function initialiseAuthorPostResults() {
+        var root = document.getElementById('author-post-results');
+        if (!root || !window.axios) {
             return;
         }
 
         var apiUrl = root.dataset.apiUrl;
-        var content = root.querySelector('.blog-index-results-content');
-        var status = root.querySelector('.blog-index-async-status');
+        var content = root.querySelector('.author-post-content');
+        var status = root.querySelector('.author-post-async-status');
         if (!apiUrl || !content || !status) {
             return;
         }
@@ -64,48 +21,20 @@
         function paramsFromUrl(url) {
             var parsedUrl = new URL(url, window.location.origin);
             return {
-                search: parsedUrl.searchParams.get('search') || '',
-                start_date: parsedUrl.searchParams.get('start_date') || '',
-                end_date: parsedUrl.searchParams.get('end_date') || '',
-                sort_primary: parsedUrl.searchParams.get('sort_primary') || '',
-                sort_secondary: parsedUrl.searchParams.get('sort_secondary') || '',
+                q: parsedUrl.searchParams.get('q') || '',
                 page: parsedUrl.searchParams.get('page') || ''
             };
-        }
-
-        function paramsFromForm(form) {
-            var formData = new FormData(form);
-            return {
-                search: String(formData.get('search') || ''),
-                start_date: String(formData.get('start_date') || ''),
-                end_date: String(formData.get('end_date') || ''),
-                sort_primary: String(formData.get('sort_primary') || ''),
-                sort_secondary: String(formData.get('sort_secondary') || ''),
-                page: form.matches('.pagination-jump-form')
-                    ? String(formData.get('page') || '')
-                    : ''
-            };
-        }
-
-        function requestParams(params) {
-            var values = {};
-            Object.keys(params).forEach(function (key) {
-                if (params[key]) {
-                    values[key] = params[key];
-                }
-            });
-            return values;
         }
 
         function setLoading(isLoading) {
             root.classList.toggle('is-loading', isLoading);
             root.setAttribute('aria-busy', String(isLoading));
             status.classList.toggle('is-loading', isLoading);
-            status.textContent = isLoading ? '正在更新文章列表…' : '';
+            status.textContent = isLoading ? '正在加载文章…' : '';
         }
 
         function clearError() {
-            var error = root.querySelector('.blog-index-load-error');
+            var error = root.querySelector('.author-post-load-error');
             if (error) {
                 error.remove();
             }
@@ -115,16 +44,16 @@
             clearError();
 
             var error = document.createElement('div');
-            error.className = 'blog-index-load-error';
+            error.className = 'author-post-load-error';
             error.setAttribute('role', 'alert');
 
             var message = document.createElement('p');
-            message.textContent = '文章列表暂时无法更新，当前结果已保留。';
+            message.textContent = '文章列表暂时无法加载，现有结果没有被更改。';
 
             var retry = document.createElement('button');
             retry.type = 'button';
-            retry.className = 'blog-index-retry';
-            retry.dataset.blogIndexRetry = 'true';
+            retry.className = 'author-post-retry';
+            retry.dataset.authorPostsRetry = 'true';
             retry.textContent = '重试';
 
             error.append(message, retry);
@@ -135,13 +64,23 @@
             return (
                 error &&
                 (error.code === 'ERR_CANCELED' ||
-                    (typeof window.axios.isCancel === 'function' &&
-                        window.axios.isCancel(error)))
+                    (typeof window.axios.isCancel === 'function' && window.axios.isCancel(error)))
             );
         }
 
+        function requestParams(params) {
+            var values = {};
+            if (params.q) {
+                values.q = params.q;
+            }
+            if (params.page) {
+                values.page = params.page;
+            }
+            return values;
+        }
+
         function focusResults(shouldScroll) {
-            var heading = content.querySelector('#blog-list-heading');
+            var heading = content.querySelector('#author-posts-heading');
             if (heading) {
                 try {
                     heading.focus({ preventScroll: true });
@@ -163,8 +102,10 @@
 
         async function loadResults(params, options) {
             var requestId = ++requestSequence;
-            var loadOptions = options || {};
-            lastRequestedParams = Object.assign({}, params);
+            lastRequestedParams = {
+                q: params.q || '',
+                page: params.page || ''
+            };
 
             if (abortController) {
                 abortController.abort();
@@ -191,35 +132,25 @@
                 }
 
                 var payload = response.data;
-                if (
-                    !payload ||
-                    payload.ok !== true ||
-                    !payload.data ||
-                    typeof payload.data.html !== 'string'
-                ) {
-                    throw new Error('Invalid blog-index response');
+                if (!payload || payload.ok !== true || !payload.data || typeof payload.data.html !== 'string') {
+                    throw new Error('Invalid author-post response');
                 }
 
                 content.innerHTML = payload.data.html;
-                updateSecondaryOptions(root);
 
-                if (payload.data.canonical_url) {
-                    lastRequestedParams = paramsFromUrl(payload.data.canonical_url);
-                }
-
-                if (loadOptions.pushHistory && payload.data.canonical_url) {
+                if (options.pushHistory && payload.data.canonical_url) {
                     var currentUrl = window.location.pathname + window.location.search;
                     if (payload.data.canonical_url !== currentUrl) {
                         window.history.pushState(
-                            { blogIndexResults: true },
+                            { authorPostResults: true },
                             '',
                             payload.data.canonical_url
                         );
                     }
                 }
 
-                if (loadOptions.focus) {
-                    focusResults(loadOptions.scroll);
+                if (options.focus) {
+                    focusResults(options.scroll);
                 }
             } catch (error) {
                 if (requestId === requestSequence && !isCanceled(error)) {
@@ -245,7 +176,7 @@
         }
 
         root.addEventListener('click', function (event) {
-            var retry = event.target.closest('[data-blog-index-retry]');
+            var retry = event.target.closest('[data-author-posts-retry]');
             if (retry && root.contains(retry)) {
                 event.preventDefault();
                 loadResults(lastRequestedParams, {
@@ -257,7 +188,7 @@
             }
 
             var link = event.target.closest(
-                '.filter-clear-link, .custom-pagination a.pagination-button'
+                '.author-search-clear, .custom-pagination a.pagination-button'
             );
             if (!link || !root.contains(link) || !shouldUseAjax(event)) {
                 return;
@@ -282,18 +213,27 @@
         root.addEventListener('submit', function (event) {
             var form = event.target;
             if (
-                !form.matches('#blog_filter_form') &&
+                !form.matches('.author-post-search') &&
                 !form.matches('.pagination-jump-form')
             ) {
                 return;
             }
 
             event.preventDefault();
-            loadResults(paramsFromForm(form), {
-                pushHistory: true,
-                focus: true,
-                scroll: true
-            });
+            var formData = new FormData(form);
+            loadResults(
+                {
+                    q: String(formData.get('q') || ''),
+                    page: form.matches('.pagination-jump-form')
+                        ? String(formData.get('page') || '')
+                        : ''
+                },
+                {
+                    pushHistory: true,
+                    focus: true,
+                    scroll: true
+                }
+            );
         });
 
         window.addEventListener('popstate', function () {
@@ -306,8 +246,8 @@
     }
 
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', initialiseBlogIndexResults);
+        document.addEventListener('DOMContentLoaded', initialiseAuthorPostResults);
     } else {
-        initialiseBlogIndexResults();
+        initialiseAuthorPostResults();
     }
 })();

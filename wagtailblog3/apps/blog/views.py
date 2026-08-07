@@ -1,13 +1,28 @@
 # 博客应用的接口和作者视图
+from urllib.parse import urlencode, urlsplit
+
 from django.http import JsonResponse
+from django.template.loader import render_to_string
+from django.urls import reverse
 from wagtail.models import Page
 from wagtail.search.backends import get_search_backend
 from django.views.decorators.http import require_POST
 from django.shortcuts import get_object_or_404
 from django.db import models
+from django.core.paginator import Paginator
 from django.views.generic import ListView, DetailView
 
-from blog.models import Author, BlogPage
+from blog.models import (
+	Author,
+	BlogIndexPage,
+	BlogPage,
+	BLOG_INDEX_DEFAULT_SORT_PRIMARY,
+	BLOG_INDEX_DEFAULT_SORT_SECONDARY,
+	BLOG_INDEX_ITEMS_PER_PAGE,
+)
+
+
+AUTHOR_POSTS_PER_PAGE = 10
 
 
 def get_client_ip(request):
@@ -215,6 +230,203 @@ class AuthorListView(ListView):
 		return context
 
 
+def get_blog_index_canonical_url(*, page, context, request):
+	"""Return a same-origin URL for the normalized index-listing state."""
+	params = {}
+	if context['search_query']:
+		params['search'] = context['search_query']
+	if context['start_date']:
+		params['start_date'] = context['start_date']
+	if context['end_date']:
+		params['end_date'] = context['end_date']
+	if (
+		context['sort_primary'] != BLOG_INDEX_DEFAULT_SORT_PRIMARY
+		or context['sort_secondary'] != BLOG_INDEX_DEFAULT_SORT_SECONDARY
+	):
+		params['sort_primary'] = context['sort_primary']
+		params['sort_secondary'] = context['sort_secondary']
+	if context['page_obj'].number > 1:
+		params['page'] = context['page_obj'].number
+
+	page_url = page.get_url(request=request) or page.url or '/'
+	page_path = urlsplit(page_url).path or '/'
+	return f'{page_path}?{urlencode(params)}' if params else page_path
+
+
+def blog_index_results_api(request, pk):
+	"""Return a server-rendered index-listing fragment as JSON."""
+	if request.method != 'GET':
+		response = JsonResponse(
+			{
+				'ok': False,
+				'error': {
+					'code': 'method_not_allowed',
+					'message': '仅支持 GET 请求。',
+				},
+			},
+			status=405,
+		)
+		response['Allow'] = 'GET'
+		response['Cache-Control'] = 'private, no-store'
+		return response
+
+	page = BlogIndexPage.objects.live().public().filter(pk=pk).first()
+	if page is None:
+		response = JsonResponse(
+			{
+				'ok': False,
+				'error': {
+					'code': 'blog_index_not_found',
+					'message': '未找到该博客索引页。',
+				},
+			},
+			status=404,
+		)
+		response['Cache-Control'] = 'private, no-store'
+		return response
+
+	context = page.get_listing_context(request.GET)
+	response = JsonResponse(
+		{
+			'ok': True,
+			'data': {
+				'filters': {
+					'search': context['search_query'],
+					'start_date': context['start_date'],
+					'end_date': context['end_date'],
+					'sort_primary': context['sort_primary'],
+					'sort_secondary': context['sort_secondary'],
+				},
+				'result_count': context['total_results'],
+				'html': render_to_string(
+					'blog/partials/_blog_index_results.html',
+					{'page': page, **context},
+					request=request,
+				),
+				'pagination': {
+					'page': context['page_obj'].number,
+					'page_size': BLOG_INDEX_ITEMS_PER_PAGE,
+					'total_pages': context['page_obj'].paginator.num_pages,
+					'has_previous': context['page_obj'].has_previous(),
+					'has_next': context['page_obj'].has_next(),
+				},
+				'canonical_url': get_blog_index_canonical_url(
+					page=page,
+					context=context,
+					request=request,
+				),
+			},
+		}
+	)
+	response['Cache-Control'] = 'private, no-store'
+	return response
+
+
+def get_author_posts_context(*, author, query_params):
+	"""Build the public, paginated author-post context used by HTML and JSON views."""
+	search_query = (query_params.get('q') or '').strip()
+	all_posts = (
+		BlogPage.objects.live()
+		.public()
+		.filter(authors=author)
+		.select_related('featured_image')
+		.prefetch_related('tags')
+	)
+	posts = all_posts
+	if search_query:
+		posts = posts.filter(title__icontains=search_query)
+	posts = posts.order_by('-date', '-pk')
+
+	paginator = Paginator(posts, AUTHOR_POSTS_PER_PAGE)
+	page_obj = paginator.get_page(query_params.get('page'))
+
+	return {
+		'blog_posts': page_obj.object_list,
+		'page_obj': page_obj,
+		'paginator': paginator,
+		'is_paginated': page_obj.has_other_pages(),
+		'total_posts': paginator.count,
+		'author_post_count': all_posts.count() if search_query else paginator.count,
+		'search_query': search_query,
+	}
+
+
+def get_author_posts_canonical_url(*, author, context):
+	"""Return the normalized server-rendered page URL for browser history."""
+	params = {}
+	if context['search_query']:
+		params['q'] = context['search_query']
+	if context['page_obj'].number > 1:
+		params['page'] = context['page_obj'].number
+
+	url = reverse('blog:author_detail', kwargs={'pk': author.pk})
+	return f'{url}?{urlencode(params)}' if params else url
+
+
+def author_posts_api(request, pk):
+	"""Return the author article-list fragment for progressive enhancement."""
+	if request.method != 'GET':
+		response = JsonResponse(
+			{
+				'ok': False,
+				'error': {
+					'code': 'method_not_allowed',
+					'message': '仅支持 GET 请求。',
+				},
+			},
+			status=405,
+		)
+		response['Allow'] = 'GET'
+		response['Cache-Control'] = 'private, no-store'
+		return response
+
+	author = Author.objects.filter(pk=pk).first()
+	if author is None:
+		response = JsonResponse(
+			{
+				'ok': False,
+				'error': {
+					'code': 'author_not_found',
+					'message': '未找到该作者。',
+				},
+			},
+			status=404,
+		)
+		response['Cache-Control'] = 'private, no-store'
+		return response
+
+	context = get_author_posts_context(author=author, query_params=request.GET)
+	fragment_context = {'author': author, **context}
+	response = JsonResponse(
+		{
+			'ok': True,
+			'data': {
+				'query': context['search_query'],
+				'author_post_count': context['author_post_count'],
+				'result_count': context['total_posts'],
+				'html': render_to_string(
+					'blog/partials/_author_post_results.html',
+					fragment_context,
+					request=request,
+				),
+				'pagination': {
+					'page': context['page_obj'].number,
+					'page_size': AUTHOR_POSTS_PER_PAGE,
+					'total_pages': context['paginator'].num_pages,
+					'has_previous': context['page_obj'].has_previous(),
+					'has_next': context['page_obj'].has_next(),
+				},
+				'canonical_url': get_author_posts_canonical_url(
+					author=author,
+					context=context,
+				),
+			},
+		}
+	)
+	response['Cache-Control'] = 'private, no-store'
+	return response
+
+
 class AuthorDetailView(DetailView):
 	"""
 	显示单个作者的详细信息及其发表的文章。
@@ -222,15 +434,13 @@ class AuthorDetailView(DetailView):
 	model = Author
 	template_name = 'blog/author_detail.html'
 	context_object_name = 'author'
+	paginate_by = AUTHOR_POSTS_PER_PAGE
 	
 	def get_context_data(self, **kwargs):
-		# 详情页只查询当前作者已发布文章，并按发布日期倒序展示。
 		context = super().get_context_data(**kwargs)
-		author = self.get_object()
-		
-		# 获取该作者的所有已发布的博客文章 (按日期倒序)
-		# 注意: 这假设你的 BlogPage 模型有一个 'authors' 字段 (ManyToManyField 或 ForeignKey)
-		# 并且 BlogPage 是 'live' (已发布) 的。你需要根据你的 BlogPage 模型调整。
-		context['blog_posts'] = BlogPage.objects.live().filter(authors=author).order_by('-date')
+		author = self.object
+		context.update(
+			get_author_posts_context(author=author, query_params=self.request.GET)
+		)
 		
 		return context

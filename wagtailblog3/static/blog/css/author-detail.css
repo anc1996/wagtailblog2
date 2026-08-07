@@ -1,0 +1,425 @@
+/* Author detail additions. Shared article cards and pagination come from blog-index.css. */
+.author-detail-page .author-profile {
+    display: grid;
+    grid-template-columns: 150px minmax(0, 1fr);
+    align-items: start;
+    gap: 30px;
+    margin-bottom: 38px;
+    padding: 30px;
+    border: 1px solid var(--index-border);
+    border-radius: 18px;
+    background: var(--index-card);
+    box-shadow: 0 12px 36px rgba(72, 54, 43, 0.07);
+}
+
+.author-detail-page .author-profile-image {
+    width: 150px;
+    height: 150px;
+    margin: 0;
+    overflow: hidden;
+    border: 1px solid var(--index-border-strong);
+    border-radius: 50%;
+    background: #eee7df;
+    box-shadow: 0 8px 22px rgba(65, 48, 38, 0.12);
+}
+
+.author-detail-page .author-profile-image img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.author-detail-page .author-profile-content {
+    min-width: 0;
+}
+
+.author-detail-page .author-profile-eyebrow {
+    display: block;
+    margin-bottom: 8px;
+    color: var(--index-accent);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    line-height: 1.2;
+}
+
+.author-detail-page .author-profile h1 {
+    margin: 0 0 12px;
+    color: var(--index-ink);
+    font-family: 'Playfair Display', serif;
+    font-size: 38px;
+    font-weight: 600;
+    line-height: 1.18;
+    overflow-wrap: anywhere;
+}
+
+.author-detail-page .author-profile-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 9px 16px;
+    margin-bottom: 17px;
+    color: var(--index-muted);
+    font-size: 13px;
+}
+
+.author-detail-page .author-profile-meta span,
+.author-detail-page .author-profile-meta a {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+}
+
+.author-detail-page .author-profile-meta i {
+    color: var(--index-accent);
+}
+
+.author-detail-page .author-profile-meta a {
+    color: var(--index-accent-dark);
+    font-weight: 700;
+    text-decoration: none;
+}
+
+.author-detail-page .author-profile-meta a:hover,
+.author-detail-page .author-profile-meta a:focus {
+    color: var(--index-accent);
+}
+
+.author-detail-page .author-profile-bio {
+    color: #514b46;
+    font-size: 15px;
+    line-height: 1.8;
+}
+
+.author-detail-page .author-profile-bio p {
+    margin: 0 0 9px;
+}
+
+.author-detail-page .author-profile-bio p:last-child {
+    margin-bottom: 0;
+}
+
+.author-detail-page .blog-list-heading-row h2 {
+    overflow-wrap: anywhere;
+}
+
+.author-detail-page .author-posts-tools {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.author-detail-page .author-post-search {
+    margin: 0;
+}
+
+.author-detail-page .author-post-search-control {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 38px;
+    width: min(100%, 250px);
+    overflow: hidden;
+    border: 1px solid var(--index-border-strong);
+    border-radius: 8px;
+    background: var(--index-card);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.author-detail-page .author-post-search-control:focus-within {
+    border-color: rgba(186, 109, 60, 0.62);
+    box-shadow: 0 0 0 3px rgba(186, 109, 60, 0.1);
+}
+
+.author-detail-page .author-post-search-control input {
+    width: 100%;
+    min-width: 0;
+    height: 38px;
+    padding: 7px 10px;
+    border: 0;
+    background: transparent;
+    color: var(--index-ink);
+    font-size: 13px;
+    outline: 0;
+}
+
+.author-detail-page .author-post-search-control button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 38px;
+    padding: 0;
+    border: 0;
+    background: var(--index-accent);
+    color: #fff;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.author-detail-page .author-post-search-control button:hover,
+.author-detail-page .author-post-search-control button:focus {
+    background: var(--index-accent-dark);
+}
+
+.author-detail-page .author-search-clear {
+    color: var(--index-accent-dark);
+    font-size: 12px;
+    font-weight: 700;
+    text-decoration: none;
+}
+
+.author-detail-page .author-search-clear:hover,
+.author-detail-page .author-search-clear:focus {
+    color: var(--index-accent);
+}
+
+.author-detail-page .author-search-form {
+    margin-bottom: 14px;
+}
+
+.author-detail-page .author-search-control {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 42px;
+    overflow: hidden;
+    border: 1px solid var(--index-border-strong);
+    border-radius: 10px;
+    background: #fff;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.author-detail-page .author-search-control:focus-within {
+    border-color: rgba(186, 109, 60, 0.62);
+    box-shadow: 0 0 0 3px rgba(186, 109, 60, 0.1);
+}
+
+.author-detail-page .author-search-control input {
+    width: 100%;
+    min-width: 0;
+    height: 42px;
+    padding: 8px 12px;
+    border: 0;
+    background: transparent;
+    color: var(--index-ink);
+    outline: 0;
+}
+
+.author-detail-page .author-search-control button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 42px;
+    height: 42px;
+    padding: 0;
+    border: 0;
+    background: var(--index-accent);
+    color: #fff;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.author-detail-page .author-search-control button:hover,
+.author-detail-page .author-search-control button:focus {
+    background: var(--index-accent-dark);
+}
+
+.author-detail-page .author-directory-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--index-accent-dark);
+    font-size: 13px;
+    font-weight: 700;
+    text-decoration: none;
+}
+
+.author-detail-page .author-directory-link:hover,
+.author-detail-page .author-directory-link:focus {
+    color: var(--index-accent);
+}
+
+.author-detail-page .author-directory-link i {
+    font-size: 11px;
+    transition: transform 0.2s ease;
+}
+
+.author-detail-page .author-directory-link:hover i,
+.author-detail-page .author-directory-link:focus i {
+    transform: translateX(3px);
+}
+
+.author-detail-page .author-post-results {
+    position: relative;
+    scroll-margin-top: 24px;
+}
+
+.author-detail-page .author-post-async-status:empty {
+    display: none;
+}
+
+.author-detail-page .author-post-async-status.is-loading {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 14px;
+    color: var(--index-muted);
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+.author-detail-page .author-post-async-status.is-loading::before {
+    width: 14px;
+    height: 14px;
+    border: 2px solid var(--index-border-strong);
+    border-top-color: var(--index-accent);
+    border-radius: 50%;
+    animation: author-post-spin 0.8s linear infinite;
+    content: '';
+}
+
+.author-detail-page .author-post-results.is-loading .author-post-content {
+    opacity: 0.58;
+    transition: opacity 0.2s ease;
+}
+
+.author-detail-page .author-post-content #author-posts-heading:focus {
+    outline: 3px solid rgba(186, 109, 60, 0.32);
+    outline-offset: 5px;
+}
+
+.author-detail-page .author-post-load-error {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 14px;
+    margin: 0 0 18px;
+    padding: 12px 14px;
+    border: 1px solid #d58a73;
+    border-radius: 8px;
+    background: #fff4ef;
+    color: #6e2d1e;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.author-detail-page .author-post-load-error p {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.author-detail-page .author-post-retry {
+    padding: 6px 10px;
+    border: 1px solid #9e432c;
+    border-radius: 5px;
+    background: #9e432c;
+    color: #fff;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.author-detail-page .author-post-retry:hover,
+.author-detail-page .author-post-retry:focus-visible {
+    border-color: #7f321f;
+    background: #7f321f;
+    outline: 0;
+}
+
+@keyframes author-post-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+:root[data-theme='dark'] .author-detail-page .author-profile-bio {
+    color: var(--index-muted);
+}
+
+:root[data-theme='dark'] .author-detail-page .author-profile-image,
+:root[data-theme='dark'] .author-detail-page .author-search-control,
+:root[data-theme='dark'] .author-detail-page .author-post-search-control {
+    background: var(--index-card-soft);
+}
+
+:root[data-theme='dark'] .author-detail-page .author-post-load-error {
+    border-color: #a75d48;
+    background: #3d2824;
+    color: #ffd8cb;
+}
+
+@media (max-width: 767px) {
+    .author-detail-page .author-profile {
+        grid-template-columns: 112px minmax(0, 1fr);
+        align-items: start;
+        gap: 22px;
+        padding: 24px;
+    }
+
+    .author-detail-page .author-profile-image {
+        width: 112px;
+        height: 112px;
+    }
+
+    .author-detail-page .author-profile h1 {
+        font-size: 32px;
+    }
+}
+
+@media (max-width: 575px) {
+    .author-detail-page .author-profile {
+        grid-template-columns: 1fr;
+        justify-items: center;
+        gap: 18px;
+        margin-bottom: 30px;
+        padding: 21px 19px 23px;
+        border-radius: 13px;
+        text-align: center;
+    }
+
+    .author-detail-page .author-profile-content {
+        width: 100%;
+    }
+
+    .author-detail-page .author-profile-meta {
+        justify-content: center;
+    }
+
+    .author-detail-page .author-profile-bio {
+        text-align: left;
+    }
+
+    .author-detail-page .blog-list-count {
+        white-space: normal;
+    }
+
+    .author-detail-page .author-posts-tools {
+        justify-content: flex-start;
+        width: 100%;
+    }
+
+    .author-detail-page .author-post-search,
+    .author-detail-page .author-post-search-control {
+        width: 100%;
+    }
+
+    .author-detail-page .author-post-load-error {
+        align-items: flex-start;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .author-detail-page .author-search-control,
+    .author-detail-page .author-search-control button,
+    .author-detail-page .author-post-search-control,
+    .author-detail-page .author-post-search-control button,
+    .author-detail-page .author-directory-link i,
+    .author-detail-page .author-post-results.is-loading .author-post-content {
+        transition: none;
+    }
+
+    .author-detail-page .author-post-async-status.is-loading::before {
+        animation: none;
+    }
+}

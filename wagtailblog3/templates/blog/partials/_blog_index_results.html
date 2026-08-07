@@ -1,0 +1,187 @@
+{% load wagtailcore_tags wagtailimages_tags static %}
+
+<section class="filters-section" aria-labelledby="blog-filter-title">
+    <div class="filter-card-header">
+        <div>
+            <span class="filter-card-eyebrow">FIND ARTICLES</span>
+            <h2 id="blog-filter-title"><i class="fa fa-sliders" aria-hidden="true"></i> 筛选与排序</h2>
+            <p>按标题、发布日期和阅读顺序快速查找文章。</p>
+        </div>
+        {% if has_active_filters %}
+            <a class="filter-clear-link" href="{% pageurl page %}">
+                <i class="fa fa-undo" aria-hidden="true"></i> 清除筛选
+            </a>
+        {% endif %}
+    </div>
+
+    <form method="get" action="{% pageurl page %}" id="blog_filter_form" class="filter-form" role="search">
+        <div class="filter-grid">
+            <div class="filter-field filter-field--search">
+                <label for="blog_search">文章标题</label>
+                <div class="filter-input-wrap">
+                    <i class="fa fa-search" aria-hidden="true"></i>
+                    <input type="search" name="search" id="blog_search" value="{{ search_query }}" placeholder="输入标题关键词…" class="form-control">
+                </div>
+            </div>
+
+            <div class="filter-field">
+                <label for="start_date_filter">开始日期</label>
+                <input type="date" name="start_date" id="start_date_filter" value="{{ start_date }}" class="form-control">
+            </div>
+            <div class="filter-field">
+                <label for="end_date_filter">结束日期</label>
+                <input type="date" name="end_date" id="end_date_filter" value="{{ end_date }}" class="form-control">
+            </div>
+
+            <div class="filter-field">
+                <label for="sort_primary">主要排序</label>
+                <select name="sort_primary" id="sort_primary" class="form-control">
+                    <option value="date_desc"{% if sort_primary == 'date_desc' %} selected{% endif %}>时间：新 → 旧</option>
+                    <option value="date_asc"{% if sort_primary == 'date_asc' %} selected{% endif %}>时间：旧 → 新</option>
+                    <option value="title_asc"{% if sort_primary == 'title_asc' %} selected{% endif %}>标题：A → Z</option>
+                    <option value="title_desc"{% if sort_primary == 'title_desc' %} selected{% endif %}>标题：Z → A</option>
+                </select>
+            </div>
+
+            <div class="filter-field">
+                <label for="sort_secondary">次要排序</label>
+                <select name="sort_secondary" id="sort_secondary" class="form-control">
+                    {% for value, label in secondary_sort_options %}
+                        <option value="{{ value }}"{% if sort_secondary == value %} selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="filter-actions">
+                <button type="submit" class="filter-submit">
+                    <i class="fa fa-filter" aria-hidden="true"></i> 应用筛选
+                </button>
+            </div>
+        </div>
+    </form>
+</section>
+
+<section class="blog-list-section" aria-labelledby="blog-list-heading">
+    <div class="blog-list-heading-row">
+        <div>
+            <span class="blog-list-eyebrow">LATEST WRITING</span>
+            <h2 id="blog-list-heading" tabindex="-1">文章列表</h2>
+        </div>
+        <span class="blog-list-count">
+            {% if total_results %}
+                第 {{ page_obj.start_index }}-{{ page_obj.end_index }} 项，共 {{ total_results }} 项
+            {% else %}
+                共 0 项
+            {% endif %}
+        </span>
+    </div>
+
+    <div class="blog-list-items">
+        {% for post in blog_pages %}
+            <article class="post-list-item">
+                {% if post.specific.featured_image %}
+                    <a class="post-card-image post-card-image--actual" href="{% pageurl post %}" aria-label="阅读 {{ post.title }}">
+                        {% image post.specific.featured_image width-420 as img %}
+                        <img src="{{ img.url }}" alt="{{ post.title }}" width="{{ img.width }}" height="{{ img.height }}">
+                    </a>
+                {% else %}
+                    <a class="post-card-image post-card-image--fallback" href="{% pageurl post %}" aria-label="阅读 {{ post.title }}">
+                        <img src="{% static 'gretzia/images/resource/news-15.jpg' %}" alt="{{ post.title }}">
+                    </a>
+                {% endif %}
+
+                <div class="post-card-content">
+                    <h3 class="post-card-title"><a href="{% pageurl post %}">{{ post.title }}</a></h3>
+
+                    <div class="post-meta-info">
+                        {% with authors=post.specific.authors.all %}
+                            {% if authors %}
+                                <span class="author">
+                                    <i class="fa fa-user" aria-hidden="true"></i>
+                                    {% for author in authors %}
+                                        <a href="{% url 'blog:author_detail' pk=author.pk %}">{{ author.name }}</a>{% if not forloop.last %}, {% endif %}
+                                    {% endfor %}
+                                </span>
+                            {% endif %}
+                        {% endwith %}
+
+                        <span class="date">
+                            <i class="fa fa-calendar" aria-hidden="true"></i>{{ post.specific.date|date:"Y-m-d" }}
+                        </span>
+
+                        {% include "blog/stats_block.html" with page=post %}
+
+                        {% with specific=post.specific %}
+                            {% with tags=specific.tags.all %}
+                                {% if tags %}
+                                    <div class="post-tags-row" aria-label="文章标签">
+                                        <i class="fa fa-tags post-tags-icon" aria-hidden="true"></i>
+                                        <div class="post-tags-list">
+                                            {% for tag in tags %}
+                                                {% if blog_tag_index_page %}
+                                                    <a class="post-tag" href="{% pageurl blog_tag_index_page %}?tag={{ tag.slug }}">{{ tag.name }}</a>
+                                                {% else %}
+                                                    <span class="post-tag">{{ tag.name }}</span>
+                                                {% endif %}
+                                            {% endfor %}
+                                        </div>
+                                    </div>
+                                {% endif %}
+                            {% endwith %}
+                        {% endwith %}
+                    </div>
+
+                    <div class="post-card-summary">
+                        <p>{{ post.specific.intro|striptags|truncatechars:180 }}</p>
+                    </div>
+
+                    <a href="{% pageurl post %}" class="post-card-link">
+                        阅读全文 <i class="fa fa-long-arrow-right" aria-hidden="true"></i>
+                    </a>
+                </div>
+            </article>
+        {% empty %}
+            <div class="blog-list-empty">
+                <i class="fa fa-search" aria-hidden="true"></i>
+                <h3>没有找到符合条件的文章</h3>
+                <p>请尝试调整关键词、日期范围或排序方式。</p>
+                <a class="filter-clear-link" href="{% pageurl page %}">查看全部文章</a>
+            </div>
+        {% endfor %}
+    </div>
+</section>
+
+{% if page_obj.paginator.num_pages > 1 %}
+    <nav class="custom-pagination" aria-label="文章分页">
+        {% if page_obj.has_previous %}
+            <a href="?page={{ page_obj.previous_page_number }}{% if search_query %}&amp;search={{ search_query|urlencode }}{% endif %}{% if start_date %}&amp;start_date={{ start_date }}{% endif %}{% if end_date %}&amp;end_date={{ end_date }}{% endif %}&amp;sort_primary={{ sort_primary }}&amp;sort_secondary={{ sort_secondary }}" class="pagination-button" rel="prev">
+                <i class="fa fa-angle-left" aria-hidden="true"></i> 上一页
+            </a>
+        {% else %}
+            <span class="pagination-button is-disabled" aria-disabled="true"><i class="fa fa-angle-left" aria-hidden="true"></i> 上一页</span>
+        {% endif %}
+
+        <span class="pagination-info-text">第 <strong>{{ page_obj.number }}</strong> 页，共 {{ page_obj.paginator.num_pages }} 页</span>
+
+        {% if page_obj.has_next %}
+            <a href="?page={{ page_obj.next_page_number }}{% if search_query %}&amp;search={{ search_query|urlencode }}{% endif %}{% if start_date %}&amp;start_date={{ start_date }}{% endif %}{% if end_date %}&amp;end_date={{ end_date }}{% endif %}&amp;sort_primary={{ sort_primary }}&amp;sort_secondary={{ sort_secondary }}" class="pagination-button" rel="next">
+                下一页 <i class="fa fa-angle-right" aria-hidden="true"></i>
+            </a>
+        {% else %}
+            <span class="pagination-button is-disabled" aria-disabled="true">下一页 <i class="fa fa-angle-right" aria-hidden="true"></i></span>
+        {% endif %}
+
+        {% if page_obj.paginator.num_pages > 2 %}
+            <form method="get" action="{% pageurl page %}" class="pagination-jump-form">
+                {% if search_query %}<input type="hidden" name="search" value="{{ search_query }}">{% endif %}
+                {% if start_date %}<input type="hidden" name="start_date" value="{{ start_date }}">{% endif %}
+                {% if end_date %}<input type="hidden" name="end_date" value="{{ end_date }}">{% endif %}
+                <input type="hidden" name="sort_primary" value="{{ sort_primary }}">
+                <input type="hidden" name="sort_secondary" value="{{ sort_secondary }}">
+                <label for="blog-index-jumptopage">跳转到</label>
+                <input type="number" name="page" id="blog-index-jumptopage" min="1" max="{{ page_obj.paginator.num_pages }}" placeholder="页" required>
+                <button type="submit">确定</button>
+            </form>
+        {% endif %}
+    </nav>
+{% endif %}

@@ -4,6 +4,7 @@ from datetime import datetime
 
 from django.db.models.functions import Coalesce, Lower
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 from django.core.paginator import EmptyPage, PageNotAnInteger, Paginator
 from django.db import models
 from django import forms
@@ -234,6 +235,29 @@ class BlogCategory(models.Model):
 		verbose_name_plural = "博客分类"
 
 
+BLOG_INDEX_ITEMS_PER_PAGE = 20
+BLOG_INDEX_DEFAULT_SORT_PRIMARY = 'date_desc'
+BLOG_INDEX_DEFAULT_SORT_SECONDARY = 'title_asc'
+BLOG_INDEX_SORT_FIELDS = {
+	'date_asc': 'sort_date',
+	'date_desc': '-sort_date',
+	'title_asc': 'sort_title',
+	'title_desc': '-sort_title',
+}
+
+
+def _normalise_blog_index_date(value):
+	"""Return a valid ISO date string and parsed date, or empty values."""
+	value = (value or '').strip()
+	if not value:
+		return '', None
+	try:
+		parsed_value = parse_date(value)
+	except ValueError:
+		parsed_value = None
+	return (value, parsed_value) if parsed_value else ('', None)
+
+
 # 博客索引页面
 class BlogIndexPage(Page):
 	"""博客索引页面"""
@@ -255,26 +279,37 @@ class BlogIndexPage(Page):
 		FieldPanel('featured_image'),
 	]
 	
-	def get_context(self, request):
-		"""
-		更新上下文。
-		使用数据库注解(Annotation)实现对不同类型子页面的高性能筛选和排序，
-		从根本上解决 FieldError。
-		"""
-		context = super().get_context(request)
-		
-		# --- 参数获取 ---
-		search_query = request.GET.get('search', '')
-		start_date_str = request.GET.get('start_date', '')
-		end_date_str = request.GET.get('end_date', '')
-		page_number = request.GET.get('page')
-		sort_primary = request.GET.get('sort_primary', 'date_desc')
-		sort_secondary = request.GET.get('sort_secondary', 'title_asc')
-		
-		# --- 核心优化：数据库注解 ---
-		
-		# 1. 为每种带 'date' 字段的子页面类型准备一个子查询
-		#    OuterRef('pk') 指的是父查询（Page）的主键
+	def get_listing_context(self, query_params):
+		"""Build the filtered child-page listing used by HTML and JSON views."""
+		search_query = (query_params.get('search') or '').strip()
+		start_date_str, start_date = _normalise_blog_index_date(
+			query_params.get('start_date')
+		)
+		end_date_str, end_date = _normalise_blog_index_date(
+			query_params.get('end_date')
+		)
+
+		sort_primary = query_params.get(
+			'sort_primary', BLOG_INDEX_DEFAULT_SORT_PRIMARY
+		)
+		if sort_primary not in BLOG_INDEX_SORT_FIELDS:
+			sort_primary = BLOG_INDEX_DEFAULT_SORT_PRIMARY
+
+		if sort_primary.startswith('date_'):
+			secondary_sort_options = (
+				('title_asc', '标题 (A→Z)'),
+				('title_desc', '标题 (Z→A)'),
+			)
+		else:
+			secondary_sort_options = (
+				('date_desc', '时间 (新→旧)'),
+				('date_asc', '时间 (旧→新)'),
+			)
+		valid_secondary_values = {value for value, _ in secondary_sort_options}
+		sort_secondary = query_params.get('sort_secondary')
+		if sort_secondary not in valid_secondary_values:
+			sort_secondary = secondary_sort_options[0][0]
+
 		blog_page_date_subquery = Subquery(
 			BlogPage.objects.filter(page_ptr_id=OuterRef('pk')).values('date')[:1]
 		)
@@ -282,73 +317,55 @@ class BlogIndexPage(Page):
 			BlogIndexPage.objects.filter(page_ptr_id=OuterRef('pk')).values('date')[:1]
 		)
 		
-		# 2. 开始构建惰性查询集，并使用 annotate 添加虚拟字段
-		child_pages = self.get_children().live().annotate(
-			# a. 创建 'sort_date' 虚拟字段：
-			#    使用 Coalesce 函数按顺序查找可用的日期，这会生成高效的 SQL CASE WHEN 语句
+		child_pages = self.get_children().live().public().annotate(
 			sort_date=Coalesce(
 				blog_page_date_subquery,
 				blog_index_page_date_subquery,
-				F('first_published_at'),  # 最后的备用选项
+				F('first_published_at'),
 				output_field=models.DateField()
 			),
-			
-			# b. 创建 'sort_title' 虚拟字段，并转换为小写以便排序
 			sort_title=Lower('title')
 		)
-		
-		# --- 数据库层面的筛选 (现在可以安全地使用了) ---
+
 		if search_query:
 			child_pages = child_pages.filter(title__icontains=search_query)
-		
-		# 【关键】现在我们可以直接在注解后的虚拟字段上进行过滤，不会再报错
-		if start_date_str:
-			child_pages = child_pages.filter(sort_date__gte=datetime.strptime(start_date_str, '%Y-%m-%d').date())
-		if end_date_str:
-			child_pages = child_pages.filter(sort_date__lte=datetime.strptime(end_date_str, '%Y-%m-%d').date())
-		
-		# --- 数据库层面的排序 ---
-		valid_sort_fields = {
-			'date_asc': 'sort_date',
-			'date_desc': '-sort_date',
-			'title_asc': 'sort_title',
-			'title_desc': '-sort_title',
-		}
-		
-		ordering = []
-		if sort_primary in valid_sort_fields:
-			ordering.append(valid_sort_fields[sort_primary])
-		if sort_secondary in valid_sort_fields and valid_sort_fields[sort_secondary].strip('-') != valid_sort_fields[
-			sort_primary].strip('-'):
-			ordering.append(valid_sort_fields[sort_secondary])
-		
-		if ordering:
-			child_pages = child_pages.order_by(*ordering)
-		
-		# --- 高效分页 ---
-		paginator = Paginator(child_pages, 20)
-		try:
-			paginated_pages = paginator.page(page_number)
-		except PageNotAnInteger:
-			paginated_pages = paginator.page(1)
-		except EmptyPage:
-			paginated_pages = paginator.page(paginator.num_pages)
-		
-		# --- 更新上下文 ---
-		# 在获取了分页结果后，再调用.specific()，开销最小
-		context['blog_pages'] = paginated_pages.object_list.specific()
-		context['search_query'] = search_query
-		context['start_date'] = start_date_str
-		context['end_date'] = end_date_str
-		context['sort_primary'] = sort_primary
-		context['sort_secondary'] = sort_secondary
-		context['page_obj'] = paginated_pages
-		
+		if start_date:
+			child_pages = child_pages.filter(sort_date__gte=start_date)
+		if end_date:
+			child_pages = child_pages.filter(sort_date__lte=end_date)
 
-		# ✅ 可选：传入页面类型映射，模板可按类型差异化渲染
-		# 也可以直接在模板用 post.specific_class.__name__ 判断
-		context['blog_tag_index_page'] = BlogTagIndexPage.objects.live().first()
-		
+		child_pages = child_pages.order_by(
+			BLOG_INDEX_SORT_FIELDS[sort_primary],
+			BLOG_INDEX_SORT_FIELDS[sort_secondary],
+			'pk',
+		)
+
+		paginator = Paginator(child_pages, BLOG_INDEX_ITEMS_PER_PAGE)
+		page_obj = paginator.get_page(query_params.get('page'))
+
+		return {
+			'blog_pages': page_obj.object_list.specific(),
+			'search_query': search_query,
+			'start_date': start_date_str,
+			'end_date': end_date_str,
+			'sort_primary': sort_primary,
+			'sort_secondary': sort_secondary,
+			'secondary_sort_options': secondary_sort_options,
+			'page_obj': page_obj,
+			'total_results': paginator.count,
+			'has_active_filters': bool(
+				search_query
+				or start_date_str
+				or end_date_str
+				or sort_primary != BLOG_INDEX_DEFAULT_SORT_PRIMARY
+				or sort_secondary != BLOG_INDEX_DEFAULT_SORT_SECONDARY
+			),
+			'blog_tag_index_page': BlogTagIndexPage.objects.live().public().first(),
+		}
+
+	def get_context(self, request):
+		context = super().get_context(request)
+		context.update(self.get_listing_context(request.GET))
 		return context
 	
 	class Meta:

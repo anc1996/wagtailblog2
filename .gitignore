@@ -34,3 +34,8 @@ staticfiles_collected/
 # Local debugging / rollback artifacts
 .ai-fix-backups/
 wagtailblog3/static/wagtail_ai/
+
+# 本地运维、代码检查和浏览器验证产物
+/ops/
+/.codemoss/
+/output/

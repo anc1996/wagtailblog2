@@ -1,0 +1,127 @@
+{% load static wagtailcore_tags wagtailimages_tags %}
+
+<section class="blog-list-section" aria-labelledby="author-posts-heading">
+    <div class="blog-list-heading-row">
+        <div>
+            <span class="blog-list-eyebrow">LATEST WRITING</span>
+            <h2 id="author-posts-heading" tabindex="-1">{{ author.name }} 的文章{% if search_query %}搜索结果{% endif %}</h2>
+        </div>
+        <div class="author-posts-tools">
+            <form method="get" action="{% url 'blog:author_detail' pk=author.pk %}" class="author-post-search" role="search">
+                <label class="sr-only" for="author-post-search">在 {{ author.name }} 的文章中搜索</label>
+                <div class="author-post-search-control">
+                    <input type="search" name="q" id="author-post-search" value="{{ search_query }}" placeholder="搜索该作者的文章标题">
+                    <button type="submit" aria-label="搜索文章"><i class="fa fa-search" aria-hidden="true"></i></button>
+                </div>
+            </form>
+            {% if search_query %}
+                <span class="blog-list-count">找到 {{ total_posts }} 篇</span>
+                <a class="author-search-clear" href="{% url 'blog:author_detail' pk=author.pk %}">清除搜索</a>
+            {% elif total_posts %}
+                <span class="blog-list-count">
+                    第 {{ page_obj.start_index }}-{{ page_obj.end_index }} 篇，共 {{ total_posts }} 篇
+                </span>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="blog-list-items">
+        {% for post in blog_posts %}
+            <article class="post-list-item">
+                {% if post.featured_image %}
+                    <a class="post-card-image post-card-image--actual" href="{% pageurl post %}" aria-label="阅读 {{ post.title }}">
+                        {% image post.featured_image width-420 as post_img %}
+                        <img src="{{ post_img.url }}" alt="{{ post.title }}" width="{{ post_img.width }}" height="{{ post_img.height }}">
+                    </a>
+                {% else %}
+                    <a class="post-card-image post-card-image--fallback" href="{% pageurl post %}" aria-label="阅读 {{ post.title }}">
+                        <img src="{% static 'gretzia/images/resource/news-15.jpg' %}" alt="{{ post.title }}">
+                    </a>
+                {% endif %}
+
+                <div class="post-card-content">
+                    <h3 class="post-card-title"><a href="{% pageurl post %}">{{ post.title }}</a></h3>
+
+                    <div class="post-meta-info">
+                        <span class="date">
+                            <i class="fa fa-calendar" aria-hidden="true"></i>
+                            <time datetime="{{ post.date|date:'Y-m-d' }}">{{ post.date|date:"Y-m-d" }}</time>
+                        </span>
+
+                        {% with tags=post.tags.all %}
+                            {% if tags %}
+                                <div class="post-tags-row" aria-label="文章标签">
+                                    <i class="fa fa-tags post-tags-icon" aria-hidden="true"></i>
+                                    <div class="post-tags-list">
+                                        {% for tag in tags %}
+                                            <span class="post-tag">{{ tag.name }}</span>
+                                        {% endfor %}
+                                    </div>
+                                </div>
+                            {% endif %}
+                        {% endwith %}
+                    </div>
+
+                    {% if post.intro %}
+                        <div class="post-card-summary">
+                            <p>{{ post.intro|striptags|truncatechars:180 }}</p>
+                        </div>
+                    {% endif %}
+
+                    <a href="{% pageurl post %}" class="post-card-link">
+                        阅读全文 <i class="fa fa-long-arrow-right" aria-hidden="true"></i>
+                    </a>
+                </div>
+            </article>
+        {% empty %}
+            <div class="blog-list-empty">
+                <i class="fa fa-file-text-o" aria-hidden="true"></i>
+                <h3>暂时没有文章</h3>
+                {% if search_query %}
+                    <p>没有找到标题包含“{{ search_query }}”的文章。</p>
+                    <a href="{% url 'blog:author_detail' pk=author.pk %}">查看全部文章</a>
+                {% else %}
+                    <p>这位作者还没有发表任何公开文章。</p>
+                    <a href="{% url 'blog:author_list' %}">浏览其他作者</a>
+                {% endif %}
+            </div>
+        {% endfor %}
+    </div>
+</section>
+
+{% if is_paginated %}
+    <nav class="custom-pagination" aria-label="作者文章分页">
+        {% if page_obj.has_previous %}
+            <a href="?page={{ page_obj.previous_page_number }}{% if search_query %}&amp;q={{ search_query|urlencode }}{% endif %}" class="pagination-button" rel="prev">
+                <i class="fa fa-angle-left" aria-hidden="true"></i> 上一页
+            </a>
+        {% else %}
+            <span class="pagination-button is-disabled" aria-disabled="true">
+                <i class="fa fa-angle-left" aria-hidden="true"></i> 上一页
+            </span>
+        {% endif %}
+
+        <span class="pagination-info-text">
+            第 <strong>{{ page_obj.number }}</strong> 页，共 {{ paginator.num_pages }} 页
+        </span>
+
+        {% if page_obj.has_next %}
+            <a href="?page={{ page_obj.next_page_number }}{% if search_query %}&amp;q={{ search_query|urlencode }}{% endif %}" class="pagination-button" rel="next">
+                下一页 <i class="fa fa-angle-right" aria-hidden="true"></i>
+            </a>
+        {% else %}
+            <span class="pagination-button is-disabled" aria-disabled="true">
+                下一页 <i class="fa fa-angle-right" aria-hidden="true"></i>
+            </span>
+        {% endif %}
+
+        {% if paginator.num_pages > 2 %}
+            <form method="get" action="{% url 'blog:author_detail' pk=author.pk %}" class="pagination-jump-form">
+                {% if search_query %}<input type="hidden" name="q" value="{{ search_query }}">{% endif %}
+                <label for="author-jumptopage">跳转到</label>
+                <input type="number" name="page" id="author-jumptopage" min="1" max="{{ paginator.num_pages }}" placeholder="页" required>
+                <button type="submit">确定</button>
+            </form>
+        {% endif %}
+    </nav>
+{% endif %}

@@ -1,5 +1,12 @@
 # wagtailblog2 协作与发布指令
 
+## Playwright 调试产物规范
+
+- Playwright 截图、trace、视频、PDF、HAR、HTML snapshot/report 及浏览器调试日志等产物，统一写入 `output/playwright/`。
+- 可按任务建立子目录，例如 `output/playwright/<task-name>/`；不得在仓库顶层新建其他 Playwright 产物目录。
+- `output/` 为本地调试输出目录并保持 Git ignored；Playwright 产物不得提交、推送到 GitHub 或同步部署到生产服务器。
+- 清理调试产物前先确认是否仍需作为问题复现证据，避免删除必要的 trace、截图或报告。
+
 ## 目标与优先级
 
 作为本仓库的全栈协作智能体，延续现有 Django/Wagtail 架构并完成调研、设计、实现、

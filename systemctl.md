@@ -1,13 +1,20 @@
-# WagtailBlog3 生产维护手册
+# WagtailBlog3 测试与生产维护手册
 
-本文档对应生产服务器 `192.168.20.2` 的当前部署方式。项目目录为
-`/home/source/Django/wagtail/wagtailblog3`，Conda 环境为
-`/root/anaconda3/envs/wagtailblog`。应用由 systemd 管理，不使用
-`start.sh` 或 Django `runserver`。
+本文档记录同一套 `main` 分支代码在测试电脑和生产服务器上的启动、停止、
+健康检查与回滚方式。环境差异只允许存在于未跟踪的环境文件、运行目录和服务配置中，
+不得通过修改 `settings/base.py` 或维护不同代码分支制造环境差异。
+
+- 测试项目：`/mnt/f/openclaw/workspace/wagtail/wagtailblog2`（Windows 路径为
+  `F:\openclaw\workspace\wagtail\wagtailblog2`），Conda 环境为
+  `/root/anaconda3/envs/wagtailblog-test`；
+- 生产项目：`/home/source/Django/wagtail/wagtailblog3`，Conda 环境为
+  `/root/anaconda3/envs/wagtailblog`；
+- 测试网站默认由维护人员在 WSL 中使用 Django `runserver` 启动；
+- 生产应用必须由 systemd 管理，不使用 `start.sh` 或 Django `runserver`。
 
 ## 服务拓扑
 
-浏览器访问 `http://192.168.20.2:6050`，宝塔 Nginx 监听 6050，并通过
+生产入口由 Nginx 监听 6050，并通过
 `/home/source/Django/wagtail/wagtailblog3/wagtailblog3.sock` 转发给 uWSGI。
 uWSGI 的 6051 是仅供本机诊断的 HTTP 端口，不作为对外入口。
 
@@ -22,10 +29,16 @@ uWSGI 的 6051 是仅供本机诊断的 HTTP 端口，不作为对外入口。
 
 ## 分支与环境配置
 
-测试代码仓库固定使用 `test` 分支，目录为
-`/mnt/f/openclaw/workspace/wagtail/wagtailblog2`；生产代码仓库固定使用 `main`
-分支，目录为 `/home/source/Django/wagtail/wagtailblog3`。两条分支的已跟踪源码应保持
-一致，环境差异只能存在于未跟踪的环境文件和运行目录中。
+测试和生产代码仓库都固定使用 `main` 分支。部署或启动前分别执行：
+
+```bash
+git branch --show-current
+git rev-parse --short HEAD
+git status --short --branch
+```
+
+只有通过测试的精确 commit 才能部署到生产。不得部署未提交的工作区内容，也不得
+因为环境不同而直接修改 `settings/base.py`。
 
 数据库、Redis、MongoDB、MinIO、Wagtail Elasticsearch、SMTP 和 Django 密钥统一放在：
 
@@ -34,18 +47,30 @@ wagtailblog3/settings/.env.test
 wagtailblog3/settings/.env.production
 ```
 
-这两个文件已加入 `.gitignore`，仓库只提交 `wagtailblog3/settings/.env.example`。
+测试电脑只保留 `.env.test`，生产服务器只保留 `.env.production`。这两个文件已加入
+`.gitignore`，仓库只提交 `wagtailblog3/settings/.env.example`。
 所有入口继续使用 `wagtailblog3.settings.dev`，因为测试和生产都由同一用户维护，
 都需要保留当前开发/调试行为。`WAGTAILBLOG_ENV=test|production` 只负责让
-`settings/base.py` 选择对应的基础设施环境文件。生产 systemd unit 应使用：
+`settings/base.py` 选择对应的基础设施环境文件；它不会根据两个文件谁存在而自动判断环境。
+
+- 未设置 `WAGTAILBLOG_ENV` 时默认选择 `.env.test`；
+- `WAGTAILBLOG_ENV=test` 时只读取 `.env.test`；
+- `WAGTAILBLOG_ENV=production` 时只读取 `.env.production`；
+- 生产模式缺少 `.env.production` 时拒绝启动；
+- 两个文件即使同时存在，也只读取 `WAGTAILBLOG_ENV` 指定的一个；
+- 由于 `load_dotenv(..., override=False)`，进程或 systemd 已提供的变量优先于文件内容。
+
+生产 systemd unit 使用：
 
 ```ini
 EnvironmentFile=/home/source/Django/wagtail/wagtailblog3/wagtailblog3/settings/.env.production
 ```
 
-现有根目录 `observability.env` 在服务尚未迁移前继续保留；迁移 Filebeat 和日志变量后，
-应删除 unit 对它的依赖，并执行 `systemctl daemon-reload`。不得在 `database.py` 或
-`email.py` 中重新写入环境专用值。
+旧版根目录 `observability.env` 已于 2026-08-08 从生产项目移出，其日志环境变量已统一
+由 `wagtailblog3/settings/.env.production` 提供。可恢复备份位于
+`/home/source/Django/wagtail/backups/wagtailblog3-observability-env-retired-20260808/`；
+不得重新让 systemd unit 引用该旧文件，也不得在 `database.py`、`email.py` 或其他源码中
+写入环境专用值或凭据。
 
 ## 服务变更登记规则
 
@@ -81,7 +106,123 @@ Elasticsearch 与 Kibana 由 Docker 管理，Elasticsearch 容器设置为
 Redis 中没有历史邮件任务，并明确需要处理这些任务。当前 Worker 只监听
 `maintenance` 队列。
 
-## 常用命令
+## 测试环境启动
+
+测试环境当前在 Windows 的 WSL 中运行，使用 Conda 环境 `wagtailblog-test`，只允许
+保留 `wagtailblog3/settings/.env.test`。测试网站、Worker 和 Beat 当前不由仓库内的
+systemd unit 管理，需要在不同终端前台启动；关闭对应终端或按 `Ctrl+C` 即可停止。
+
+每个终端先执行公共准备步骤：
+
+```bash
+wsl
+cd /mnt/f/openclaw/workspace/wagtail/wagtailblog2
+source /root/anaconda3/bin/activate wagtailblog-test
+
+test "$(git branch --show-current)" = "main"
+test -f wagtailblog3/settings/.env.test
+test ! -f wagtailblog3/settings/.env.production
+export WAGTAILBLOG_ENV=test
+
+python manage.py check
+```
+
+启动测试网站：
+
+```bash
+python manage.py runserver 0.0.0.0:8000
+```
+
+浏览器访问 `http://127.0.0.1:8000/`，后台登录页为
+`http://127.0.0.1:8000/admin/login/`。若 8000 已被占用，先定位占用进程，不要通过
+反复启动制造多个测试实例。
+
+需要验证异步维护任务时，在第二个终端完成公共准备步骤后启动只监听
+`maintenance` 队列的 Worker：
+
+```bash
+python -m celery -A wagtailblog3 worker \
+  --loglevel=INFO \
+  --queues=maintenance \
+  --hostname=maintenance@test \
+  --concurrency=1
+```
+
+需要验证定时任务和失败补偿时，在第三个终端完成公共准备步骤后启动 Beat：
+
+```bash
+python -m celery -A wagtailblog3 beat --loglevel=INFO
+```
+
+测试 Filebeat 只有在已安装并核对 `ops/filebeat/wagtailblog-test.service`、生成的
+Filebeat 配置、Elasticsearch 地址以及数据/日志目录后才能启用。该服务不是启动
+Django 网站的前置条件。修改或安装该 unit 后必须执行：
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now wagtailblog-test.service
+sudo systemctl is-active wagtailblog-test.service
+sudo systemctl is-enabled wagtailblog-test.service
+```
+
+测试环境停止顺序为 Beat、Worker、网站；前台进程均使用 `Ctrl+C` 优雅停止。
+
+## 生产环境启动
+
+生产环境只允许保留 `wagtailblog3/settings/.env.production`，并必须由 systemd 在进程
+启动前提供 `WAGTAILBLOG_ENV=production` 和对应的 `EnvironmentFile`。不得在生产环境
+使用 `runserver`，不得手动执行 `start.sh`，也不得临时修改 `base.py` 选择环境。
+
+首次安装、unit 文件或环境文件引用发生变化时执行：
+
+```bash
+systemctl daemon-reload
+systemctl enable \
+  wagtailblog3.service \
+  wagtailblog3-celery-maintenance.service \
+  wagtailblog3-celery-beat.service \
+  wagtailblog3-filebeat.service
+```
+
+启动前检查代码和环境文件，不输出环境文件内容：
+
+```bash
+cd /home/source/Django/wagtail/wagtailblog3
+test "$(git branch --show-current)" = "main"
+git status --short --branch
+test -f wagtailblog3/settings/.env.production
+test ! -f wagtailblog3/settings/.env.test
+test "$(stat -c '%a' wagtailblog3/settings/.env.production)" = "600"
+
+set -a
+. ./wagtailblog3/settings/.env.production
+set +a
+test "$WAGTAILBLOG_ENV" = "production"
+/root/anaconda3/envs/wagtailblog/bin/python manage.py check
+```
+
+确认 MySQL、MongoDB、Redis、MinIO、Docker 和 Elasticsearch 等依赖健康后，按照依赖
+顺序启动应用服务：
+
+```bash
+systemctl start wagtailblog3.service
+systemctl start wagtailblog3-celery-maintenance.service
+systemctl start wagtailblog3-celery-beat.service
+systemctl start wagtailblog3-filebeat.service
+```
+
+Nginx 只有在自身未运行或配置发生变化时才启动或重载：
+
+```bash
+nginx -t
+systemctl start nginx.service
+# 仅在配置已验证且发生变化时：systemctl reload nginx.service
+```
+
+停止应用时使用相反顺序，先停止生产流量或进入维护窗口，再停止 Filebeat、Beat、
+Worker 和网站；不要为了处理短暂的 Elasticsearch 连接失败连续重启 Filebeat。
+
+## 生产服务常用命令
 
 以下命令可在任意目录以 root 执行：
 
@@ -172,16 +313,22 @@ curl -I -H 'Host: wagtailblog.docs' http://127.0.0.1:6050/admin/login/
 
 ## 发布与静态文件
 
-生产环境采用文件清单部署，不对生产目录执行 `git pull` 或 `rsync --delete`。
-部署必须保留生产的 `wagtailblog3/settings/.env.production`、旧版 `observability.env`（在
-所有 unit 完成迁移前）、
-`logs/`、`media/` 和 socket 文件。
+当前测试和生产目录都按 Git 工作树维护，并使用 `main` 分支。每次部署仍必须先重新
+确认生产目录确实是干净且安全的 Git 工作树、远程地址正确，并确定测试通过的精确
+commit；不得直接对未知状态的生产目录执行 `git pull`，不得使用 `rsync --delete`。
+如果生产目录不再是 Git 工作树，则退回经过校验的文件清单部署方式。
+
+无论采用 Git 还是文件清单部署，都必须保留生产的
+`wagtailblog3/settings/.env.production`、`logs/`、`media/`、静态文件目录和运行时
+socket/PID 路径。旧版 `observability.env` 只能保留在生产备份目录中，不得重新复制到
+项目根目录。环境文件、凭据、日志、媒体和运行数据不得进入 Git。
 
 生产备份统一存放在 `/home/source/Django/wagtail/backups/`：
 
 - MySQL、MongoDB 备份文件直接放在该目录；
 - 应用回滚文件使用 `wagtailblog3-YYYYMMDD-HHMMSS/` 子目录；
-- 本次部署回滚点为 `/home/source/Django/wagtail/backups/wagtailblog3-20260808-122400/`；
+- 当前已验证部署的回滚点为
+  `/home/source/Django/wagtail/backups/wagtailblog3-20260808-190106/`；
 - 备份目录禁止使用 `--delete` 全量同步，回滚前先校验文件清单和校验和。
 
 代码切换后，在项目目录执行：
@@ -194,7 +341,14 @@ set +a
 /root/anaconda3/envs/wagtailblog/bin/python manage.py check
 /root/anaconda3/envs/wagtailblog/bin/python manage.py collectstatic --noinput
 systemctl restart wagtailblog3.service
+systemctl restart wagtailblog3-celery-maintenance.service
+systemctl restart wagtailblog3-celery-beat.service
+systemctl restart wagtailblog3-filebeat.service
 ```
+
+只有本次修改确实影响对应组件时才重启该组件；Nginx 配置未变化时不重载 Nginx。
+执行迁移前必须另行确认迁移计划、数据库备份和回滚兼容性，不能把迁移混入普通
+代码启动命令。
 
 迁移、索引创建、数据库恢复、日志清理和页面发布都会改变生产数据，必须在明确
 授权后单独执行。不要把 BlogPage 正文、MongoDB 草稿或 revision pointer 当作

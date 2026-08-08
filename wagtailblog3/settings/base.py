@@ -26,6 +26,11 @@ if WAGTAILBLOG_ENV not in {"test", "production"}:
 ENV_FILE = os.path.join(PROJECT_DIR, "settings", f".env.{WAGTAILBLOG_ENV}")
 if os.path.exists(ENV_FILE):
     load_dotenv(ENV_FILE, override=False)
+elif WAGTAILBLOG_ENV == "production":
+    raise RuntimeError(
+        f"Missing production environment file: {ENV_FILE}. "
+        "Refusing to start without explicit production configuration."
+    )
 else:
     load_dotenv(os.path.join(BASE_DIR, ".env"), override=False)
 

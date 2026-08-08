@@ -38,7 +38,7 @@ def _env_float(name, default):
 # 远程开发依赖服务
 # ==========================================================
 # 本地项目运行在 20.5，数据库与基础设施服务运行在 20.2。
-SERVICE_HOST = os.environ.get("SERVICE_HOST", "127.0.0.1")
+SERVICE_HOST = os.environ.get("SERVICE_HOST", "192.168.20.2")
 
 # ==========================================================
 # MySQL 数据库配置
@@ -46,7 +46,7 @@ SERVICE_HOST = os.environ.get("SERVICE_HOST", "127.0.0.1")
 DATABASES = {
 	'default': {
 		'ENGINE': 'django.db.backends.mysql',
-		'NAME': os.environ.get('MYSQL_NAME', 'wagtailblog'),
+		'NAME': os.environ.get('MYSQL_NAME', 'wagtailsoftblog_test'),
 		'USER': os.environ.get('MYSQL_USER', 'root'),
 		'PASSWORD': os.environ.get('MYSQL_PASSWORD', ''),
 		'HOST': os.environ.get('MYSQL_HOST', SERVICE_HOST),
@@ -92,7 +92,7 @@ CACHES = {
 # MongoDB 配置
 # ==========================================================
 MONGO_DB = {
-	'NAME': os.environ.get('MONGO_NAME', 'wagtailblog'),
+	'NAME': os.environ.get('MONGO_NAME', 'wagtailblog_test'),
 	'HOST': os.environ.get('MONGO_HOST', SERVICE_HOST),
 	'PORT': _env_int('MONGO_PORT', 27017),
 }
@@ -103,7 +103,7 @@ MONGO_DEBUG = _env_bool('MONGO_DEBUG', False)
 # ==========================================================
 # MinIO 存储配置
 # ==========================================================
-AWS_STORAGE_BUCKET_NAME = os.environ.get('MINIO_BUCKET', 'wagtailblog-media')
+AWS_STORAGE_BUCKET_NAME = os.environ.get('MINIO_BUCKET', 'wagtail-test-bucket')
 AWS_S3_ENDPOINT_URL = os.environ.get('MINIO_ENDPOINT', f'http://{SERVICE_HOST}:9000')
 AWS_ACCESS_KEY_ID = os.environ.get('MINIO_ACCESS_KEY', '')
 AWS_SECRET_ACCESS_KEY = os.environ.get('MINIO_SECRET_KEY', '')

@@ -149,6 +149,13 @@ curl -I -H 'Host: wagtailblog.docs' http://127.0.0.1:6050/admin/login/
 部署必须保留生产的 `wagtailblog3/settings/database.py`、`observability.env`、
 `logs/`、`media/` 和 socket 文件。
 
+生产备份统一存放在 `/home/source/Django/wagtail/backups/`：
+
+- MySQL、MongoDB 备份文件直接放在该目录；
+- 应用回滚文件使用 `wagtailblog3-YYYYMMDD-HHMMSS/` 子目录；
+- 本次部署回滚点为 `/home/source/Django/wagtail/backups/wagtailblog3-20260808-122400/`；
+- 备份目录禁止使用 `--delete` 全量同步，回滚前先校验文件清单和校验和。
+
 代码切换后，在项目目录执行：
 
 ```bash

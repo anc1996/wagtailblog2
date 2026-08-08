@@ -307,6 +307,62 @@
     font-size: 15px;
 }
 
+.archive-result-total {
+    margin: -8px 0 14px;
+    color: #8c7a68;
+    font-size: 15px;
+}
+
+.archive-result-total:focus {
+    outline: 2px solid rgba(197, 138, 66, .24);
+    outline-offset: 3px;
+}
+
+.archive-async-status {
+    min-height: 0;
+    color: #8c7a68;
+    font-size: 13px;
+}
+
+.archive-async-status.is-loading {
+    min-height: 20px;
+    margin-bottom: 8px;
+}
+
+.archive-results.is-loading .archive-results-content {
+    opacity: .58;
+    pointer-events: none;
+}
+
+.archive-results .async-listing-load-error {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 14px;
+    padding: 10px 13px;
+    color: #854b2a;
+    background: #fff4ec;
+    border: 1px solid #edc9ae;
+    border-radius: 8px;
+    font-size: 13px;
+}
+
+.archive-results .async-listing-load-error p {
+    margin: 0;
+}
+
+.archive-results .async-listing-load-error button {
+    flex: 0 0 auto;
+    min-height: 30px;
+    padding: 0 10px;
+    color: #fff;
+    background: #b97835;
+    border: 1px solid #b97835;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
 .archive-list-page .breadcrumb {
     margin-bottom: 18px;
     padding: 9px 12px;

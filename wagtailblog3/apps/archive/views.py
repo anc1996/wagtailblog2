@@ -1,195 +1,199 @@
-# 归档应用的前台视图
-from django.http import JsonResponse
-from django.shortcuts import render
-from django.db.models import Count
-from django.db.models.functions import TruncYear, TruncMonth
-from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
-from blog.models import BlogPage, BlogTagIndexPage
-import datetime
+"""Public archive views and their server-rendered fragment APIs."""
+
 import logging
+
+from django.db.models import Count
+from django.db.models.functions import TruncMonth, TruncYear
+from django.http import Http404, JsonResponse
+from django.shortcuts import render
+from django.template.loader import render_to_string
+from django.views.decorators.csrf import csrf_exempt
+
+from blog.models import BlogPage
+
+from .services.listing import (
+    ARCHIVE_PAGE_SIZE,
+    get_archive_canonical_url,
+    get_archive_listing_context,
+)
+
 
 logger = logging.getLogger(__name__)
 
 
 def get_archive_data():
-	"""获取归档数据的工具函数"""
-	
-	# 获取所有已发布的博客页面
-	blog_pages = BlogPage.objects.live()
-	
-	# 按年份分组统计
-	yearly_archives = blog_pages.annotate(
-		year=TruncYear('date')
-	).values('year').annotate(
-		count=Count('id')
-	).order_by('-year')
-	
-	# 按月份分组统计
-	monthly_archives = blog_pages.annotate(
-		year=TruncYear('date'),
-		month=TruncMonth('date')
-	).values('year', 'month').annotate(
-		count=Count('id')
-	).order_by('-year', '-month')
-	
-	# 先建立年份节点，再把月份挂到对应年份，避免模板重复聚合数据库结果。
-	archive_tree = {}
-	
-	for item in yearly_archives:
-		
-		year = item['year'].year
-		archive_tree[year] = {
-			'count': item['count'],
-			'months': {}
-		}
-	
-	for item in monthly_archives:
-		year = item['year'].year
-		month = item['month'].month
-		month_name = item['month'].strftime('%B')
-		
-		if year in archive_tree:
-			archive_tree[year]['months'][month] = {
-				'count': item['count'],
-				'name': month_name,
-				'display_name': f"{month}月"
-			}
-	
-	return archive_tree
+    """Return the archive tree used by the existing archive APIs and admin UI."""
+    blog_pages = BlogPage.objects.live()
+
+    yearly_archives = (
+        blog_pages.annotate(year=TruncYear("date"))
+        .values("year")
+        .annotate(count=Count("id"))
+        .order_by("-year")
+    )
+    monthly_archives = (
+        blog_pages.annotate(year=TruncYear("date"), month=TruncMonth("date"))
+        .values("year", "month")
+        .annotate(count=Count("id"))
+        .order_by("-year", "-month")
+    )
+
+    archive_tree = {}
+    for item in yearly_archives:
+        year = item["year"].year
+        archive_tree[year] = {"count": item["count"], "months": {}}
+
+    for item in monthly_archives:
+        year = item["year"].year
+        month = item["month"].month
+        if year in archive_tree:
+            archive_tree[year]["months"][month] = {
+                "count": item["count"],
+                "name": item["month"].strftime("%B"),
+                "display_name": f"{month}月",
+            }
+
+    return archive_tree
 
 
 def archives_api(request):
-	"""归档数据的JSON API"""
-	archive_data = get_archive_data()
-	
-	# 将日期对象组成的树转换为纯数字和字符串，确保响应可以直接序列化为 JSON。
-	data = []
-	for year, year_data in archive_data.items():
-		year_obj = {
-			'year': year,
-			'count': year_data['count'],
-			'months': []
-		}
-		
-		for month, month_data in year_data['months'].items():
-			year_obj['months'].append({
-				'month': month,
-				'name': month_data['name'],
-				'display_name': month_data['display_name'],
-				'count': month_data['count']
-			})
-		
-		data.append(year_obj)
-	
-	return JsonResponse({'archives': data})
+    """Return the existing archive tree JSON contract."""
+    data = []
+    for year, year_data in get_archive_data().items():
+        data.append(
+            {
+                "year": year,
+                "count": year_data["count"],
+                "months": [
+                    {
+                        "month": month,
+                        "name": month_data["name"],
+                        "display_name": month_data["display_name"],
+                        "count": month_data["count"],
+                    }
+                    for month, month_data in year_data["months"].items()
+                ],
+            }
+        )
+    return JsonResponse({"archives": data})
+
+
+def _render_archive_page(request, *, template_name, year, month=None):
+    context = get_archive_listing_context(
+        year=year,
+        month=month,
+        query_params=request.GET,
+    )
+    return render(request, template_name, context)
 
 
 def year_archive(request, year):
-	"""年份归档视图"""
-	# 获取搜索和分页参数
-	search_query = request.GET.get('search', '').strip()
-	page_number = request.GET.get('page')
-	
-	# 获取指定年份的博客文章
-	pages_queryset = BlogPage.objects.live().filter(date__year=year)
-	
-	# 应用搜索过滤
-	if search_query:
-		pages_queryset = pages_queryset.filter(title__icontains=search_query)
-	
-	# 按日期降序排序
-	pages_queryset = pages_queryset.order_by('-date')
-	
-	# 分页处理；非法页码回退到第一页，超出范围则展示最后一页。
-	paginator = Paginator(pages_queryset, 10)  # 每页10篇
-	
-	try:
-		paginated_pages = paginator.page(page_number)
-	except PageNotAnInteger:
-		paginated_pages = paginator.page(1)
-	except EmptyPage:
-		paginated_pages = paginator.page(paginator.num_pages)
-	
-	# 生成紧凑页码范围，避免几百页时把所有页码全部输出
-	pagination_range = paginator.get_elided_page_range(
-		number=paginated_pages.number, on_each_side=2, on_ends=1
-	)
-
-	# 获取归档数据用于侧边栏
-	archive_data = get_archive_data()
-	blog_tag_index_page = BlogTagIndexPage.objects.live().public().first()
-	
-	# 返回数据到模板
-	return render(request, 'archive/year_archive.html', {
-		'year': year,
-		'pages': paginated_pages,
-		'pagination_range': pagination_range,
-		'archive_data': archive_data,
-		'blog_tag_index_page': blog_tag_index_page,
-		'search_query': search_query,
-		'total_count': pages_queryset.count()
-	})
+    """Render the server-side year archive page."""
+    return _render_archive_page(
+        request,
+        template_name="archive/year_archive.html",
+        year=year,
+    )
 
 
 def month_archive(request, year, month):
-	"""月份归档视图"""
-	# 获取搜索和分页参数
-	search_query = request.GET.get('search', '').strip()
-	page_number = request.GET.get('page')
-	
-	# 使用左闭右开区间覆盖整月，避免依赖月份最后一天的具体日期。
-	start_date = datetime.date(year, month, 1)
-	# 计算下个月的第一天
-	if month == 12:
-		end_date = datetime.date(year + 1, 1, 1)
-	else:
-		end_date = datetime.date(year, month + 1, 1)
-	
-	# 获取特定年月的博客文章
-	pages_queryset = BlogPage.objects.live().filter(
-		date__gte=start_date,
-		date__lt=end_date
-	)
-	
-	# 应用搜索过滤
-	if search_query:
-		# 如果有搜索参数，则根据标题过滤
-		pages_queryset = pages_queryset.filter(title__icontains=search_query)
-	
-	# 按日期降序排序
-	pages_queryset = pages_queryset.order_by('-date')
-	
-	# 分页处理；非法页码回退到第一页，超出范围则展示最后一页。
-	paginator = Paginator(pages_queryset, 10)  # 每页10篇
-	
-	try:
-		paginated_pages = paginator.page(page_number)
-	except PageNotAnInteger:
-		paginated_pages = paginator.page(1)
-	except EmptyPage:
-		paginated_pages = paginator.page(paginator.num_pages)
-	
-	# 生成紧凑页码范围，避免几百页时把所有页码全部输出
-	pagination_range = paginator.get_elided_page_range(
-		number=paginated_pages.number, on_each_side=2, on_ends=1
-	)
+    """Render the server-side month archive page."""
+    return _render_archive_page(
+        request,
+        template_name="archive/month_archive.html",
+        year=year,
+        month=month,
+    )
 
-	# 获取归档数据用于侧边栏
-	archive_data = get_archive_data()
-	blog_tag_index_page = BlogTagIndexPage.objects.live().public().first()
-	
-	# 获取月份名称
-	month_name = datetime.date(year, month, 1).strftime('%B')
-	
-	# 返回数据到模板
-	return render(request, 'archive/month_archive.html', {
-		'year': year,
-		'month': month,
-		'month_name': month_name,
-		'pages': paginated_pages,
-		'pagination_range': pagination_range,
-		'archive_data': archive_data,
-		'blog_tag_index_page': blog_tag_index_page,
-		'search_query': search_query,
-		'total_count': pages_queryset.count()
-	})
+
+def _archive_results_api(request, *, year, month=None):
+    if request.method != "GET":
+        response = JsonResponse(
+            {
+                "ok": False,
+                "error": {
+                    "code": "method_not_allowed",
+                    "message": "Only GET requests are supported.",
+                },
+            },
+            status=405,
+        )
+        response["Allow"] = "GET"
+        response["Cache-Control"] = "private, no-store"
+        return response
+
+    try:
+        context = get_archive_listing_context(
+            year=year,
+            month=month,
+            query_params=request.GET,
+        )
+    except Http404:
+        response = JsonResponse(
+            {
+                "ok": False,
+                "error": {
+                    "code": "archive_not_found",
+                    "message": "The requested archive does not exist.",
+                },
+            },
+            status=404,
+        )
+    except Exception:
+        logger.exception(
+            "archive_results_api_failed year=%s month=%s",
+            year,
+            month,
+        )
+        response = JsonResponse(
+            {
+                "ok": False,
+                "error": {
+                    "code": "archive_results_unavailable",
+                    "message": "归档结果暂时无法加载，请稍后重试。",
+                },
+            },
+            status=500,
+        )
+    else:
+        pages = context["pages"]
+        response = JsonResponse(
+            {
+                "ok": True,
+                "data": {
+                    "scope": context["archive_scope"],
+                    "year": context["year"],
+                    "month": context["month"],
+                    "search": context["search_query"],
+                    "result_count": context["total_count"],
+                    "html": render_to_string(
+                        "archive/partials/_archive_results.html",
+                        context,
+                        request=request,
+                    ),
+                    "pagination": {
+                        "page": pages.number,
+                        "page_size": ARCHIVE_PAGE_SIZE,
+                        "total_pages": pages.paginator.num_pages,
+                        "has_previous": pages.has_previous(),
+                        "has_next": pages.has_next(),
+                    },
+                    "canonical_url": get_archive_canonical_url(context=context),
+                },
+            }
+        )
+
+    response["Cache-Control"] = "private, no-store"
+    return response
+
+
+@csrf_exempt
+def year_archive_results_api(request, year):
+    """Return the year archive's server-rendered results fragment as JSON."""
+    return _archive_results_api(request, year=year)
+
+
+@csrf_exempt
+def month_archive_results_api(request, year, month):
+    """Return the month archive's server-rendered results fragment as JSON."""
+    return _archive_results_api(request, year=year, month=month)

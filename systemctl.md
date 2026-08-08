@@ -35,8 +35,9 @@ wagtailblog3/settings/.env.production
 ```
 
 这两个文件已加入 `.gitignore`，仓库只提交 `wagtailblog3/settings/.env.example`。
-进程通过 `WAGTAILBLOG_ENV=test|production` 选择配置，所有入口统一使用
-`wagtailblog3.settings.runtime`。生产 systemd unit 应使用：
+所有入口继续使用 `wagtailblog3.settings.dev`，因为测试和生产都由同一用户维护，
+都需要保留当前开发/调试行为。`WAGTAILBLOG_ENV=test|production` 只负责让
+`settings/base.py` 选择对应的基础设施环境文件。生产 systemd unit 应使用：
 
 ```ini
 EnvironmentFile=/home/source/Django/wagtail/wagtailblog3/wagtailblog3/settings/.env.production

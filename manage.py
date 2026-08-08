@@ -5,7 +5,7 @@ import sys
 
 def main():
 	"""Run administrative tasks."""
-	os.environ.setdefault("DJANGO_SETTINGS_MODULE", "wagtailblog3.settings.runtime")
+	os.environ.setdefault("DJANGO_SETTINGS_MODULE", "wagtailblog3.settings.dev")
 	
 	# 添加命令行参数解析
 	import argparse

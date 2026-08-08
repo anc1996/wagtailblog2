@@ -39,3 +39,4 @@ wagtailblog3/static/wagtail_ai/
 /ops/
 /.codemoss/
 /output/
+/.playwright-cli/

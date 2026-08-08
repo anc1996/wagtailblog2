@@ -1,195 +1,569 @@
-// static/search/js/search.js
+(function () {
+    'use strict';
 
-$(document).ready(function() {
-    // 搜索过滤器
-    const filterButtons = $('.filter-button');
-    const searchTypeInput = $('#search-type-input');
-    const searchForm = $('#search-form');
-
-    filterButtons.each(function() {
-        $(this).on('click', function() {
-            filterButtons.removeClass('active');
-            $(this).addClass('active');
-            const type = $(this).data('type');
-            searchTypeInput.val(type);
-        });
-    });
-
-    // 清除筛选按钮
-    const clearFiltersBtn = $('#clear-filters');
-    if (clearFiltersBtn.length) {
-        clearFiltersBtn.on('click', function(e) {
-            e.preventDefault();
-
-            // 清空搜索框 (可选，根据需求决定)
-            $('#search-input').val('');
-
-            // 重置类型筛选到 'all' 并更新按钮状态
-            searchTypeInput.val('all');
-            filterButtons.removeClass('active');
-            $('.filter-button[data-type="all"]').addClass('active');
-
-            // 清空日期输入
-            const startDatePicker = $('#start-date');
-            const endDatePicker = $('#end-date');
-
-            if (startDatePicker.length && startDatePicker[0]._flatpickr) {
-                startDatePicker[0]._flatpickr.clear();
-            } else {
-                startDatePicker.val('');
-            }
-
-            if (endDatePicker.length && endDatePicker[0]._flatpickr) {
-                endDatePicker[0]._flatpickr.clear();
-            } else {
-                endDatePicker.val('');
-            }
-
-            // 重置排序到默认值
-            $('#order-by').val('');
-
-            // 提交表单以应用清除的筛选条件
-            searchForm.submit();
-        });
-    }
-
-    // 实时搜索建议
-    const searchInput = $('#search-input');
-    const suggestionsBox = $('#suggestions');
-
-    if (searchInput.length && suggestionsBox.length) {
-        searchInput.on('input', function() {
-            const query = $(this).val();
-            if (query.length >= 2) {
-                $.ajax({
-                    url: suggestionsBox.data('suggestions-url') || '/search/suggestions/',
-                    data: { 'q': query },
-                    success: function(data) {
-                        suggestionsBox.empty().show();
-                        if (data.suggestions && data.suggestions.length > 0) {
-                            data.suggestions.forEach(function(suggestion) {
-                                const item = $('<div class="suggestion-item"></div>').text(suggestion.query || suggestion);
-                                item.on('click', function() {
-                                    searchInput.val($(this).text());
-                                    suggestionsBox.hide();
-                                    searchForm.submit();
-                                });
-                                suggestionsBox.append(item);
-                            });
-                        } else {
-                            suggestionsBox.hide();
-                        }
-                    },
-                    error: function() {
-                        suggestionsBox.hide();
-                    }
-                });
-            } else {
-                suggestionsBox.hide();
-            }
-        });
-    }
-
-    // 处理点击页面其他地方时隐藏建议框
-    $(document).on('click', function(e) {
-        if (suggestionsBox.length && !suggestionsBox.is(e.target) && suggestionsBox.has(e.target).length === 0 && searchInput.length && !searchInput.is(e.target)) {
-            suggestionsBox.hide();
+    function requestFormSubmit(form) {
+        if (typeof form.requestSubmit === 'function') {
+            form.requestSubmit();
+            return;
         }
-    });
 
-    // 高亮搜索词
-    function highlightSearchTerms() {
-        if (typeof currentSearchQuery === 'undefined' || !currentSearchQuery || currentSearchQuery === 'None') return;
+        form.submit();
+    }
 
-        const terms = currentSearchQuery.split(' ').filter(term => term.length > 0);
-        const elementsToHighlight = $('.result-title a, .result-intro');
+    function initialiseSearchControls() {
+        var searchForm = document.getElementById('search-form');
+        var searchTypeInput = document.getElementById('search-type-input');
+        var filterButtons = document.querySelectorAll('.filter-button');
+        var clearFiltersButton = document.getElementById('clear-filters');
 
-        elementsToHighlight.each(function() {
-            let originalHtml = $(this).html();
-            let newHtml = originalHtml;
-            terms.forEach(term => {
-                const regex = new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
-                newHtml = newHtml.replace(regex, function(match) {
-                    if (match.toLowerCase().includes('<span class="highlight">')) {
-                        return match;
-                    }
-                    return '<span class="highlight">' + match + '</span>';
+        filterButtons.forEach(function (button) {
+            button.addEventListener('click', function () {
+                filterButtons.forEach(function (filterButton) {
+                    filterButton.classList.remove('active');
                 });
+                button.classList.add('active');
+
+                if (searchTypeInput) {
+                    searchTypeInput.value = button.dataset.type || 'all';
+                }
             });
-            if (newHtml !== originalHtml) {
-                $(this).html(newHtml);
+        });
+
+        if (!clearFiltersButton || !searchForm) {
+            return;
+        }
+
+        clearFiltersButton.addEventListener('click', function (event) {
+            event.preventDefault();
+
+            var searchInput = document.getElementById('search-input');
+            var startDatePicker = document.getElementById('start-date');
+            var endDatePicker = document.getElementById('end-date');
+            var orderBy = document.getElementById('order-by');
+
+            if (searchInput) {
+                searchInput.value = '';
+            }
+            if (searchTypeInput) {
+                searchTypeInput.value = 'all';
+            }
+            filterButtons.forEach(function (filterButton) {
+                filterButton.classList.toggle(
+                    'active',
+                    filterButton.dataset.type === 'all'
+                );
+            });
+
+            [startDatePicker, endDatePicker].forEach(function (input) {
+                if (!input) {
+                    return;
+                }
+                if (input._flatpickr) {
+                    input._flatpickr.clear();
+                } else {
+                    input.value = '';
+                }
+            });
+
+            if (orderBy) {
+                orderBy.value = '';
+            }
+
+            requestFormSubmit(searchForm);
+        });
+    }
+
+    function initialiseSearchSuggestions() {
+        var searchForm = document.getElementById('search-form');
+        var searchInput = document.getElementById('search-input');
+        var suggestionsBox = document.getElementById('suggestions');
+        var jquery = window.jQuery;
+
+        if (!searchForm || !searchInput || !suggestionsBox || !jquery) {
+            return;
+        }
+
+        var suggestionsUrl =
+            suggestionsBox.dataset.suggestionsUrl ||
+            new URL('suggestions/', searchForm.action).toString();
+
+        jquery(searchInput).on('input', function () {
+            var query = searchInput.value;
+            if (query.length < 2) {
+                jquery(suggestionsBox).hide();
+                return;
+            }
+
+            jquery.ajax({
+                url: suggestionsUrl,
+                data: { q: query },
+                success: function (data) {
+                    jquery(suggestionsBox).empty().show();
+                    if (!data.suggestions || data.suggestions.length === 0) {
+                        jquery(suggestionsBox).hide();
+                        return;
+                    }
+
+                    data.suggestions.forEach(function (suggestion) {
+                        var item = jquery('<div class="suggestion-item"></div>').text(
+                            suggestion.query || suggestion
+                        );
+                        item.on('click', function () {
+                            searchInput.value = item.text();
+                            jquery(suggestionsBox).hide();
+                            requestFormSubmit(searchForm);
+                        });
+                        jquery(suggestionsBox).append(item);
+                    });
+                },
+                error: function () {
+                    jquery(suggestionsBox).hide();
+                }
+            });
+        });
+
+        jquery(document).on('click', function (event) {
+            if (
+                !suggestionsBox.contains(event.target) &&
+                event.target !== searchInput
+            ) {
+                jquery(suggestionsBox).hide();
             }
         });
     }
 
-    // 应用高亮
-    highlightSearchTerms();
-
-    // 表单提交前的处理
-    searchForm.on('submit', function(e) {
-        // 清理空的日期和排序参数
-        const searchQueryVal = $('#search-input').val();
-        const startDateVal = $('#start-date').val();
-        const endDateVal = $('#end-date').val();
-        const orderByVal = $('#order-by').val();
-
-        // 如果值为空或者是'None'，禁用该字段避免在URL中出现
-        if (!searchQueryVal || searchQueryVal === 'None') {
-            $('#search-input').prop('disabled', true);
-        }
-        if (!startDateVal || startDateVal === 'None') {
-            $('#start-date').prop('disabled', true);
-        }
-        if (!endDateVal || endDateVal === 'None') {
-            $('#end-date').prop('disabled', true);
-        }
-        if (!orderByVal || orderByVal === 'None') {
-            $('#order-by').prop('disabled', true);
+    function initialiseSearchResults() {
+        var root = document.getElementById('search-results');
+        var searchForm = document.getElementById('search-form');
+        if (!root || !searchForm || !window.axios) {
+            return;
         }
 
-        // 确保 type 字段在提交时启用
-        $('#search-type-input').prop('disabled', false);
-    });
+        var apiUrl = root.dataset.apiUrl;
+        var content = root.querySelector('.search-results-content');
+        var status = root.querySelector('.search-async-status');
+        if (!apiUrl || !content || !status) {
+            return;
+        }
 
-    // 处理分页跳转表单
-    const jumpFormNav = document.getElementById('jump-to-page-form-nav');
-    if (jumpFormNav) {
-        jumpFormNav.addEventListener('submit', function(event) {
-            const pageInput = jumpFormNav.querySelector('input[name="page"]');
-            const pageValue = parseInt(pageInput.value, 10);
-            const maxPage = parseInt(pageInput.getAttribute('max'), 10);
-            const minPage = parseInt(pageInput.getAttribute('min'), 10);
+        var abortController = null;
+        var requestSequence = 0;
+        var lastRequestedParams = paramsFromUrl(window.location.href);
 
-            if (isNaN(pageValue) || pageValue < minPage || pageValue > maxPage) {
+        function paramsFromUrl(url) {
+            var parsedUrl = new URL(url, window.location.origin);
+            return {
+                query: parsedUrl.searchParams.get('query') || '',
+                type: parsedUrl.searchParams.get('type') || 'all',
+                start_date: parsedUrl.searchParams.get('start_date') || '',
+                end_date: parsedUrl.searchParams.get('end_date') || '',
+                order_by: parsedUrl.searchParams.get('order_by') || '',
+                page: parsedUrl.searchParams.get('page') || ''
+            };
+        }
+
+        function paramsFromForm(form) {
+            var formData = new FormData(form);
+            return {
+                query: String(formData.get('query') || ''),
+                type: String(formData.get('type') || 'all'),
+                start_date: String(formData.get('start_date') || ''),
+                end_date: String(formData.get('end_date') || ''),
+                order_by: String(formData.get('order_by') || ''),
+                page: form.matches('.jump-to-page-form')
+                    ? String(formData.get('page') || '')
+                    : ''
+            };
+        }
+
+        function requestParams(params) {
+            var values = { type: params.type || 'all' };
+            ['query', 'start_date', 'end_date', 'order_by', 'page'].forEach(function (key) {
+                if (params[key]) {
+                    values[key] = params[key];
+                }
+            });
+            return values;
+        }
+
+        function setDateInputValue(input, value) {
+            if (!input) {
+                return;
+            }
+
+            if (input._flatpickr) {
+                if (value) {
+                    input._flatpickr.setDate(value, false);
+                } else {
+                    input._flatpickr.clear();
+                }
+                return;
+            }
+
+            input.value = value;
+        }
+
+        function applyFormValues(params) {
+            var searchInput = document.getElementById('search-input');
+            var searchTypeInput = document.getElementById('search-type-input');
+            var startDateInput = document.getElementById('start-date');
+            var endDateInput = document.getElementById('end-date');
+            var orderByInput = document.getElementById('order-by');
+
+            if (searchInput) {
+                searchInput.value = params.query || '';
+            }
+            if (searchTypeInput) {
+                searchTypeInput.value = params.type || 'all';
+            }
+            document.querySelectorAll('.filter-button').forEach(function (button) {
+                button.classList.toggle(
+                    'active',
+                    button.dataset.type === (params.type || 'all')
+                );
+            });
+            setDateInputValue(startDateInput, params.start_date || '');
+            setDateInputValue(endDateInput, params.end_date || '');
+            if (orderByInput) {
+                orderByInput.value = params.order_by || '';
+            }
+        }
+
+        function setLoading(isLoading) {
+            root.classList.toggle('is-loading', isLoading);
+            root.setAttribute('aria-busy', String(isLoading));
+            status.classList.toggle('is-loading', isLoading);
+            status.textContent = isLoading ? '正在更新搜索结果…' : '';
+        }
+
+        function clearError() {
+            var error = root.querySelector('.search-results-load-error');
+            if (error) {
+                error.remove();
+            }
+        }
+
+        function showError() {
+            clearError();
+
+            var error = document.createElement('div');
+            error.className = 'search-results-load-error';
+            error.setAttribute('role', 'alert');
+
+            var message = document.createElement('p');
+            message.textContent = '搜索结果暂时无法更新，当前结果已保留。';
+
+            var retry = document.createElement('button');
+            retry.type = 'button';
+            retry.className = 'search-results-retry';
+            retry.dataset.searchResultsRetry = 'true';
+            retry.textContent = '重试';
+
+            error.append(message, retry);
+            root.insertBefore(error, content);
+        }
+
+        function isCanceled(error) {
+            return (
+                error &&
+                (error.code === 'ERR_CANCELED' ||
+                    (typeof window.axios.isCancel === 'function' &&
+                        window.axios.isCancel(error)))
+            );
+        }
+
+        function escapeRegExp(value) {
+            return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        }
+
+        function highlightText(element, expression) {
+            var walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, {
+                acceptNode: function (node) {
+                    return node.parentElement && node.parentElement.closest('.highlight')
+                        ? NodeFilter.FILTER_REJECT
+                        : NodeFilter.FILTER_ACCEPT;
+                }
+            });
+            var textNodes = [];
+            var node;
+
+            while ((node = walker.nextNode())) {
+                textNodes.push(node);
+            }
+
+            textNodes.forEach(function (textNode) {
+                var text = textNode.nodeValue;
+                var match;
+                var lastIndex = 0;
+                var fragment = document.createDocumentFragment();
+
+                expression.lastIndex = 0;
+                while ((match = expression.exec(text))) {
+                    fragment.append(document.createTextNode(text.slice(lastIndex, match.index)));
+                    var highlight = document.createElement('span');
+                    highlight.className = 'highlight';
+                    highlight.textContent = match[0];
+                    fragment.append(highlight);
+                    lastIndex = match.index + match[0].length;
+                }
+
+                if (lastIndex === 0) {
+                    return;
+                }
+
+                fragment.append(document.createTextNode(text.slice(lastIndex)));
+                textNode.parentNode.replaceChild(fragment, textNode);
+            });
+        }
+
+        function highlightSearchTerms(query) {
+            var terms = Array.from(
+                new Set(
+                    String(query || '')
+                        .trim()
+                        .split(/\s+/)
+                        .filter(Boolean)
+                )
+            ).sort(function (left, right) {
+                return right.length - left.length;
+            });
+
+            if (terms.length === 0) {
+                return;
+            }
+
+            var expression = new RegExp(
+                '(' + terms.map(escapeRegExp).join('|') + ')',
+                'gi'
+            );
+            content.querySelectorAll('.result-title a, .result-intro').forEach(function (element) {
+                highlightText(element, expression);
+            });
+        }
+
+        function focusResults(shouldScroll) {
+            var heading = content.querySelector('#search-results-heading');
+            if (heading) {
+                try {
+                    heading.focus({ preventScroll: true });
+                } catch (error) {
+                    heading.focus();
+                }
+            }
+
+            if (shouldScroll) {
+                var reducedMotion =
+                    window.matchMedia &&
+                    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+                root.scrollIntoView({
+                    behavior: reducedMotion ? 'auto' : 'smooth',
+                    block: 'start'
+                });
+            }
+        }
+
+        async function loadResults(params, options) {
+            var requestId = ++requestSequence;
+            var loadOptions = options || {};
+            lastRequestedParams = Object.assign({}, params);
+
+            if (abortController) {
+                abortController.abort();
+            }
+            abortController =
+                typeof AbortController === 'undefined' ? null : new AbortController();
+
+            clearError();
+            setLoading(true);
+
+            try {
+                var response = await window.axios.get(apiUrl, {
+                    params: requestParams(lastRequestedParams),
+                    headers: {
+                        Accept: 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    signal: abortController ? abortController.signal : undefined,
+                    timeout: 10000
+                });
+
+                if (requestId !== requestSequence) {
+                    return;
+                }
+
+                var payload = response.data;
+                if (
+                    !payload ||
+                    payload.ok !== true ||
+                    !payload.data ||
+                    typeof payload.data.html !== 'string'
+                ) {
+                    throw new Error('Invalid search-results response');
+                }
+
+                content.innerHTML = payload.data.html;
+                var responseParams = Object.assign(
+                    { query: payload.data.query || '' },
+                    payload.data.filters || {}
+                );
+                if (payload.data.canonical_url) {
+                    responseParams = paramsFromUrl(payload.data.canonical_url);
+                }
+                lastRequestedParams = responseParams;
+                applyFormValues(responseParams);
+                highlightSearchTerms(payload.data.query);
+
+                if (loadOptions.pushHistory && payload.data.canonical_url) {
+                    var currentUrl = window.location.pathname + window.location.search;
+                    if (payload.data.canonical_url !== currentUrl) {
+                        window.history.pushState(
+                            { searchResults: true },
+                            '',
+                            payload.data.canonical_url
+                        );
+                    }
+                }
+
+                if (loadOptions.focus) {
+                    focusResults(loadOptions.scroll);
+                }
+            } catch (error) {
+                if (requestId === requestSequence && !isCanceled(error)) {
+                    showError();
+                }
+            } finally {
+                if (requestId === requestSequence) {
+                    abortController = null;
+                    setLoading(false);
+                }
+            }
+        }
+
+        function shouldUseAjax(event) {
+            return !(
+                event.defaultPrevented ||
+                event.button !== 0 ||
+                event.metaKey ||
+                event.ctrlKey ||
+                event.shiftKey ||
+                event.altKey
+            );
+        }
+
+        searchForm.addEventListener('submit', function (event) {
+            event.preventDefault();
+            loadResults(paramsFromForm(searchForm), {
+                pushHistory: true,
+                focus: true,
+                scroll: true
+            });
+        });
+
+        root.addEventListener('click', function (event) {
+            var retry = event.target.closest('[data-search-results-retry]');
+            if (retry && root.contains(retry)) {
                 event.preventDefault();
-                alert('请输入有效的页码 (在 ' + minPage + ' 和 ' + maxPage + ' 之间)。');
+                loadResults(lastRequestedParams, {
+                    pushHistory: true,
+                    focus: true,
+                    scroll: false
+                });
+                return;
+            }
+
+            var link = event.target.closest('.search-pagination a.pagination-button');
+            if (!link || !root.contains(link) || !shouldUseAjax(event)) {
+                return;
+            }
+
+            var destination = new URL(link.href, window.location.href);
+            if (
+                destination.origin !== window.location.origin ||
+                destination.pathname !== window.location.pathname
+            ) {
+                return;
+            }
+
+            event.preventDefault();
+            loadResults(paramsFromUrl(destination.href), {
+                pushHistory: true,
+                focus: true,
+                scroll: true
+            });
+        });
+
+        root.addEventListener('submit', function (event) {
+            var form = event.target;
+            if (!form.matches('.jump-to-page-form')) {
+                return;
+            }
+
+            event.preventDefault();
+            var pageInput = form.querySelector('input[name="page"]');
+            var pageValue = Number.parseInt(pageInput.value, 10);
+            var minPage = Number.parseInt(pageInput.min, 10);
+            var maxPage = Number.parseInt(pageInput.max, 10);
+            if (
+                Number.isNaN(pageValue) ||
+                pageValue < minPage ||
+                pageValue > maxPage
+            ) {
+                window.alert('请输入有效的页码。');
                 pageInput.focus();
                 pageInput.value = pageInput.defaultValue;
+                return;
             }
+
+            loadResults(paramsFromForm(form), {
+                pushHistory: true,
+                focus: true,
+                scroll: true
+            });
         });
+
+        document.querySelectorAll('a.popular-tag').forEach(function (link) {
+            link.addEventListener('click', function (event) {
+                if (!shouldUseAjax(event)) {
+                    return;
+                }
+
+                var destination = new URL(link.href, window.location.href);
+                if (
+                    destination.origin !== window.location.origin ||
+                    destination.pathname !== window.location.pathname
+                ) {
+                    return;
+                }
+
+                event.preventDefault();
+                loadResults(paramsFromUrl(destination.href), {
+                    pushHistory: true,
+                    focus: true,
+                    scroll: true
+                });
+            });
+        });
+
+        window.addEventListener('popstate', function () {
+            loadResults(paramsFromUrl(window.location.href), {
+                pushHistory: false,
+                focus: false,
+                scroll: false
+            });
+        });
+
+        highlightSearchTerms(lastRequestedParams.query);
     }
 
-    // 初始化时检查并清理None值
-    function cleanNoneValues() {
-        const searchInputField = $('#search-input');
-        const startDateField = $('#start-date');
-        const endDateField = $('#end-date');
-        const orderByField = $('#order-by');
-
-        if (searchInputField.val() === 'None') {
-            searchInputField.val('');
-        }
-        if (startDateField.val() === 'None') {
-            startDateField.val('');
-        }
-        if (endDateField.val() === 'None') {
-            endDateField.val('');
-        }
-        if (orderByField.val() === 'None') {
-            orderByField.val('');
-        }
+    function initialiseSearch() {
+        initialiseSearchControls();
+        initialiseSearchSuggestions();
+        initialiseSearchResults();
     }
 
-    // 页面加载时清理None值
-    cleanNoneValues();
-});
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initialiseSearch);
+    } else {
+        initialiseSearch();
+    }
+})();

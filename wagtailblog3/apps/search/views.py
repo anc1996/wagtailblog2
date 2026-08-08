@@ -1,13 +1,18 @@
 # 搜索应用的页面视图
+from urllib.parse import urlencode
+
 from django.core.paginator import EmptyPage, PageNotAnInteger, Paginator
-from django.template.response import TemplateResponse
 from django.http import JsonResponse
+from django.template.loader import render_to_string
+from django.template.response import TemplateResponse
+from django.urls import reverse
+
 from .analytics import SearchAnalytics
 from .core import perform_search, get_search_suggestions
-from .cache import SearchCache
 import logging
 
 logger = logging.getLogger(__name__)
+SEARCH_RESULTS_PER_PAGE = 20
 
 
 def clean_search_param(value):
@@ -17,29 +22,15 @@ def clean_search_param(value):
 	return value.strip() if isinstance(value, str) else value
 
 
-def search(request):
-	"""搜索视图"""
-	# 获取参数
-	search_query = request.GET.get("query", None)
-	page = request.GET.get("page", 1)
-	search_type = request.GET.get("type", "all")  # 可选：全部、博客或普通页面
-	
-	# 获取新增参数并清理
-	start_date = clean_search_param(request.GET.get("start_date", None))
-	end_date = clean_search_param(request.GET.get("end_date", None))
-	order_by = clean_search_param(request.GET.get("order_by", None))
-	
-	# 清理搜索查询
-	search_query = clean_search_param(search_query)
-	
-	# 预留片段缓存入口；当前页面仍由核心搜索结果直接渲染。
-	if search_query:
-		cache_key = SearchCache.get_cache_key(
-			search_query, search_type, page, start_date, end_date, order_by
-		)
-		cached_html = None  # 使用片段缓存，可选功能
-	
-	# 仅在有有效关键词时访问搜索后端。
+def get_search_results_context(query_params):
+	"""Build the shared paginated search context for page and fragment responses."""
+	search_query = clean_search_param(query_params.get("query"))
+	search_type = query_params.get("type") or "all"
+	start_date = clean_search_param(query_params.get("start_date"))
+	end_date = clean_search_param(query_params.get("end_date"))
+	order_by = clean_search_param(query_params.get("order_by"))
+	page = query_params.get("page", 1)
+
 	search_results = None
 	if search_query:
 		search_results = perform_search(
@@ -47,12 +38,12 @@ def search(request):
 			search_type,
 			start_date=start_date,
 			end_date=end_date,
-			order_by=order_by
+			order_by=order_by,
 		)
-	
-	# 分页对象同时兼容惰性搜索结果和空结果，保证模板始终有稳定结构。
+
+	# Keep the paginator shape stable for the welcome state and lazy search results.
 	if search_results:
-		paginator = Paginator(search_results, 20)  # 每页20条
+		paginator = Paginator(search_results, SEARCH_RESULTS_PER_PAGE)
 		try:
 			paginated_results = paginator.page(page)
 		except PageNotAnInteger:
@@ -60,47 +51,140 @@ def search(request):
 		except EmptyPage:
 			paginated_results = paginator.page(paginator.num_pages)
 	else:
-		# 创建空的分页对象以避免模板错误
-		paginator = Paginator([], 20)
+		paginator = Paginator([], SEARCH_RESULTS_PER_PAGE)
 		paginated_results = paginator.page(1)
-	
-	# 异步请求只返回结果片段，供无限滚动或动态加载使用。
-	if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-		return search_ajax(request, paginated_results, search_query, search_type, start_date, end_date, order_by)
-	
-	# 获取最近 30 天的热门搜索词，分析失败时不影响搜索页面。
-	try:
-		popular_search_terms_list = SearchAnalytics.get_popular_searches(days=30, limit=10)
-	except Exception as e:
-		logger.error(f"获取热门搜索词失败: {e}", exc_info=True)
-		popular_search_terms_list = []
-	
-	# 只有真正执行了关键词搜索才记录统计，避免空页面污染数据。
-	if search_query:
-		try:
-			SearchAnalytics.log_search(
-				search_query,
-				results_count=paginator.count if hasattr(paginator, 'count') else 0,
-				search_type=search_type
-			)
-		except Exception as e:
-			logger.error(f"记录搜索分析错误: {e}", exc_info=True)
-	
-	# 向模板传递已清理的值，避免把空参数显示成 None。
-	context = {
+
+	return {
 		"search_query": search_query or "",
 		"search_results": paginated_results,
 		"search_type": search_type,
-		"popular_search_terms": popular_search_terms_list,  # 热门搜索词
 		"start_date": start_date or "",
 		"end_date": end_date or "",
 		"order_by": order_by or "",
 	}
-	return TemplateResponse(
-		request,
-		"search/search.html",
-		context,
-	)
+
+
+def get_search_canonical_url(context):
+	"""Return the normalized, server-rendered search URL for browser history."""
+	if not context["search_query"]:
+		return reverse("search:search")
+
+	params = {
+		"query": context["search_query"],
+		"type": context["search_type"],
+	}
+	if context["start_date"]:
+		params["start_date"] = context["start_date"]
+	if context["end_date"]:
+		params["end_date"] = context["end_date"]
+	if context["order_by"]:
+		params["order_by"] = context["order_by"]
+	if context["search_results"].number > 1:
+		params["page"] = context["search_results"].number
+
+	return f'{reverse("search:search")}?{urlencode(params)}'
+
+
+def search(request):
+	"""Render the full progressive-enhancement search page."""
+	context = get_search_results_context(request.GET)
+
+	# Preserve the existing raw JSON contract for callers of the original endpoint.
+	if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+		return search_ajax(
+			request,
+			context["search_results"],
+			context["search_query"],
+			context["search_type"],
+			context["start_date"],
+			context["end_date"],
+			context["order_by"],
+		)
+
+	# Fetching popular queries must not make the page unavailable when analytics fails.
+	try:
+		context["popular_search_terms"] = SearchAnalytics.get_popular_searches(
+			days=30, limit=10
+		)
+	except Exception as e:
+		logger.error(f"获取热门搜索词失败: {e}", exc_info=True)
+		context["popular_search_terms"] = []
+
+	if context["search_query"]:
+		try:
+			SearchAnalytics.log_search(
+				context["search_query"],
+				results_count=context["search_results"].paginator.count,
+				search_type=context["search_type"],
+			)
+		except Exception as e:
+			logger.error(f"记录搜索分析错误: {e}", exc_info=True)
+
+	return TemplateResponse(request, "search/search.html", context)
+
+
+def search_results_api(request):
+	"""Return the server-rendered search-results fragment as JSON."""
+	if request.method != "GET":
+		response = JsonResponse(
+			{
+				"ok": False,
+				"error": {
+					"code": "method_not_allowed",
+					"message": "仅支持 GET 请求。",
+				},
+			},
+			status=405,
+		)
+		response["Allow"] = "GET"
+		response["Cache-Control"] = "private, no-store"
+		return response
+
+	try:
+		context = get_search_results_context(request.GET)
+		response = JsonResponse(
+			{
+				"ok": True,
+				"data": {
+					"query": context["search_query"],
+					"filters": {
+						"type": context["search_type"],
+						"start_date": context["start_date"],
+						"end_date": context["end_date"],
+						"order_by": context["order_by"],
+					},
+					"result_count": context["search_results"].paginator.count,
+					"html": render_to_string(
+						"search/partials/_search_results.html",
+						context,
+						request=request,
+					),
+					"pagination": {
+						"page": context["search_results"].number,
+						"page_size": SEARCH_RESULTS_PER_PAGE,
+						"total_pages": context["search_results"].paginator.num_pages,
+						"has_previous": context["search_results"].has_previous(),
+						"has_next": context["search_results"].has_next(),
+					},
+					"canonical_url": get_search_canonical_url(context),
+				},
+			}
+		)
+	except Exception as e:
+		logger.error(f"搜索结果片段响应错误: {e}", exc_info=True)
+		response = JsonResponse(
+			{
+				"ok": False,
+				"error": {
+					"code": "search_unavailable",
+					"message": "搜索结果暂时无法加载，请稍后重试。",
+				},
+			},
+			status=500,
+		)
+
+	response["Cache-Control"] = "private, no-store"
+	return response
 
 
 def search_ajax(request, search_results, search_query, search_type=None, start_date=None, end_date=None, order_by=None):

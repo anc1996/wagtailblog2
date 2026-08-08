@@ -4,7 +4,7 @@
 
 {% block extra_css %}
     {{ block.super }}
-    <link rel="stylesheet" href="{% static 'blog/css/blog.css' %}?v=20260730-1">
+    <link rel="stylesheet" href="{% static 'blog/css/blog.css' %}?v=20260808-2">
     <link rel="stylesheet" href="{% static 'blog/css/blog-resize.css' %}">
     <link rel="stylesheet" href="{% static 'blog/css/adaptive-scroll.css' %}?v=20260730-2127">
     {% include "includes/content/article_reading_css.html" %}
@@ -29,7 +29,7 @@
     {% if has_embed %}<link rel="stylesheet" href="{% static 'blog/css/embed_blocks.css' %}?v=20260801-1">{% endif %}
     {% if has_table %}<link rel="stylesheet" href="{% static 'blog/css/table_blocks.css' %}">{% endif %}
     {% if has_mermaid %}{% include "includes/content/mermaid_css.html" %}{% endif %}
-    <link rel="stylesheet" href="{% static 'comments/css/comments.css' %}?v=20260729-5">
+    <link rel="stylesheet" href="{% static 'comments/css/comments.css' %}?v=20260808-1">
 
 {% endblock %}
 
@@ -88,7 +88,7 @@
                                 <i class="fa fa-pencil" aria-hidden="true"></i>
                                 <span>
                                     {% for author in authors %}
-                                        {{ author.name }}{% if not forloop.last %}、{% endif %}
+                                        <a class="blog-meta-author-link" href="{% url 'blog:author_detail' pk=author.pk %}">{{ author.name }}</a>{% if not forloop.last %}、{% endif %}
                                     {% endfor %}
                                 </span>
                             </div>
@@ -337,13 +337,13 @@
     <script src="{% static 'vendor/katex/render.js' %}?v=20260728-1" defer></script>
 
     <!-- 使用 ES6 模块 -->
-    <script type="module" src="{% static 'comments/js/comments.js' %}?v=20260729-5"></script>
+    <script type="module" src="{% static 'comments/js/comments.js' %}?v=20260808-1"></script>
 
     <script src="{% static 'blog/js/blog_page.js' %}?v=20260728-3" defer></script>
     <script src="{% static 'blog/js/adaptive-blog-scroll.js' %}?v=20260730-2127" defer></script>
 
     <!-- 🆕 添加拖动布局JS -->
-    <script src="{% static 'blog/js/resize-manager.js' %}"></script>
+    <script src="{% static 'blog/js/resize-manager.js' %}?v=20260808-1"></script>
 
     {% include "includes/content/article_reading_js.html" %}
     {% if has_image or has_gallery %}{% include "includes/content/image_viewer_js.html" %}{% endif %}

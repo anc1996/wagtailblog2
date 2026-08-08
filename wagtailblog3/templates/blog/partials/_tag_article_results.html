@@ -1,0 +1,132 @@
+{% load wagtailcore_tags wagtailimages_tags %}
+
+<header class="tag-page-hero">
+    <div class="tag-page-eyebrow"><i class="fa fa-tag" aria-hidden="true"></i> 文章标签</div>
+    <h1>{{ current_tag.name }}</h1>
+    <p>浏览所有标记为“{{ current_tag.name }}”的文章</p>
+    <span class="tag-page-count">共 {{ total_results }} 篇文章</span>
+</header>
+
+<section class="tag-filter-card" aria-label="标签文章筛选">
+    <form method="get" action="{% pageurl page %}" class="tag-filter-form" data-tag-async-form>
+        <input type="hidden" name="tag" value="{{ current_tag.slug }}">
+
+        <div class="tag-search-field">
+            <label for="tag-search-input">搜索文章</label>
+            <div class="tag-input-with-icon">
+                <i class="fa fa-search" aria-hidden="true"></i>
+                <input id="tag-search-input" type="search" name="q" value="{{ search_query|default:'' }}" placeholder="输入文章标题关键词">
+            </div>
+        </div>
+
+        <div class="tag-date-field">
+            <label for="start-date">开始日期</label>
+            <div class="tag-input-with-icon">
+                <i class="fa fa-calendar" aria-hidden="true"></i>
+                <input type="text" name="start_date" value="{{ start_date|default:'' }}" class="flatpickr-input" id="start-date" placeholder="选择开始日期">
+            </div>
+        </div>
+
+        <div class="tag-date-field">
+            <label for="end-date">结束日期</label>
+            <div class="tag-input-with-icon">
+                <i class="fa fa-calendar" aria-hidden="true"></i>
+                <input type="text" name="end_date" value="{{ end_date|default:'' }}" class="flatpickr-input" id="end-date" placeholder="选择结束日期">
+            </div>
+        </div>
+
+        <div class="tag-filter-actions">
+            <button type="submit" class="tag-filter-submit"><i class="fa fa-filter" aria-hidden="true"></i> 筛选文章</button>
+            {% if search_query or start_date or end_date %}
+                <a href="{% pageurl page %}?tag={{ current_tag.slug|urlencode }}" class="tag-filter-clear" data-tag-async-link>清除筛选</a>
+            {% endif %}
+        </div>
+    </form>
+</section>
+
+{% if search_query or start_date or end_date %}
+    <div class="tag-results-summary" role="status">
+        <i class="fa fa-info-circle" aria-hidden="true"></i>
+        {% if paged_items and paged_items.object_list %}
+            找到 <strong>{{ total_results }}</strong> 篇文章
+            {% if search_query %}，标题包含“<strong>{{ search_query }}</strong>”{% endif %}
+            {% if start_date %}，发布时间从 {{ start_date }} 起{% endif %}
+            {% if end_date %}，截至 {{ end_date }}{% endif %}
+        {% else %}
+            没有找到符合当前条件的文章
+        {% endif %}
+    </div>
+{% endif %}
+
+{% if paged_items and paged_items.object_list %}
+    <section class="tag-article-list" aria-labelledby="tag-articles-heading">
+        <h2 id="tag-articles-heading" class="sr-only" tabindex="-1" data-tag-results-heading>{{ current_tag.name }} 标签文章</h2>
+        {% for post in paged_items.object_list %}
+            <article class="tag-article-card">
+                {% if post.featured_image %}
+                    <a href="{% pageurl post %}" class="tag-article-image" tabindex="-1" aria-hidden="true">
+                        {% image post.featured_image fill-360x220 format-webp as card_image %}
+                        <img src="{{ card_image.url }}" alt="" loading="lazy">
+                    </a>
+                {% endif %}
+
+                <div class="tag-article-content{% if not post.featured_image %} tag-article-content-full{% endif %}">
+                    <div class="tag-article-meta">
+                        {% if post.date %}<span><i class="fa fa-calendar" aria-hidden="true"></i>{{ post.date|date:"Y年m月d日" }}</span>{% endif %}
+                        <span><i class="fa fa-tag" aria-hidden="true"></i>{{ current_tag.name }}</span>
+                    </div>
+
+                    <h2><a href="{% pageurl post %}">{{ post.title }}</a></h2>
+                    {% if post.intro %}<p class="tag-article-intro">{{ post.intro|striptags|truncatechars:180 }}</p>{% endif %}
+
+                    <div class="tag-article-footer">
+                        {% include "blog/stats_block.html" with page=post %}
+                        <a href="{% pageurl post %}" class="tag-read-more">阅读全文 <i class="fa fa-angle-right" aria-hidden="true"></i></a>
+                    </div>
+                </div>
+            </article>
+        {% endfor %}
+    </section>
+
+    {% if paged_items.has_other_pages %}
+        <nav class="tag-pagination" aria-label="文章分页">
+            {% if paged_items.has_previous %}
+                <a href="{% pageurl page %}?tag={{ current_tag.slug|urlencode }}{% if search_query %}&amp;q={{ search_query|urlencode }}{% endif %}{% if start_date %}&amp;start_date={{ start_date }}{% endif %}{% if end_date %}&amp;end_date={{ end_date }}{% endif %}&amp;page={{ paged_items.previous_page_number }}" class="tag-page-button" data-tag-async-link>
+                    <i class="fa fa-angle-left" aria-hidden="true"></i> 上一页
+                </a>
+            {% else %}
+                <span class="tag-page-button is-disabled" aria-disabled="true"><i class="fa fa-angle-left" aria-hidden="true"></i> 上一页</span>
+            {% endif %}
+
+            <span class="tag-page-status">第 <strong>{{ paged_items.number }}</strong> / {{ paged_items.paginator.num_pages }} 页</span>
+
+            {% if paged_items.has_next %}
+                <a href="{% pageurl page %}?tag={{ current_tag.slug|urlencode }}{% if search_query %}&amp;q={{ search_query|urlencode }}{% endif %}{% if start_date %}&amp;start_date={{ start_date }}{% endif %}{% if end_date %}&amp;end_date={{ end_date }}{% endif %}&amp;page={{ paged_items.next_page_number }}" class="tag-page-button" data-tag-async-link>
+                    下一页 <i class="fa fa-angle-right" aria-hidden="true"></i>
+                </a>
+            {% else %}
+                <span class="tag-page-button is-disabled" aria-disabled="true">下一页 <i class="fa fa-angle-right" aria-hidden="true"></i></span>
+            {% endif %}
+
+            <form method="get" action="{% pageurl page %}" class="tag-page-jump" data-tag-async-form>
+                <input type="hidden" name="tag" value="{{ current_tag.slug }}">
+                {% if search_query %}<input type="hidden" name="q" value="{{ search_query }}">{% endif %}
+                {% if start_date %}<input type="hidden" name="start_date" value="{{ start_date }}">{% endif %}
+                {% if end_date %}<input type="hidden" name="end_date" value="{{ end_date }}">{% endif %}
+                <label for="tag-article-jump-page">跳转</label>
+                <input id="tag-article-jump-page" type="number" name="page" min="1" max="{{ paged_items.paginator.num_pages }}" value="{{ paged_items.number }}" required>
+                <button type="submit">确定</button>
+            </form>
+        </nav>
+    {% endif %}
+{% else %}
+    <div class="tag-empty-state">
+        <i class="fa fa-folder-open-o" aria-hidden="true"></i>
+        <h2 id="tag-articles-heading" tabindex="-1" data-tag-results-heading>暂时没有相关文章</h2>
+        <p>可以清除筛选条件，或返回查看全部标签。</p>
+    </div>
+{% endif %}
+
+<div class="tag-page-back">
+    <a href="{% pageurl page %}" data-tag-async-link><i class="fa fa-tags" aria-hidden="true"></i> 查看全部标签</a>
+</div>

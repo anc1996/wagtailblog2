@@ -178,6 +178,13 @@ class SmartResizeManager {
     // 全局鼠标事件
     document.addEventListener('mousemove', (e) => this.onDrag(e));
     document.addEventListener('mouseup', () => this.stopDrag());
+    window.addEventListener('blur', () => this.cancelDrag());
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) this.cancelDrag();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') this.cancelDrag();
+    });
 
     // 监听Zen模式切换
     this.observeZenMode();
@@ -369,7 +376,11 @@ class SmartResizeManager {
   // 停止拖动
   // ========================================
   stopDrag() {
-    if (!this.state.isDragging) return;
+    if (!this.state.isDragging) {
+      // 清理可能因窗口失焦而残留的全局拖动状态。
+      document.body.classList.remove('resizing');
+      return;
+    }
 
     const { currentSide } = this.state;
 
@@ -383,6 +394,25 @@ class SmartResizeManager {
     this.state.currentSide = null;
 
     console.log(`✅ 拖动结束，已保存宽度`);
+  }
+
+  // 窗口失焦、标签页隐藏或按 Esc 时取消拖动，不保存半成品宽度。
+  cancelDrag() {
+    if (!this.state.isDragging && !document.body.classList.contains('resizing')) {
+      return;
+    }
+
+    const handle = this.state.currentSide === 'left'
+      ? this.leftHandle
+      : this.state.currentSide === 'right'
+        ? this.rightHandle
+        : null;
+
+    if (handle) handle.classList.remove('dragging');
+    document.body.classList.remove('resizing');
+    this.state.isDragging = false;
+    this.state.currentSide = null;
+    this.dragRaf = null;
   }
 
   // ========================================

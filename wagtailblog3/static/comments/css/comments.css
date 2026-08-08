@@ -441,6 +441,8 @@
     border-radius: 8px;
     box-shadow: 0 2px 8px rgba(0,0,0,0.1);
     border: 1px solid #e9ecef;
+    position: relative;
+    z-index: 10;
 }
 
 .comment-reply-form .author-image {
@@ -476,6 +478,9 @@
     min-height: 100px;
     box-sizing: border-box;
     transition: border-color 0.2s ease;
+    cursor: text;
+    caret-color: #3b3129;
+    pointer-events: auto;
 }
 
 .comment-reply-form .form-control:focus {

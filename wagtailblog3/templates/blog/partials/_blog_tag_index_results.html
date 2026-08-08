@@ -1,0 +1,12 @@
+{% if mode == "tag_detail" and current_tag %}
+    {% include "blog/partials/_tag_article_results.html" %}
+{% elif mode == "tag_list" %}
+    {% include "blog/partials/_tag_directory_results.html" %}
+{% elif mode == "tag_missing" %}
+    {% include "blog/partials/_tag_missing_results.html" %}
+{% else %}
+    <div class="tag-empty-state">
+        <h1>{{ page.title }}</h1>
+        <p>请选择一个标签浏览文章。</p>
+    </div>
+{% endif %}

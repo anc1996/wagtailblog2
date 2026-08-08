@@ -1,11 +1,10 @@
 # 博客应用的页面、媒体和统计模型
 import logging,uuid,json,re,time
-from datetime import datetime
 
 from django.db.models.functions import Coalesce, Lower
 from django.utils import timezone
 from django.utils.dateparse import parse_date
-from django.core.paginator import EmptyPage, PageNotAnInteger, Paginator
+from django.core.paginator import Paginator
 from django.db import models
 from django import forms
 from django.db.models import Count, Subquery, OuterRef, F
@@ -17,7 +16,7 @@ from django.utils.safestring import mark_safe  # 用于标记HTML安全
 from modelcluster.fields import ParentalKey, ParentalManyToManyField
 from modelcluster.contrib.taggit import ClusterTaggableManager
 
-from taggit.models import TaggedItemBase, Tag
+from taggit.models import TaggedItemBase
 
 from wagtail.admin.forms import WagtailAdminPageForm
 from wagtail.embeds.blocks import EmbedBlock
@@ -83,9 +82,8 @@ class BlogTagIndexPage(Page):
 	页面用于展示按标签筛选的文章列表，或所有标签的列表。
 	支持对文章标题（在特定标签下）或标签名称进行搜索和分页。
 	"""
-	subpage_types = []  # 通常标签索引页不应有子页面
-	parent_page_types = ['wagtailcore.Page', 'home.HomePage', 'blog.BlogIndexPage']  # 根据你的实际情况调整
-	subpage_types = ['blog.BlogIndexPage']  # 根据你的实际情况调整
+	parent_page_types = ['wagtailcore.Page', 'home.HomePage', 'blog.BlogIndexPage']
+	subpage_types = []
 	
 	# 每页显示的标签显示数
 	items_tag_page = 50
@@ -93,112 +91,17 @@ class BlogTagIndexPage(Page):
 	items_per_page = 20
 	
 	def get_context(self, request, *args, **kwargs):
-		"""根据标签筛选或标签列表模式构造分页上下文。"""
+		"""Build the tag page from the same service used by the JSON endpoint."""
+		from blog.services.tag_listing import get_tag_index_context
+
 		context = super().get_context(request, *args, **kwargs)
-		
-		tag_slug_filter = request.GET.get('tag')  # ?tag=<slug>
-		search_query = request.GET.get('q', '').strip()  # ?q=<query>
-		page_number = request.GET.get('page')  # ?page=<number>
-		
-		start_date = request.GET.get('start_date', '')
-		end_date = request.GET.get('end_date', '')
-		
-		context['search_query'] = search_query
-		context['start_date'] = start_date
-		context['end_date'] = end_date
-		context['current_tag'] = None
-		context['paged_items'] = None  # 将用于文章分页或标签分页
-		context['mode'] = None  # "tag_detail" 或 "tag_list"
-		
-		if tag_slug_filter:
-			# 标签详情模式：先锁定一个标签，再在数据库中叠加标题和日期条件。
-			context['mode'] = "tag_detail"
-			try:
-				tag_object = Tag.objects.get(slug=tag_slug_filter)
-				context['current_tag'] = tag_object
-				
-				# 获取该标签下的所有已发布、公开的文章
-				articles_queryset = BlogPage.objects.live().public().filter(tags=tag_object)
-				
-				# 如果有文章标题搜索词 (q)，则进一步过滤
-				if search_query:
-					articles_queryset = articles_queryset.filter(title__icontains=search_query)
-				
-				if start_date:
-					start_date_obj = datetime.strptime(start_date, '%Y-%m-%d').date()
-					articles_queryset = articles_queryset.filter(date__gte=start_date_obj)
-				
-				if end_date:
-					end_date_obj = datetime.strptime(end_date, '%Y-%m-%d').date()
-					articles_queryset = articles_queryset.filter(date__lte=end_date_obj)
-				
-				articles_queryset = articles_queryset.order_by('-date')  # 或其他排序
-				
-				# 对文章列表进行分页
-				paginator = Paginator(articles_queryset, self.items_per_page)
-				try:
-					context['paged_items'] = paginator.page(page_number)
-				except PageNotAnInteger:
-					context['paged_items'] = paginator.page(1)
-				except EmptyPage:
-					context['paged_items'] = paginator.page(paginator.num_pages)
-			
-			except Tag.DoesNotExist:
-				context['paged_items'] = []  # 或者设置为空列表以避免错误
-		else:
-			# 标签列表模式：从标签表出发聚合公开文章数量，避免逐个标签查询造成 N+1。
-			context['mode'] = "tag_list"
-			
-			# =====================================================================
-			# 【终极优化】：从 Tag 侧出发，Subquery + JOIN，单条 SQL 完成全部工作
-			#
-			# 生成的 SQL 等价于：
-			#   SELECT taggit_tag.*, COUNT(blog_blogpagetag.id) AS count
-			#   FROM taggit_tag
-			#   INNER JOIN blog_blogpagetag
-			#       ON blog_blogpagetag.tag_id = taggit_tag.id
-			#   WHERE blog_blogpagetag.content_object_id IN (
-			#       SELECT page_ptr_id FROM blog_blogpage
-			#       INNER JOIN wagtailcore_page ON ...   -- live() + public() 的过滤
-			#   )
-			#   [AND taggit_tag.name ILIKE %search_query%]
-			#   GROUP BY taggit_tag.id
-			#   ORDER BY count DESC
-			#   LIMIT 50 OFFSET N;    -- 由 Paginator 自动加上，只取当前页数据
-			#
-			# 关键点：
-			# 1. Subquery 让 live_public_page_ids 永远不求值到 Python，只是 SQL 嵌套子查询
-			# 2. Paginator 接收 QuerySet，内部用 LIMIT/OFFSET，永远不加载全量数据
-			# 3. 整个流程零 Python 内存峰值，千万级标签同样稳定
-			# =====================================================================
-			
-			# 第一步：只构造公开文章 ID 的惰性子查询，不提前加载到 Python。
-			live_public_page_ids = BlogPage.objects.live().public().values('id')
-			
-			# 第二步：通过中间表连接标签和文章，并在数据库层完成计数。
-			#   blog_blogpagetag_items  是 taggit TaggedItemBase 在 Tag 上自动生成的反向关系名
-			#   命名规则: %(app_label)s_%(class)s_items → blog_blogpagetag_items
-			tags_qs = Tag.objects.filter(
-				blog_blogpagetag_items__content_object_id__in=live_public_page_ids
-			).annotate(
-				count=Count('blog_blogpagetag_items')
+		context.update(
+			get_tag_index_context(
+				query_params=request.GET,
+				tag_page_size=self.items_tag_page,
+				article_page_size=self.items_per_page,
 			)
-			
-			# 第三步：继续在数据库层过滤标签名称。
-			if search_query:
-				tags_qs = tags_qs.filter(name__icontains=search_query)
-			
-			# 第四步：按引用数量倒序，让最常用的标签优先展示。
-			tags_qs = tags_qs.order_by('-count')
-			
-			# 第五步：分页器直接消费 QuerySet，只让数据库返回当前页数据。
-			paginator = Paginator(tags_qs, self.items_tag_page)
-			try:
-				context['paged_items'] = paginator.page(page_number)
-			except PageNotAnInteger:
-				context['paged_items'] = paginator.page(1)
-			except EmptyPage:
-				context['paged_items'] = paginator.page(paginator.num_pages)
+		)
 		return context
 
 

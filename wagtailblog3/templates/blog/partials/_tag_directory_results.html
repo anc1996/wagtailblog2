@@ -1,0 +1,68 @@
+{% load wagtailcore_tags %}
+
+<header class="tag-page-hero">
+    <div class="tag-page-eyebrow"><i class="fa fa-tags" aria-hidden="true"></i> 内容导航</div>
+    <h1>{{ page.title|default:"所有标签" }}</h1>
+    <p>按主题快速发现感兴趣的文章</p>
+</header>
+
+<section class="tag-filter-card tag-list-search-card" aria-label="标签搜索">
+    <form method="get" action="{% pageurl page %}" class="tag-list-search-form" data-tag-async-form>
+        <label for="tag-name-search">搜索标签</label>
+        <div class="tag-input-with-icon">
+            <i class="fa fa-search" aria-hidden="true"></i>
+            <input id="tag-name-search" type="search" name="q" value="{{ search_query|default:'' }}" placeholder="输入标签名称">
+        </div>
+        <button type="submit" class="tag-filter-submit">搜索标签</button>
+        {% if search_query %}
+            <a href="{% pageurl page %}" class="tag-filter-clear" data-tag-async-link>清除搜索</a>
+        {% endif %}
+    </form>
+</section>
+
+{% if paged_items and paged_items.object_list %}
+    <section class="tag-cloud-grid" aria-labelledby="tag-directory-heading">
+        <h2 id="tag-directory-heading" class="sr-only" tabindex="-1" data-tag-results-heading>所有标签</h2>
+        {% for item in paged_items.object_list %}
+            <a href="{% pageurl page %}?tag={{ item.slug|urlencode }}" class="tag-cloud-item" data-tag-async-link>
+                <span class="tag-cloud-name"><i class="fa fa-tag" aria-hidden="true"></i>{{ item.name }}</span>
+                <span class="tag-cloud-count">{{ item.count }} 篇</span>
+            </a>
+        {% endfor %}
+    </section>
+
+    {% if paged_items.has_other_pages %}
+        <nav class="tag-pagination" aria-label="标签分页">
+            {% if paged_items.has_previous %}
+                <a href="{% pageurl page %}?{% if search_query %}q={{ search_query|urlencode }}&amp;{% endif %}page={{ paged_items.previous_page_number }}" class="tag-page-button" data-tag-async-link>
+                    <i class="fa fa-angle-left" aria-hidden="true"></i> 上一页
+                </a>
+            {% else %}
+                <span class="tag-page-button is-disabled" aria-disabled="true"><i class="fa fa-angle-left" aria-hidden="true"></i> 上一页</span>
+            {% endif %}
+
+            <span class="tag-page-status">第 <strong>{{ paged_items.number }}</strong> / {{ paged_items.paginator.num_pages }} 页</span>
+
+            {% if paged_items.has_next %}
+                <a href="{% pageurl page %}?{% if search_query %}q={{ search_query|urlencode }}&amp;{% endif %}page={{ paged_items.next_page_number }}" class="tag-page-button" data-tag-async-link>
+                    下一页 <i class="fa fa-angle-right" aria-hidden="true"></i>
+                </a>
+            {% else %}
+                <span class="tag-page-button is-disabled" aria-disabled="true">下一页 <i class="fa fa-angle-right" aria-hidden="true"></i></span>
+            {% endif %}
+
+            <form method="get" action="{% pageurl page %}" class="tag-page-jump" data-tag-async-form>
+                {% if search_query %}<input type="hidden" name="q" value="{{ search_query }}">{% endif %}
+                <label for="tag-directory-jump-page">跳转</label>
+                <input id="tag-directory-jump-page" type="number" name="page" min="1" max="{{ paged_items.paginator.num_pages }}" value="{{ paged_items.number }}" required>
+                <button type="submit">确定</button>
+            </form>
+        </nav>
+    {% endif %}
+{% else %}
+    <div class="tag-empty-state">
+        <i class="fa fa-tags" aria-hidden="true"></i>
+        <h2 id="tag-directory-heading" tabindex="-1" data-tag-results-heading>没有找到标签</h2>
+        <p>请尝试使用其他关键词。</p>
+    </div>
+{% endif %}

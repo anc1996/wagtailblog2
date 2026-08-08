@@ -1,0 +1,113 @@
+{% load wagtailcore_tags wagtailimages_tags search_tags %}
+
+<div class="search-results-fragment">
+    <h2 id="search-results-heading" class="sr-only sr-only-focusable" tabindex="-1">搜索结果</h2>
+
+    {% if search_query and search_query != 'None' %}
+        <div class="search-results-info" role="status">
+            <i class="fa {% if search_results.paginator.count > 0 %}fa-check-circle{% else %}fa-info-circle{% endif %}" aria-hidden="true"></i>
+            <span>
+                {% if search_results.paginator.count > 0 %}
+                    找到 <strong>{{ search_results.paginator.count }}</strong> 条关于“<strong>{{ search_query }}</strong>”的结果
+                    {% if start_date and start_date != 'None' or end_date and end_date != 'None' %}
+                        <span class="date-filter-info">
+                            {% if start_date and start_date != 'None' %}从 {{ start_date }}{% endif %}
+                            {% if end_date and end_date != 'None' %}至 {{ end_date }}{% endif %}
+                        </span>
+                    {% endif %}
+                {% else %}
+                    未找到关于“<strong>{{ search_query }}</strong>”的结果
+                {% endif %}
+            </span>
+        </div>
+    {% endif %}
+
+    <section class="results-list" aria-label="搜索结果">
+        {% for result in search_results %}
+            <article class="search-result">
+                {% if result.specific.featured_image %}
+                    <a href="{% pageurl result %}" class="result-image" tabindex="-1" aria-hidden="true">
+                        {% image result.specific.featured_image fill-320x200 format-webp as result_image %}
+                        <img src="{{ result_image.url }}" alt="" loading="lazy">
+                    </a>
+                {% endif %}
+
+                <div class="result-content{% if not result.specific.featured_image %} result-content-full{% endif %}">
+                    <div class="result-meta">
+                        <span class="result-type"><i class="fa fa-file-o" aria-hidden="true"></i>{{ result|verbose_name }}</span>
+                        {% if result.specific.date %}
+                            <span class="result-date"><i class="fa fa-calendar" aria-hidden="true"></i>{{ result.specific.date|date:"Y年m月d日" }}</span>
+                        {% elif result.last_published_at %}
+                            <span class="result-date"><i class="fa fa-calendar" aria-hidden="true"></i>{{ result.last_published_at|date:"Y年m月d日" }}</span>
+                        {% endif %}
+                    </div>
+
+                    <h3 class="result-title"><a href="{% pageurl result %}">{{ result.title }}</a></h3>
+
+                    {% if result.specific.intro %}
+                        <p class="result-intro">{{ result.specific.intro|striptags|truncatechars:190 }}</p>
+                    {% elif result.search_description %}
+                        <p class="result-intro">{{ result.search_description|striptags|truncatechars:190 }}</p>
+                    {% endif %}
+
+                    <a href="{% pageurl result %}" class="view-result">查看详情 <i class="fa fa-angle-right" aria-hidden="true"></i></a>
+                </div>
+            </article>
+        {% empty %}
+            {% if search_query and search_query != 'None' %}
+                <div class="no-results">
+                    <i class="fa fa-search-minus" aria-hidden="true"></i>
+                    <h3>没有找到相关内容</h3>
+                    <p>可以尝试以下方法：</p>
+                    <ul>
+                        <li>检查关键词是否有错别字</li>
+                        <li>减少关键词数量或使用更短的词组</li>
+                        <li>改用含义相近的关键词</li>
+                        {% if start_date and start_date != 'None' or end_date and end_date != 'None' %}<li>放宽发布时间范围</li>{% endif %}
+                        {% if search_type != 'all' %}<li>将内容类型切换为“全部”</li>{% endif %}
+                    </ul>
+                </div>
+            {% else %}
+                <div class="search-welcome-state">
+                    <i class="fa fa-compass" aria-hidden="true"></i>
+                    <h3>输入关键词开始搜索</h3>
+                    <p>支持搜索文章标题、简介和站内页面内容。</p>
+                </div>
+            {% endif %}
+        {% endfor %}
+    </section>
+
+    {% if search_results.has_other_pages %}
+        <nav class="search-pagination" aria-label="搜索结果分页">
+            {% if search_results.has_previous %}
+                <a href="?{% if search_query and search_query != 'None' %}query={{ search_query|urlencode }}&amp;{% endif %}type={{ search_type }}&amp;page={{ search_results.previous_page_number }}{% if start_date and start_date != 'None' %}&amp;start_date={{ start_date }}{% endif %}{% if end_date and end_date != 'None' %}&amp;end_date={{ end_date }}{% endif %}{% if order_by and order_by != 'None' %}&amp;order_by={{ order_by }}{% endif %}" class="pagination-button" rel="prev">
+                    <i class="fa fa-angle-left" aria-hidden="true"></i> 上一页
+                </a>
+            {% else %}
+                <span class="pagination-button disabled"><i class="fa fa-angle-left" aria-hidden="true"></i> 上一页</span>
+            {% endif %}
+
+            <span class="pagination-info">第 <strong>{{ search_results.number }}</strong> / {{ search_results.paginator.num_pages }} 页</span>
+
+            <form method="get" action="{% url 'search:search' %}" class="jump-to-page-form" id="jump-to-page-form-nav">
+                {% if search_query and search_query != 'None' %}<input type="hidden" name="query" value="{{ search_query }}">{% endif %}
+                <input type="hidden" name="type" value="{{ search_type }}">
+                {% if start_date and start_date != 'None' %}<input type="hidden" name="start_date" value="{{ start_date }}">{% endif %}
+                {% if end_date and end_date != 'None' %}<input type="hidden" name="end_date" value="{{ end_date }}">{% endif %}
+                {% if order_by and order_by != 'None' %}<input type="hidden" name="order_by" value="{{ order_by }}">{% endif %}
+                <label for="search-jump-page">跳转</label>
+                <input id="search-jump-page" type="number" name="page" min="1" max="{{ search_results.paginator.num_pages }}"
+                       value="{{ search_results.number }}" aria-label="跳转到页码" class="jump-page-input" required>
+                <button type="submit" class="jump-page-button">确定</button>
+            </form>
+
+            {% if search_results.has_next %}
+                <a href="?{% if search_query and search_query != 'None' %}query={{ search_query|urlencode }}&amp;{% endif %}type={{ search_type }}&amp;page={{ search_results.next_page_number }}{% if start_date and start_date != 'None' %}&amp;start_date={{ start_date }}{% endif %}{% if end_date and end_date != 'None' %}&amp;end_date={{ end_date }}{% endif %}{% if order_by and order_by != 'None' %}&amp;order_by={{ order_by }}{% endif %}" class="pagination-button" rel="next">
+                    下一页 <i class="fa fa-angle-right" aria-hidden="true"></i>
+                </a>
+            {% else %}
+                <span class="pagination-button disabled">下一页 <i class="fa fa-angle-right" aria-hidden="true"></i></span>
+            {% endif %}
+        </nav>
+    {% endif %}
+</div>

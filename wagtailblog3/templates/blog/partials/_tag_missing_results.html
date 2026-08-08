@@ -1,0 +1,8 @@
+{% load wagtailcore_tags %}
+
+<div class="tag-empty-state">
+    <i class="fa fa-exclamation-circle" aria-hidden="true"></i>
+    <h1 tabindex="-1" data-tag-results-heading>标签不存在</h1>
+    <p>没有找到“{{ requested_tag_slug }}”标签。</p>
+    <a href="{% pageurl page %}" class="tag-filter-submit" data-tag-async-link>查看全部标签</a>
+</div>

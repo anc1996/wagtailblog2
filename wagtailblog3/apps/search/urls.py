@@ -8,6 +8,7 @@ app_name = 'search'
 urlpatterns = [
 	# 标准搜索视图
 	path('', views.search, name='search'),
+	path('results/', views.search_results_api, name='search_results_api'),
 	path('suggestions/', views.search_suggestions, name='search_suggestions'),
 	
 	

@@ -16,10 +16,12 @@ from blog.models import (
 	Author,
 	BlogIndexPage,
 	BlogPage,
+	BlogTagIndexPage,
 	BLOG_INDEX_DEFAULT_SORT_PRIMARY,
 	BLOG_INDEX_DEFAULT_SORT_SECONDARY,
 	BLOG_INDEX_ITEMS_PER_PAGE,
 )
+from blog.services.tag_listing import get_tag_index_context
 
 
 AUTHOR_POSTS_PER_PAGE = 10
@@ -311,6 +313,115 @@ def blog_index_results_api(request, pk):
 					'has_next': context['page_obj'].has_next(),
 				},
 				'canonical_url': get_blog_index_canonical_url(
+					page=page,
+					context=context,
+					request=request,
+				),
+			},
+		}
+	)
+	response['Cache-Control'] = 'private, no-store'
+	return response
+
+
+def get_tag_index_canonical_url(*, page, context, request):
+	"""Return the normalized public URL for a tag listing state."""
+	params = {}
+	mode = context['mode']
+	if mode == 'tag_detail' and context['current_tag'] is not None:
+		params['tag'] = context['current_tag'].slug
+	elif mode == 'tag_missing' and context['requested_tag_slug']:
+		params['tag'] = context['requested_tag_slug']
+
+	if context['search_query']:
+		params['q'] = context['search_query']
+	if mode == 'tag_detail':
+		if context['start_date']:
+			params['start_date'] = context['start_date']
+		if context['end_date']:
+			params['end_date'] = context['end_date']
+
+	page_obj = context.get('paged_items')
+	if page_obj is not None and page_obj.number > 1:
+		params['page'] = page_obj.number
+
+	page_url = page.get_url(request=request) or page.url or '/'
+	page_path = urlsplit(page_url).path or '/'
+	return f'{page_path}?{urlencode(params)}' if params else page_path
+
+
+def tag_index_results_api(request, pk):
+	"""Return a server-rendered tag directory or tag-article fragment as JSON."""
+	if request.method != 'GET':
+		response = JsonResponse(
+			{
+				'ok': False,
+				'error': {
+					'code': 'method_not_allowed',
+					'message': '仅支持 GET 请求。',
+				},
+			},
+			status=405,
+		)
+		response['Allow'] = 'GET'
+		response['Cache-Control'] = 'private, no-store'
+		return response
+
+	page = BlogTagIndexPage.objects.live().public().filter(pk=pk).first()
+	if page is None:
+		response = JsonResponse(
+			{
+				'ok': False,
+				'error': {
+					'code': 'tag_index_not_found',
+					'message': '未找到该标签索引页。',
+				},
+			},
+			status=404,
+		)
+		response['Cache-Control'] = 'private, no-store'
+		return response
+
+	context = get_tag_index_context(
+		query_params=request.GET,
+		tag_page_size=page.items_tag_page,
+		article_page_size=page.items_per_page,
+	)
+	page_obj = context.get('paged_items')
+	pagination = None
+	if page_obj is not None:
+		pagination = {
+			'page': page_obj.number,
+			'page_size': page.items_per_page
+			if context['mode'] == 'tag_detail'
+			else page.items_tag_page,
+			'total_pages': page_obj.paginator.num_pages,
+			'has_previous': page_obj.has_previous(),
+			'has_next': page_obj.has_next(),
+		}
+
+	current_tag = context.get('current_tag')
+	response = JsonResponse(
+		{
+			'ok': True,
+			'data': {
+				'mode': context['mode'],
+				'filters': {
+					'tag': current_tag.slug
+					if current_tag is not None
+					else context['requested_tag_slug'],
+					'q': context['search_query'],
+					'start_date': context['start_date'],
+					'end_date': context['end_date'],
+				},
+				'result_count': context['total_results'],
+				'pagination': pagination,
+				'html': render_to_string(
+					'blog/partials/_blog_tag_index_results.html',
+					{'page': page, **context},
+					request=request,
+				),
+				'canonical_url': get_tag_index_canonical_url(
 					page=page,
 					context=context,
 					request=request,

@@ -1,64 +1,149 @@
-# wagtailblog2 Agent Instructions
+# wagtailblog2 协作与发布指令
 
-## Scope and Priority
+## 目标与优先级
 
-Act as the full-stack collaborator for this repository. Follow this priority:
+作为本仓库的全栈协作智能体，延续现有 Django/Wagtail 架构并完成调研、设计、实现、
+测试、发布、回滚与维护。优先级如下：
 
-1. The user's current request and explicit authorization.
-2. Data safety, production stability, and a viable rollback path.
-3. The repository, live configuration, Git state, service state, and test evidence.
-4. Project documentation and Git history.
+1. 用户当前任务与明确授权；
+2. 数据安全、生产稳定性与可回滚性；
+3. 当前代码、Git 状态、真实运行配置、服务状态与测试证据；
+4. 项目文档与 Git 历史；
+5. 经验只能作为候选，不能替代实际核查。
 
-Do not replace the existing architecture based on generic experience. Establish facts from code, configuration, logs, health checks, and service state before diagnosing or changing behavior.
+不根据通用经验重写架构；必须以代码、配置、日志、健康检查和服务状态为准。
 
-## Project Facts To Verify
+## 当前工作区与环境事实
 
-- Repository root: `F:\openclaw\workspace\wagtail\wagtailblog2`; Django package: `wagtailblog3`.
-- Expected test environment: Conda `wagtailblog-test`; expected production environment: Conda `wagtailblog`.
-- Expected production path: `/home/source/Django/wagtail/wagtailblog3`.
-- Expected production stack: Nginx, uWSGI, systemd, MySQL, MongoDB, Redis, MinIO, Elasticsearch, Celery, and Filebeat.
+- Windows 编辑工作区：`F:\openclaw\workspace\wagtail\wagtailblog2`；
+- WSL2 测试工作区：`/mnt/f/openclaw/workspace/wagtail/wagtailblog2`；
+- 两个路径是同一个 NTFS 工作目录与同一个 `.git`，不是两份代码，也不需要同步；
+- Windows 主机不承担 Conda 运行环境；测试 Conda 位于 WSL2：`/root/anaconda3/envs/wagtailblog-test`；
+- Django 包：`wagtailblog3`；仓库根目录包含 `manage.py`；
+- 唯一开发与发布分支：`main`；远程：`origin`；
+- 生产项目：`/home/source/Django/wagtail/wagtailblog3`；生产 Conda：`/root/anaconda3/envs/wagtailblog`；
+- 生产服务：Nginx + uWSGI + systemd，依赖 MySQL、MongoDB、Redis、MinIO、Docker、Elasticsearch、Celery 与 Filebeat。
 
-These facts are starting points, not permission to assume that paths, service names, ports, commits, or deployment methods are current. Verify them for every deployment or service task.
+这些是当前事实的起点。每个发布或服务任务都必须重新核实路径、分支、commit、服务名、
+端口、socket、Conda 路径与环境文件，不能把它们当成永久常量。
 
-## Required Workflow
+## Windows、WSL2 与 Git 规则
 
-For any substantial change, first establish the goal, scope, non-goals, acceptance criteria, data impact, deployment scope, and whether production is involved. Then inspect Git status, relevant code and tests, settings, URLs, Wagtail models, migrations, data flows, and affected services.
+Windows 负责编辑；WSL2 负责使用 `wagtailblog-test` 运行 Django、Celery 和测试，并作为
+Git 发布入口。因为工作树共享，任一端修改文件或创建 commit，另一端立即可见。
 
-Before implementation, state the files to change and not change, storage and service impact, risks, test plan, rollback plan, and any decision requiring user confirmation. Make the smallest coherent change. Review the diff after each verifiable unit. Run proportionate checks and tests before claiming completion.
+- 不要在 Windows 和 WSL2 同时执行 Git 写操作（add、commit、merge、pull、push、rebase），避免共享 `.git/index.lock` 冲突；
+- WSL2 与 Windows 的 SSH key、凭据管理器和全局 Git 配置彼此独立；仓库 `.git/config`、分支和 commit 记录共享；
+- 发布前在 WSL2 的 `/mnt/f/.../wagtailblog2` 执行 Git 状态、提交和推送；
+- 不创建测试分支或环境分支；测试与生产源码都使用 `main`；
+- 不提交 `.env.test`、`.env.production`、凭据、日志、媒体、socket、PID、静态收集目录或运行缓存。
 
-Only deploy an exact, tested commit. Do not deploy uncommitted working-tree state.
+## 环境配置边界
 
-## Data and Production Safety
+所有入口继续使用 `wagtailblog3.settings.dev`。`WAGTAILBLOG_ENV` 只负责让
+`settings/base.py` 选择环境文件，不得为部署修改 `base.py`：
 
-- Treat `BlogPage.body`, StreamField body data, MongoDB body documents, draft snapshots, revision pointers, and `mongo_content_id` as protected data.
-- Keep Markdown as Markdown. Do not permanently replace it with HTML, and preserve the `markdown_block` storage key.
-- Never run `flush`, destructive bulk repair, deletion, data restore, migration, publish, or real save without explicit authorization.
-- Before a production data operation, state impact, backup requirement, execution order, and rollback plan, then obtain confirmation.
-- Never put production credentials, tokens, passwords, keys, or private server details into source code, Git, logs, docs, or final responses.
-- Do not use `git pull` or destructive/full-sync deployment commands against production unless its working-tree status and the operation are explicitly confirmed safe.
+- WSL2 测试环境使用 `wagtailblog3/settings/.env.test` 与 `WAGTAILBLOG_ENV=test`；
+- 生产服务使用 `wagtailblog3/settings/.env.production` 与 `WAGTAILBLOG_ENV=production`；
+- 不复制生产凭据到测试环境，也不复制测试凭据到生产；
+- 生产 systemd unit 只应引用 `.env.production`；已退役的 `observability.env` 不得恢复到项目根目录或重新被 unit 引用；
+- 根目录旧 `.env` 不得作为生产服务的配置来源；任何清理或迁移前先核对引用并保留可恢复备份。
 
-## MCP and Skill Routing
+`load_dotenv(..., override=False)` 不覆盖进程或 systemd 已提供的变量；两个环境文件即使
+同时存在也只读取 `WAGTAILBLOG_ENV` 指定的一个。生产模式缺少 `.env.production` 必须拒绝启动。
 
-Use available capabilities deliberately. Check connection availability when a relevant MCP is needed; do not claim a tool was used if it was unavailable or failed.
+## 数据保护
 
-- Django or Wagtail models, settings, migrations, views, StreamField, admin, or tests: use the Django/Wagtail development skill.
-- Product features, plans, TDD, debugging, and verification: use the matching Superpowers workflow when available.
-- Frontend templates, browser behavior, visual regressions, or responsive UI: use the frontend skills; use Playwright for real browser verification when visual behavior matters.
-- Public documentation or long-form external pages: prefer `fetch_reader` from the `fetch` MCP to obtain article Markdown. Respect robots rules and do not access private hosts without explicit authorization.
-- Database and cache inspection: prefer the Google Toolbox MCP's read-only tools when connected. Use it for MySQL schema/active-query/query-plan inspection, approved Mongo metadata reads, and Redis capacity/keyspace inspection. Never use it for writes unless the user explicitly authorizes a precise write operation.
-- GitHub PRs, issues, Actions, and review work: use the GitHub or CodeRabbit skills/MCP when available. Do not push, create a PR, or change remote state without explicit authorization.
-- CircleCI, Sentry, Render, Temporal, MagicPath, or Plugin Eval work: use the matching installed skill only when the task actually involves that platform or function.
+- BlogPage 正文、StreamField body、MongoDB 正文、草稿快照、revision pointer 与 `mongo_content_id` 是受保护数据；
+- Markdown 必须保持 Markdown 字符串，`markdown_block` 存储 key 不得改变；
+- 未获明确授权不得执行 flush、删除、批量修复、数据恢复、日志清理、迁移、发布页面或真实保存；
+- 生产数据操作前必须说明影响范围、备份、顺序、回滚，并再次获得确认；
+- 不得将凭据、Token、密码、私钥、服务器认证信息写入源码、Git、日志、文档或回复。
 
-MCP tools and skills are aids, not substitutes for repository evidence. Do not invoke unrelated tools merely because they are installed.
+## 研发与发布闭环
 
-## Services and Deployment
+### 1. 调研与设计
 
-`systemctl.md` is the service-maintenance baseline. For any changed service, queue, timer, scheduled job, Filebeat/indexing chain, dependency, environment variable, data directory, log directory, port, socket, uWSGI, Nginx, or reverse-proxy behavior, update `systemctl.md` in the same change.
+处理中大型需求前，明确目标、范围、非目标、验收标准、数据影响与生产范围；检查 Git、
+设置、URL、应用注册、中间件、Wagtail 页面/StreamField、相关测试、迁移、数据流与服务。
+同时确认 MySQL、MongoDB、Redis、Elasticsearch、MinIO、uWSGI、Nginx、Celery、Beat、
+Filebeat、日志、审计及失败补偿的受影响部分。
 
-For each added or changed service, document its name and responsibility, queue/port/socket, project and runtime paths, data and log paths, dependencies and startup order, enable/start/stop/restart commands, health check, retry behavior, rollback, and differences between test and production.
+实施前说明要修改和不修改的文件、数据与服务影响、异常路径、性能/安全风险、测试、
+回滚与需要确认的事项。每完成一个可验证单元检查 diff，避免无关重构。
 
-When service units change, run `systemctl daemon-reload` and verify the appropriate enablement and restart sequence. After a deployment or restart, verify failed units, the active/enabled status of the website, maintenance worker, Celery Beat, and Filebeat, plus socket/port reachability, website/admin access, Django checks, static assets, Redis worker connectivity, queue consumption, Beat scheduling, Filebeat/Elasticsearch health, logs, and task backlog.
+### 2. WSL2 测试与版本确认
 
-## Completion Report
+在 WSL2 共享工作树中使用 `wagtailblog-test` 运行与变更相称的检查：
 
-Report the completed scope, modified files, tested commit, tests and health checks run, whether `systemctl.md` changed, service changes, migrations or production data operations, rollback point, remaining test/production differences, and residual risks. State checks that could not run and why.
+- `python manage.py check`；
+- `python manage.py makemigrations --check --dry-run` 与 `python manage.py migrate --plan`（涉及模型或迁移时）；
+- 相关单元/集成测试；
+- 静态文件、配置、网站、后台、Celery、Beat、Filebeat 和日志链路检查（受影响时）。
+
+只有检查通过后才能形成发布 commit；不得以未提交工作区内容发布。提交前确认：
+
+```bash
+git status --short --branch
+git diff --check
+git diff --cached --check
+```
+
+### 3. GitHub 与生产同步
+
+用户确认可发布且 WSL2 测试通过后，按以下固定顺序完成闭环：
+
+1. 在 WSL2 提交精确 commit 并推送 `origin/main`；
+2. 验证本地 `HEAD`、`origin/main` 与远程 `main` 指向同一 SHA；
+3. 同步生产仓库到同一精确 SHA；
+4. 完成与变更范围相称的生产验收；
+5. 报告 commit、服务状态、数据操作、回滚点与剩余差异。
+
+生产同步前必须确认生产目录是干净、安全的 Git 工作树，分支为 `main`，远程地址正确，
+并检查 `HEAD..origin/main` 的 commit 与文件清单。不得对未知状态执行 `git pull`，不得使用
+`rsync --delete`。已确认安全时使用：
+
+```bash
+git fetch origin --prune
+git diff --name-status HEAD..origin/main
+git merge --ff-only origin/main
+```
+
+生产同步仅能部署已验证 commit。文档-only 变更不重启服务；代码、依赖、Celery、Beat、
+Filebeat、Elasticsearch 或配置变更必须根据实际影响重启对应服务。涉及迁移、生产数据、
+环境文件、systemd unit、端口、队列、外部服务或不可逆操作时，即使 commit 已通过测试，
+仍必须在生产执行前单独说明影响、备份、顺序与回滚并获得确认。
+
+## 服务与 systemctl.md
+
+`systemctl.md` 是测试与生产共同的服务维护基准。任何涉及 service、timer、socket、队列、
+Beat 任务、Filebeat、索引器、依赖服务、环境变量、数据/日志目录、端口、uWSGI、Nginx
+或反向代理的变更，都必须同步更新该文档。
+
+当前应核实的应用服务：
+
+- `wagtailblog3.service`：uWSGI / Django；
+- `wagtailblog3-celery-maintenance.service`：`maintenance` 队列 Worker；
+- `wagtailblog3-celery-beat.service`：定时任务与失败补偿；
+- `wagtailblog3-filebeat.service`：项目日志采集至 Elasticsearch。
+
+不得新增只消费 `email` 或 `default` 队列的 Worker，除非已说明用途、并发、数据影响、
+日志路径与回滚方式并获得确认。
+
+service unit 发生变化后必须执行 `systemctl daemon-reload`，并核对 enable 状态。重启依赖
+顺序为：基础设施 → Django/uWSGI → Worker → Beat → Filebeat → 必要时 Nginx。Elasticsearch
+恢复期间 Filebeat 的短暂连接失败应观察退避恢复，不得连续重启。
+
+生产部署或重启后，按变更范围执行：失败 unit 检查、四个服务 active/enabled、socket/端口、
+首页和后台、Django check、静态文件、Redis/Worker 队列、Beat 调度、Filebeat/Elasticsearch、
+日志与 outbox 检查。服务器重启后必须重新进行完整验收。
+
+## 回滚与交付
+
+部署失败时停止或回退本次涉及的服务，恢复到上一个已验证 commit 或文件清单；只有确认迁移
+兼容时才处理数据库回滚，绝不删除 MongoDB 正文、草稿或 revision 数据。恢复后重新执行
+Django check、服务和访问检查，并记录原因、动作与残余风险。
+
+每次交付报告必须包含：完成范围、实际修改文件、测试与生产 commit、测试结果、测试与生产
+服务状态、`systemctl.md` 是否更新、服务变更、迁移/生产数据操作、健康检查、回滚点、
+环境差异与残余风险。

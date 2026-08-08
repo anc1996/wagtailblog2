@@ -1,5 +1,7 @@
 # 敏感环境配置文件（必须忽略！）
 .env
+wagtailblog3/settings/.env.test
+wagtailblog3/settings/.env.production
 
 # Python 编译文件
 __pycache__/

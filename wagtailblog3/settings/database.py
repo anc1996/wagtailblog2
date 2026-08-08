@@ -38,7 +38,7 @@ def _env_float(name, default):
 # 远程开发依赖服务
 # ==========================================================
 # 本地项目运行在 20.5，数据库与基础设施服务运行在 20.2。
-SERVICE_HOST = '192.168.20.2'
+SERVICE_HOST = os.environ.get("SERVICE_HOST", "127.0.0.1")
 
 # ==========================================================
 # MySQL 数据库配置
@@ -46,11 +46,11 @@ SERVICE_HOST = '192.168.20.2'
 DATABASES = {
 	'default': {
 		'ENGINE': 'django.db.backends.mysql',
-		'NAME': 'wagtailsoftblog_test',
-		'USER': 'root',
-		'PASSWORD': '123456',
-		'HOST': SERVICE_HOST,
-		'PORT': '3306',
+		'NAME': os.environ.get('MYSQL_NAME', 'wagtailblog'),
+		'USER': os.environ.get('MYSQL_USER', 'root'),
+		'PASSWORD': os.environ.get('MYSQL_PASSWORD', ''),
+		'HOST': os.environ.get('MYSQL_HOST', SERVICE_HOST),
+		'PORT': os.environ.get('MYSQL_PORT', '3306'),
 		'OPTIONS': {
 			'charset': 'utf8mb4',
 			'collation': 'utf8mb4_general_ci',
@@ -61,27 +61,29 @@ DATABASES = {
 # ==========================================================
 # Redis 配置
 # ==========================================================
-REDIS_HOST = SERVICE_HOST
-REDIS_PORT = 6379
-REDIS_PASSWORD = '123456'
-REDIS_DB = 1  # 用于计数器的数据库
+REDIS_HOST = os.environ.get('REDIS_HOST', SERVICE_HOST)
+REDIS_PORT = _env_int('REDIS_PORT', 6379)
+REDIS_PASSWORD = os.environ.get('REDIS_PASSWORD', '')
+REDIS_DB = _env_int('REDIS_DB', 1)  # 用于计数器的数据库
+REDIS_CACHE_DB = _env_int('REDIS_CACHE_DB', 1)
+REDIS_COMMENT_CACHE_DB = _env_int('REDIS_COMMENT_CACHE_DB', 2)
 
 # Redis 缓存配置
 CACHES = {
 	'default': {
 		'BACKEND': 'django_redis.cache.RedisCache',
-		'LOCATION': f'redis://{REDIS_HOST}:6379/1',
+		'LOCATION': f'redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_CACHE_DB}',
 		'OPTIONS': {
 			'CLIENT_CLASS': 'django_redis.client.DefaultClient',
-			'PASSWORD': '123456'
+			'PASSWORD': REDIS_PASSWORD
 		}
 	},
 	'comment_rate_limit_cache': {  # 新的缓存实例，专门用于评论频率限制
 		'BACKEND': 'django_redis.cache.RedisCache',
-		'LOCATION': f'redis://{REDIS_HOST}:6379/2',  # 使用不同的Redis DB，例如 DB 2
+		'LOCATION': f'redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_COMMENT_CACHE_DB}',
 		'OPTIONS': {
 			'CLIENT_CLASS': 'django_redis.client.DefaultClient',
-			'PASSWORD': '123456'
+			'PASSWORD': REDIS_PASSWORD
 		}
 	}
 }
@@ -90,28 +92,28 @@ CACHES = {
 # MongoDB 配置
 # ==========================================================
 MONGO_DB = {
-	'NAME': 'wagtailblog_test',
-	'HOST': SERVICE_HOST,
-	'PORT': 27017,
+	'NAME': os.environ.get('MONGO_NAME', 'wagtailblog'),
+	'HOST': os.environ.get('MONGO_HOST', SERVICE_HOST),
+	'PORT': _env_int('MONGO_PORT', 27017),
 }
 
 # MongoDB调试信息开关
-MONGO_DEBUG = True
+MONGO_DEBUG = _env_bool('MONGO_DEBUG', False)
 
 # ==========================================================
 # MinIO 存储配置
 # ==========================================================
-AWS_STORAGE_BUCKET_NAME = 'wagtail-test-bucket'
-AWS_S3_ENDPOINT_URL = 'http://192.168.20.2:9000'
-AWS_ACCESS_KEY_ID = 'admin'
-AWS_SECRET_ACCESS_KEY = '12345678'
+AWS_STORAGE_BUCKET_NAME = os.environ.get('MINIO_BUCKET', 'wagtailblog-media')
+AWS_S3_ENDPOINT_URL = os.environ.get('MINIO_ENDPOINT', f'http://{SERVICE_HOST}:9000')
+AWS_ACCESS_KEY_ID = os.environ.get('MINIO_ACCESS_KEY', '')
+AWS_SECRET_ACCESS_KEY = os.environ.get('MINIO_SECRET_KEY', '')
 AWS_S3_OBJECT_PARAMETERS = {
 	'CacheControl': 'max-age=86400',
 }
-AWS_QUERYSTRING_AUTH = False
-AWS_S3_FILE_OVERWRITE = False
-AWS_DEFAULT_ACL = 'public-read'
-AWS_S3_VERIFY = False
+AWS_QUERYSTRING_AUTH = _env_bool('MINIO_QUERYSTRING_AUTH', False)
+AWS_S3_FILE_OVERWRITE = _env_bool('MINIO_FILE_OVERWRITE', False)
+AWS_DEFAULT_ACL = os.environ.get('MINIO_DEFAULT_ACL', 'public-read')
+AWS_S3_VERIFY = _env_bool('MINIO_VERIFY', False)
 
 # ==========================================================
 # 存储后端配置
@@ -394,16 +396,16 @@ WAGTAILSEARCH_BACKENDS = {
 		
 		# 2. ES 集群的物理连接地址
 		# 本地单节点或集群网关的 REST API 端点
-		'URLS': [f'http://{SERVICE_HOST}:9200'],
+		'URLS': [os.environ.get('ELASTICSEARCH_URL', f'http://{SERVICE_HOST}:9200')],
 		
 		# 3. 隔离命名空间（索引前缀）
 		# 在多套环境（如开发/测试/生产）公用同一个 ES 集群时，防止索引冲突
 		# 实际生成的索引名形如: wagtailblog__apps_blog_blogpage 等
-		'INDEX_PREFIX': 'wagtailblog-test',
+		'INDEX_PREFIX': os.environ.get('ELASTICSEARCH_INDEX_PREFIX', 'wagtailblog-test'),
 		
 		# 4. HTTP 网络超时时间（单位：秒）
 		# 限制 Django 向 ES 发送检索或批量建立索引（Bulk Indexing）时的最大等待时间
-		'TIMEOUT': 10,
+		'TIMEOUT': _env_int('ELASTICSEARCH_TIMEOUT', 10),
 		
 		# =========================================================================
 		# 核心高级配置：深度定制 Elasticsearch 索引级别的分词行为 (IK Analyzer)

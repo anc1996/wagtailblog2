@@ -20,6 +20,32 @@ uWSGI 的 6051 是仅供本机诊断的 HTTP 端口，不作为对外入口。
 | `wagtailblog3-celery-beat.service` | 每 30 秒补偿日志索引 outbox | 是 |
 | `wagtailblog3-filebeat.service` | 采集项目日志并写入 Elasticsearch | 是 |
 
+## 分支与环境配置
+
+测试代码仓库固定使用 `test` 分支，目录为
+`/mnt/f/openclaw/workspace/wagtail/wagtailblog2`；生产代码仓库固定使用 `main`
+分支，目录为 `/home/source/Django/wagtail/wagtailblog3`。两条分支的已跟踪源码应保持
+一致，环境差异只能存在于未跟踪的环境文件和运行目录中。
+
+数据库、Redis、MongoDB、MinIO、Wagtail Elasticsearch、SMTP 和 Django 密钥统一放在：
+
+```text
+wagtailblog3/settings/.env.test
+wagtailblog3/settings/.env.production
+```
+
+这两个文件已加入 `.gitignore`，仓库只提交 `wagtailblog3/settings/.env.example`。
+进程通过 `WAGTAILBLOG_ENV=test|production` 选择配置，所有入口统一使用
+`wagtailblog3.settings.runtime`。生产 systemd unit 应使用：
+
+```ini
+EnvironmentFile=/home/source/Django/wagtail/wagtailblog3/wagtailblog3/settings/.env.production
+```
+
+现有根目录 `observability.env` 在服务尚未迁移前继续保留；迁移 Filebeat 和日志变量后，
+应删除 unit 对它的依赖，并执行 `systemctl daemon-reload`。不得在 `database.py` 或
+`email.py` 中重新写入环境专用值。
+
 ## 服务变更登记规则
 
 以后每次功能更新、异步任务更新、定时任务更新、日志链路更新或外部依赖更新，
@@ -130,7 +156,7 @@ Celery Beat 状态文件位于：
 ```bash
 cd /home/source/Django/wagtail/wagtailblog3
 set -a
-. ./observability.env
+. ./wagtailblog3/settings/.env.production
 set +a
 
 /root/anaconda3/envs/wagtailblog/bin/python manage.py check
@@ -146,7 +172,8 @@ curl -I -H 'Host: wagtailblog.docs' http://127.0.0.1:6050/admin/login/
 ## 发布与静态文件
 
 生产环境采用文件清单部署，不对生产目录执行 `git pull` 或 `rsync --delete`。
-部署必须保留生产的 `wagtailblog3/settings/database.py`、`observability.env`、
+部署必须保留生产的 `wagtailblog3/settings/.env.production`、旧版 `observability.env`（在
+所有 unit 完成迁移前）、
 `logs/`、`media/` 和 socket 文件。
 
 生产备份统一存放在 `/home/source/Django/wagtail/backups/`：
@@ -160,7 +187,7 @@ curl -I -H 'Host: wagtailblog.docs' http://127.0.0.1:6050/admin/login/
 
 ```bash
 set -a
-. ./observability.env
+. ./wagtailblog3/settings/.env.production
 set +a
 
 /root/anaconda3/envs/wagtailblog/bin/python manage.py check

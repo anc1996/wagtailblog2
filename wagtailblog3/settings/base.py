@@ -7,6 +7,7 @@ Django settings for wagtailblog3 project.
 # 在项目中构建路径，如下所示： os.path.join（BASE_DIR， ...）
 import os
 import sys
+from dotenv import load_dotenv
 
 from django.contrib import messages
 
@@ -16,6 +17,19 @@ PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # 项目的根目录:/xx/xx/wagtailblog3
 BASE_DIR = os.path.dirname(PROJECT_DIR)
+
+# Load the environment-specific settings file before importing configuration modules.
+WAGTAILBLOG_ENV = os.environ.get("WAGTAILBLOG_ENV", "test").strip().lower()
+if WAGTAILBLOG_ENV not in {"test", "production"}:
+    raise RuntimeError("WAGTAILBLOG_ENV must be 'test' or 'production'")
+
+ENV_FILE = os.path.join(PROJECT_DIR, "settings", f".env.{WAGTAILBLOG_ENV}")
+if os.path.exists(ENV_FILE):
+    load_dotenv(ENV_FILE, override=False)
+else:
+    load_dotenv(os.path.join(BASE_DIR, ".env"), override=False)
+
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "")
 
 # Django 应用统一放在项目包的 apps 目录中。
 APPS_DIR = os.path.join(PROJECT_DIR, "apps")
@@ -189,15 +203,6 @@ AUTH_PASSWORD_VALIDATORS = [  # 定义密码验证器列表，用于检查用户
         "NAME": "django.contrib.auth.password_validation.NumericPasswordValidator",
     },
 ]
-
-
-from dotenv import load_dotenv
-
-# 加载环境变量
-load_dotenv()
-
-
-
 
 
 # 1. 基础 Django 配置

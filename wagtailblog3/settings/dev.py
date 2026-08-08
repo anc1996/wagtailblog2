@@ -5,9 +5,6 @@ from .base import *
 # 安全警告：请勿在生产环境中开启调试的情况下运行！
 DEBUG = True
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = "django-insecure-k@nr)u9ylv@5(i_cdp0za#$ofi0764)9(6r9*2^30(-7cwz)h="
-
 # 开发环境表单调试设置
 FORM_DEBUG = True  # 启用表单调试模式
 WAGTAILFORMS_HELP_TEXT_ALLOW_HTML = True  # 允许在帮助文本中使用HTML
@@ -82,7 +79,7 @@ EMAIL_DEBUG_ENABLED = DEBUG
 
 if DEBUG and EMAIL_DEBUG_ENABLED:
 	# 合并邮件调试配置
-	email_debug_config = get_email_debug_config()
+	email_debug_config = get_email_debug_config(log_dir=LOG_DIR)
 	
 	# 更新处理器
 	LOGGING['handlers'].update(email_debug_config['handlers'])

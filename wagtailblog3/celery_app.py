@@ -45,7 +45,7 @@ Celery 配置说明：
 # ==========================================================
 # 设置 Django 默认设置模块
 # ==========================================================
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'wagtailblog3.settings.dev')
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'wagtailblog3.settings.runtime')
 
 # ==========================================================
 # 创建 Celery 应用实例

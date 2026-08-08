@@ -7,20 +7,23 @@
 # 邮件服务配置
 # ==========================================================
 
+import os
 
 # QQ邮箱SMTP配置（推荐配置）
-EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-EMAIL_HOST = 'smtp.qq.com'
-EMAIL_PORT = 465
-EMAIL_USE_SSL = True
-EMAIL_USE_TLS = False
-EMAIL_HOST_USER = '834195283@qq.com'
-EMAIL_HOST_PASSWORD = 'zmevrjqtgshkbeij'
-DEFAULT_FROM_EMAIL = '834195283@qq.com'
+EMAIL_BACKEND = os.environ.get(
+	'EMAIL_BACKEND', 'django.core.mail.backends.smtp.EmailBackend'
+)
+EMAIL_HOST = os.environ.get('EMAIL_HOST', 'localhost')
+EMAIL_PORT = int(os.environ.get('EMAIL_PORT', '25'))
+EMAIL_USE_SSL = os.environ.get('EMAIL_USE_SSL', 'false').lower() in {'1', 'true', 'yes', 'on'}
+EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', 'false').lower() in {'1', 'true', 'yes', 'on'}
+EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
+DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', EMAIL_HOST_USER)
 
 # 邮件发送相关设置
-EMAIL_TIMEOUT = 30  # 邮件发送超时时间（秒）
-EMAIL_MAX_RECIPIENTS = 50  # 单封邮件最大收件人数量
+EMAIL_TIMEOUT = int(os.environ.get('EMAIL_TIMEOUT', '30'))
+EMAIL_MAX_RECIPIENTS = int(os.environ.get('EMAIL_MAX_RECIPIENTS', '50'))
 
 # 异步邮件发送开关（可在管理后台动态控制）
 ASYNC_EMAIL_ENABLED = True

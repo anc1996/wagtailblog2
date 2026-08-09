@@ -1,0 +1,13 @@
+repos:
+  - repo: local
+    hooks:
+      - id: staged-diff-check
+        name: Check staged diff
+        entry: bash -lc 'git diff --cached --check'
+        language: system
+        pass_filenames: false
+      - id: django-check-test
+        name: Django check (wagtailblog-test)
+        entry: bash -lc 'WAGTAILBLOG_ENV=test /root/anaconda3/envs/wagtailblog-test/bin/python manage.py check'
+        language: system
+        pass_filenames: false

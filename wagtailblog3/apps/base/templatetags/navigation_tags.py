@@ -2,7 +2,8 @@
 from django import template
 from wagtail.models import Site
 
-from base.models import FooterText
+from base.models import FooterText, NavigationSettings
+from base.services.social_links import resolve_navigation_social_links
 
 # 注册模板标签库
 register = template.Library()
@@ -30,3 +31,13 @@ def get_footer_text(context):
 def get_site_root(context):
 	"""获取当前请求的站点根页面"""
 	return Site.find_for_request(context["request"]).root_page # 根据当前请求找到对应站点的根页面。
+
+
+@register.simple_tag(takes_context=True)
+def get_navigation_social_links(context):
+	"""返回经校验和去重的结构化页脚社交链接。"""
+
+	request = context.get("request")
+	if request is None:
+		return []
+	return resolve_navigation_social_links(NavigationSettings.load(request))

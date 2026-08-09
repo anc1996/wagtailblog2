@@ -2,10 +2,12 @@
 from django.urls import path
 from . import views
 from .views import AuthorListView, AuthorDetailView
+from .analytics_views import record_engagement
 
 app_name = 'blog'
 
 urlpatterns = [
+    path('api/analytics/engagement/', record_engagement, name='engagement'),
     path('api/reactions/<int:page_id>/toggle/', views.toggle_reaction, name='toggle_reaction'),
     path('api/reactions/<int:page_id>/counts/', views.get_reaction_counts, name='get_reaction_counts'),
     path('api/index-pages/<int:pk>/results/', views.blog_index_results_api, name='blog_index_results_api'),

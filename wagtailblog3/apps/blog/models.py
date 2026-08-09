@@ -3,6 +3,7 @@ import logging,uuid,json,re,time
 
 from django.db.models.functions import Coalesce, Lower
 from django.utils import timezone
+from django.utils.text import slugify
 from django.utils.dateparse import parse_date
 from django.core.paginator import Paginator
 from django.db import models
@@ -929,10 +930,6 @@ class BlogPage(Page):
 		return context
 
 	def serve(self, request):
-		# 访问计数与正文读取分离；计数失败不应阻断文章渲染。
-		if self.pk:
-			PageViewCounter(self.pk).record(request)
-		
 		# 读取一次 Mongo 正文，同时计算前端资源需求，避免模板阶段重复访问数据库。
 		mongo_content = self.get_content_from_mongodb()
 		body_data = mongo_content.get('body', []) if mongo_content else []
@@ -955,7 +952,11 @@ class BlogPage(Page):
 				self.body = StreamValue(self.body.stream_block, source_body_data, is_lazy=True)
 		
 		# 父类负责站点、预览和模板选择；此时 self.body 已经是可渲染的 StreamValue。
-		return super().serve(request)
+		response = super().serve(request)
+		# 只在页面成功交给响应链路后标记统计对象，避免正文读取或模板渲染失败也被计入浏览量。
+		if self.pk:
+			request._blog_analytics_page_id = self.pk
+		return response
 	
 	@property
 	def body_text(self):
@@ -1109,19 +1110,37 @@ class BlogPageGalleryImage(Orderable):
 
 # 页面访问记录模型
 class PageView(models.Model):
-    page           = models.ForeignKey('wagtailcore.Page', on_delete=models.CASCADE, related_name='page_views')
-    date           = models.DateField()                                          # 访问日期，用于按天查询
-    user           = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
-    ip_address     = models.GenericIPAddressField()
-    user_agent     = models.CharField(max_length=255, blank=True)
-    last_viewed_at = models.DateTimeField()                                      # 当天最后一次访问时间，可更新
+    page = models.ForeignKey('wagtailcore.Page', on_delete=models.CASCADE, related_name='page_views')
+    date = models.DateField()  # 访问日期，用于按天查询
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
+    ip_address = models.GenericIPAddressField()
+    user_agent = models.CharField(max_length=255, blank=True)
+    visitor_key = models.CharField(max_length=64, null=True, blank=True)
+    view_count = models.PositiveIntegerField(default=0)
+    first_viewed_at = models.DateTimeField(null=True, blank=True)
+    last_viewed_at = models.DateTimeField()  # 当天最后一次访问时间，可更新
+    source_category = models.CharField(max_length=20, default='direct')
+    referrer_host = models.CharField(max_length=255, blank=True)
+    engaged = models.BooleanField(default=False)
+    max_scroll_percent = models.PositiveSmallIntegerField(default=0)
+    scroll_50_reached = models.BooleanField(default=False)
+    scroll_90_reached = models.BooleanField(default=False)
+    active_reading_seconds = models.PositiveIntegerField(default=0)
 
     class Meta:
         verbose_name = "页面访问记录"
         verbose_name_plural = "页面访问记录"
         indexes = [
             models.Index(fields=['page', 'date']),
-            models.Index(fields=['page', 'date', 'ip_address']),                 # 加速唯一性查询
+            models.Index(fields=['page', 'date', 'ip_address']),  # 兼容旧审计检索
+            models.Index(fields=['date', 'source_category']),
+        ]
+        constraints = [
+            # NULL 兼容尚未回填的历史记录；新记录始终写入HMAC摘要，因此可由数据库保证并发去重。
+            models.UniqueConstraint(
+                fields=['page', 'date', 'visitor_key'],
+                name='blog_pageview_page_date_visitor_uniq',
+            ),
         ]
 
     def admin_page_title(self):
@@ -1154,8 +1173,16 @@ class PageView(models.Model):
 class PageViewCount(models.Model):
 	page = models.ForeignKey('wagtailcore.Page', on_delete=models.CASCADE, related_name='view_counts')
 	date = models.DateField()
-	count = models.PositiveIntegerField(default=0)  # 总访问量
-	unique_count = models.PositiveIntegerField(default=0)  # 唯一访问量
+	# 下列两个字段保留旧口径，不能与V2字段相加或回填。
+	count = models.PositiveIntegerField(default=0)
+	unique_count = models.PositiveIntegerField(default=0)
+	view_count_v2 = models.PositiveBigIntegerField(default=0)
+	unique_visitor_count_v2 = models.PositiveBigIntegerField(default=0)
+	engaged_visitor_count = models.PositiveBigIntegerField(default=0)
+	scroll_50_visitor_count = models.PositiveBigIntegerField(default=0)
+	scroll_90_visitor_count = models.PositiveBigIntegerField(default=0)
+	active_reading_seconds = models.PositiveBigIntegerField(default=0)
+	v2_started_at = models.DateTimeField(null=True, blank=True)
 	
 	class Meta:
 		verbose_name = "页面访问统计"
@@ -1163,7 +1190,116 @@ class PageViewCount(models.Model):
 		unique_together = ('page', 'date')
 	
 	def __str__(self):
-		return f"{self.page.title} - {self.date} - {self.count}次访问"
+		return f"{self.page.title} - {self.date} - {self.view_count_v2}次浏览"
+
+
+class PageTrafficSourceDaily(models.Model):
+	"""按日保存来源聚合，避免后台报表扫描短期访问审计明细。"""
+
+	page = models.ForeignKey('wagtailcore.Page', on_delete=models.CASCADE, related_name='traffic_sources')
+	date = models.DateField()
+	source_category = models.CharField(max_length=20)
+	view_count = models.PositiveBigIntegerField(default=0)
+	unique_visitor_count = models.PositiveBigIntegerField(default=0)
+
+	class Meta:
+		verbose_name = "页面流量来源统计"
+		verbose_name_plural = "页面流量来源统计"
+		constraints = [
+			models.UniqueConstraint(
+				fields=['page', 'date', 'source_category'],
+				name='blog_traffic_source_daily_uniq',
+			),
+		]
+		indexes = [models.Index(fields=['date', 'source_category'])]
+
+
+class ArticleEngagementSession(models.Model):
+	"""保存短期阅读会话的最新绝对状态，使Beacon重试不会重复累计。"""
+
+	page = models.ForeignKey('wagtailcore.Page', on_delete=models.CASCADE, related_name='engagement_sessions')
+	date = models.DateField()
+	visitor_key = models.CharField(max_length=64)
+	session_id = models.UUIDField()
+	sequence = models.PositiveIntegerField(default=0)
+	engaged = models.BooleanField(default=False)
+	max_scroll_percent = models.PositiveSmallIntegerField(default=0)
+	active_reading_seconds = models.PositiveIntegerField(default=0)
+	created_at = models.DateTimeField(auto_now_add=True)
+	updated_at = models.DateTimeField(auto_now=True)
+
+	class Meta:
+		verbose_name = "文章阅读会话"
+		verbose_name_plural = "文章阅读会话"
+		constraints = [
+			models.UniqueConstraint(
+				fields=['page', 'session_id'],
+				name='blog_engagement_page_session_uniq',
+			),
+		]
+		indexes = [models.Index(fields=['date', 'visitor_key'])]
+
+
+class FeedRequestDaily(models.Model):
+	"""按订阅源范围聚合真实的RSS和Atom响应，不把请求数称为订阅人数。"""
+
+	SCOPE_GLOBAL = 'global'
+	SCOPE_TAG = 'tag'
+	SCOPE_AUTHOR = 'author'
+	SCOPE_CHOICES = [
+		(SCOPE_GLOBAL, '全站'),
+		(SCOPE_TAG, '标签'),
+		(SCOPE_AUTHOR, '作者'),
+	]
+	FORMAT_RSS = 'rss'
+	FORMAT_ATOM = 'atom'
+	FORMAT_CHOICES = [(FORMAT_RSS, 'RSS'), (FORMAT_ATOM, 'Atom')]
+
+	site = models.ForeignKey('wagtailcore.Site', on_delete=models.CASCADE, related_name='feed_request_counts')
+	locale = models.ForeignKey('wagtailcore.Locale', on_delete=models.CASCADE, related_name='feed_request_counts')
+	date = models.DateField()
+	scope_type = models.CharField(max_length=10, choices=SCOPE_CHOICES)
+	scope_id = models.PositiveIntegerField(default=0)
+	scope_slug = models.CharField(max_length=255, blank=True)
+	scope_label = models.CharField(max_length=255, blank=True)
+	feed_format = models.CharField(max_length=10, choices=FORMAT_CHOICES)
+	response_200_count = models.PositiveBigIntegerField(default=0)
+	response_304_count = models.PositiveBigIntegerField(default=0)
+	estimated_client_count = models.PositiveBigIntegerField(default=0)
+
+	class Meta:
+		verbose_name = "订阅源请求统计"
+		verbose_name_plural = "订阅源请求统计"
+		constraints = [
+			models.UniqueConstraint(
+				fields=['site', 'locale', 'date', 'scope_type', 'scope_id', 'feed_format'],
+				name='blog_feed_request_daily_uniq',
+			),
+		]
+		indexes = [models.Index(fields=['date', 'scope_type', 'scope_id'])]
+
+
+class FeedClientDaily(models.Model):
+	"""短期保留每日客户端摘要，仅用于估算活跃客户端。"""
+
+	site = models.ForeignKey('wagtailcore.Site', on_delete=models.CASCADE)
+	locale = models.ForeignKey('wagtailcore.Locale', on_delete=models.CASCADE)
+	date = models.DateField()
+	scope_type = models.CharField(max_length=10, choices=FeedRequestDaily.SCOPE_CHOICES)
+	scope_id = models.PositiveIntegerField(default=0)
+	feed_format = models.CharField(max_length=10, choices=FeedRequestDaily.FORMAT_CHOICES)
+	client_key = models.CharField(max_length=64)
+
+	class Meta:
+		verbose_name = "订阅源客户端摘要"
+		verbose_name_plural = "订阅源客户端摘要"
+		constraints = [
+			models.UniqueConstraint(
+				fields=['site', 'locale', 'date', 'scope_type', 'scope_id', 'feed_format', 'client_key'],
+				name='blog_feed_client_daily_uniq',
+			),
+		]
+
 
 
 # 反应类型模型
@@ -1210,6 +1346,7 @@ class Author(models.Model):
 	"""作者模型"""
 	
 	name = models.CharField(max_length=255)  # 作者名称
+	slug = models.SlugField(max_length=255, unique=True, blank=True, allow_unicode=True)
 	author_image = models.ForeignKey(
 		'blog.BlogImage',
 		null=True,  # 允许为空
@@ -1239,12 +1376,25 @@ class Author(models.Model):
 	# 因此它们的编辑界面不会分为单独的“内容”/“推广”/“设置”选项卡。因此无需区分“内容面板”和“推广面板”。
 	panels = [
 		FieldPanel('name'),
+		FieldPanel('slug'),
 		FieldPanel('author_image'),
 		FieldPanel('bio', heading="个人简介"),  # 使用 StreamFieldPanel 显示富文本简介
 	]  # 在管理界面中显示的字段
 	
 	def __str__(self):
 		return self.name
+
+	def save(self, *args, **kwargs):
+		"""新作者生成稳定地址；改名不改变已有订阅地址。"""
+		if not self.slug:
+			base_slug = slugify(self.name, allow_unicode=True) or "author"
+			candidate = base_slug
+			counter = 2
+			while type(self).objects.exclude(pk=self.pk).filter(slug=candidate).exists():
+				candidate = f"{base_slug}-{counter}"
+				counter += 1
+			self.slug = candidate
+		return super().save(*args, **kwargs)
 	
 	# 在 Author 类中添加这个方法
 	def get_bio_preview(self, word_limit=3):

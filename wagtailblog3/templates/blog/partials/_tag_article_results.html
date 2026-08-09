@@ -5,6 +5,7 @@
     <h1>{{ current_tag.name }}</h1>
     <p>浏览所有标记为“{{ current_tag.name }}”的文章</p>
     <span class="tag-page-count">共 {{ total_results }} 篇文章</span>
+    <a class="tag-filter-clear" href="{% url 'blog_feed:tag_rss' tag_slug=current_tag.slug %}"><i class="fa fa-rss" aria-hidden="true"></i> 订阅此标签</a>
 </header>
 
 <section class="tag-filter-card" aria-label="标签文章筛选">

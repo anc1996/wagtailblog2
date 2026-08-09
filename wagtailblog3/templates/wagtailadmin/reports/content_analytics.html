@@ -1,0 +1,68 @@
+{% extends "wagtailadmin/base.html" %}
+{% load static %}
+
+{% block titletag %}内容分析{% endblock %}
+
+{% block extra_css %}
+  {{ block.super }}
+  <link rel="stylesheet" href="{% static 'blog/css/content-analytics-admin.css' %}?v=20260809-3">
+{% endblock %}
+
+{% block content %}
+<header class="nice-padding">
+  <div class="row"><div class="left"><h1 class="icon icon-site">内容分析</h1></div></div>
+</header>
+
+<div class="nice-padding analytics-dashboard">
+  <form method="get" class="analytics-filters">
+    <label>开始日期<input type="date" name="start_date" value="{{ filters.start_date|date:'Y-m-d' }}"></label>
+    <label>结束日期<input type="date" name="end_date" value="{{ filters.end_date|date:'Y-m-d' }}"></label>
+    <label>作者<select name="author"><option value="">全部作者</option>{% for author in authors %}<option value="{{ author.pk }}"{% if filters.author_id == author.pk %} selected{% endif %}>{{ author.name }}</option>{% endfor %}</select></label>
+    <label>标签<select name="tag"><option value="">全部标签</option>{% for tag in tags %}<option value="{{ tag.pk }}"{% if filters.tag_id == tag.pk %} selected{% endif %}>{{ tag.name }}</option>{% endfor %}</select></label>
+    <label>语言<select name="locale"><option value="">全部语言</option>{% for locale in locales %}<option value="{{ locale.pk }}"{% if filters.locale_id == locale.pk %} selected{% endif %}>{{ locale.language_code }}</option>{% endfor %}</select></label>
+    <label>Feed 范围<select name="feed_scope"><option value="">全部范围</option><option value="global"{% if filters.feed_scope == 'global' %} selected{% endif %}>全站</option><option value="tag"{% if filters.feed_scope == 'tag' %} selected{% endif %}>标签</option><option value="author"{% if filters.feed_scope == 'author' %} selected{% endif %}>作者</option></select></label>
+    <label>Feed 格式<select name="feed_format"><option value="">全部格式</option><option value="rss"{% if filters.feed_format == 'rss' %} selected{% endif %}>RSS</option><option value="atom"{% if filters.feed_format == 'atom' %} selected{% endif %}>Atom</option></select></label>
+    <div class="analytics-filter-actions"><button type="submit" class="button">应用筛选</button><a href="?" class="button button-secondary">重置</a><a href="?{{ export_query }}" class="button button-secondary">导出 CSV</a></div>
+  </form>
+
+  <section class="analytics-metrics" aria-label="内容指标总览">
+    <div><span>浏览量</span><strong>{{ overview.views }}</strong></div>
+    <div><span>独立访客</span><strong>{{ overview.visitors }}</strong></div>
+    <div><span>有效阅读率</span><strong>{{ overview.engagement_rate }}%</strong></div>
+    <div><span>90% 到达率</span><strong>{{ overview.reach_90_rate }}%</strong></div>
+    <div><span>平均活跃时间</span><strong>{{ overview.average_active_seconds }} 秒</strong></div>
+  </section>
+
+  <section class="analytics-section">
+    <h2>访问趋势</h2>
+    <div class="analytics-chart"><canvas id="content-analytics-trend" aria-label="访问趋势图"></canvas></div>
+    {{ trend_chart|json_script:"content-analytics-trend-data" }}
+  </section>
+
+  <section class="analytics-section">
+    <h2>文章表现</h2>
+    <div
+      class="analytics-articles"
+      data-analytics-articles
+      data-url="{% url 'content_analytics_articles' %}"
+      aria-busy="true"
+    >
+      <div class="analytics-async-status" data-analytics-status role="status" aria-live="polite">正在加载文章数据…</div>
+      <div data-analytics-content>
+        <div class="analytics-table-placeholder" aria-hidden="true"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="analytics-section analytics-split">
+    <div><h2>流量来源</h2><table class="listing"><thead><tr><th>来源</th><th>浏览量</th><th>独立访客</th></tr></thead><tbody>{% for source in sources %}<tr><td>{{ source.source_category }}</td><td>{{ source.views }}</td><td>{{ source.visitors }}</td></tr>{% empty %}<tr><td colspan="3">暂无来源数据。</td></tr>{% endfor %}</tbody></table></div>
+    <div><h2>Feed 兴趣</h2><p class="help-block">客户端数量是每日摘要估算值，代理阅读器可能合并多位订阅者。</p><table class="listing"><thead><tr><th>范围</th><th>格式</th><th>200</th><th>304</th><th>估算客户端</th></tr></thead><tbody>{% for feed in feeds %}<tr><td>{% if feed.scope_label %}{{ feed.scope_label }}{% else %}全站{% endif %}</td><td>{{ feed.feed_format|upper }}</td><td>{{ feed.responses_200 }}</td><td>{{ feed.responses_304 }}</td><td>{{ feed.estimated_clients }}</td></tr>{% empty %}<tr><td colspan="5">暂无 Feed 请求数据。</td></tr>{% endfor %}</tbody></table></div>
+  </section>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+  {{ block.super }}
+  <script src="{% static 'vendor/chartjs/chart.umd.js' %}?v=4.4.8"></script>
+  <script src="{% static 'blog/js/content-analytics-admin.js' %}?v=20260809-3"></script>
+{% endblock %}

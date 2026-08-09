@@ -1,5 +1,6 @@
 # 博客应用的 Wagtail 后台扩展
 
+import csv
 import logging
 
 from django.conf import settings
@@ -8,13 +9,15 @@ from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 from django.db.models import Sum
 from django.shortcuts import render, get_object_or_404
+from django.core.exceptions import PermissionDenied
+from django.http import HttpResponse
+from django.core.paginator import Paginator
 from django.urls import path, reverse
-from django.contrib import messages
-from django.views.generic.edit import UpdateView
 from django.utils.decorators import method_decorator
+from django.views.decorators.http import require_GET
 from wagtail import hooks
 
-from wagtail.models import Page
+from wagtail.models import Page, Site
 from wagtail.admin.views.reports import ReportView
 from wagtail.admin.menu import MenuItem
 from wagtail.admin.ui.tables import Column, Table
@@ -25,7 +28,7 @@ from wagtail.snippets.models import register_snippet
 
 from .admin import PageViewSnippetViewSet, TagsSnippetViewSet
 from .models import PageViewCount
-from .forms import PageViewCountForm
+from .services.content_analytics import ContentAnalyticsFilters, ContentAnalyticsQueryService
 from .admin_image_upload import upload_vditor_image
 from . import widget_adapters  # noqa: F401
 
@@ -109,14 +112,19 @@ def register_page_views_report_url():
 		template_name = 'wagtailadmin/reports/page_views_report.html'
 		title = "页面访问统计"
 		header_icon = "site"
+
+		def dispatch(self, request, *args, **kwargs):
+			if not request.user.has_perm('blog.view_pageviewcount'):
+				raise PermissionDenied
+			return super().dispatch(request, *args, **kwargs)
 		
 		def get_queryset(self):
 			# 只查询存在聚合记录的页面，并在数据库层汇总总访问量和唯一访问量。
 			queryset = Page.objects.filter(
 				id__in=PageViewCount.objects.values('page').distinct()
 			).annotate(
-				total_views=Sum('view_counts__count'),
-				total_unique_views=Sum('view_counts__unique_count')
+				total_views=Sum('view_counts__view_count_v2'),
+				total_unique_views=Sum('view_counts__unique_visitor_count_v2')
 			)
 			
 			# 标题筛选保持在数据库层执行，避免报告页加载全部页面后再过滤。
@@ -189,54 +197,123 @@ def register_page_views_report_url():
 			
 			return context
 	
-	@method_decorator(require_admin_access, name='dispatch')
-	class PageViewCountEditView(UpdateView):
-		model = PageViewCount
-		form_class = PageViewCountForm
-		template_name = 'wagtailadmin/reports/edit_page_view_count.html'
-		pk_url_kwarg = 'count_id'
-		
-		def get_context_data(self, **kwargs):
-			context = super().get_context_data(**kwargs)
-			context['page_title'] = f"编辑 {self.object.page.title} 的访问数据"
-			return context
-		
-		def form_valid(self, form):
-			response = super().form_valid(form)
-			messages.success(self.request, f"已成功更新 {self.object.page.title} 的访问统计")
-			return response
-		
-		def get_success_url(self):
-			return reverse('page_views_report')
-	
 	@require_admin_access
 	def page_view_counts_for_page(request, page_id):
 		"""查看某个页面的所有访问统计记录"""
+		if not request.user.has_perm('blog.view_pageviewcount'):
+			raise PermissionDenied
 		page = get_object_or_404(Page, id=page_id)
 		counts = PageViewCount.objects.filter(page=page).order_by('-date')
 		
 		return render(request, 'wagtailadmin/reports/page_view_counts_detail.html', {
 			'page': page,
 			'counts': counts,
-			'total_views': counts.aggregate(Sum('count'))['count__sum'] or 0,
-			'total_unique_views': counts.aggregate(Sum('unique_count'))['unique_count__sum'] or 0,
+			'total_views': counts.aggregate(Sum('view_count_v2'))['view_count_v2__sum'] or 0,
+			'total_unique_views': counts.aggregate(Sum('unique_visitor_count_v2'))['unique_visitor_count_v2__sum'] or 0,
 		})
-	
+
+	@require_admin_access
+	def content_analytics_dashboard(request):
+		"""只读展示V2统计，旧口径不参与任何总览计算。"""
+		if not request.user.has_perm('blog.view_pageviewcount'):
+			raise PermissionDenied
+		filters = ContentAnalyticsFilters.from_request(request)
+		service = ContentAnalyticsQueryService(filters, Site.find_for_request(request))
+		if request.GET.get('export') == 'csv':
+			pages = service.top_pages()
+			response = HttpResponse(content_type='text/csv; charset=utf-8')
+			response['Content-Disposition'] = 'attachment; filename="content-analytics.csv"'
+			response.write('\ufeff')
+			writer = csv.writer(response)
+			writer.writerow(['文章', '浏览量', '独立访客', '有效阅读', '到达90%', '活跃秒数'])
+			for page in pages:
+				writer.writerow([
+					page.title,
+					page.analytics_views,
+					page.analytics_visitors,
+					page.analytics_engaged,
+					page.analytics_reached_90,
+					page.analytics_active_seconds,
+				])
+			return response
+		trends = service.trends()
+		context = {
+			'filters': filters,
+			'overview': service.overview(),
+			'trends': trends,
+			'trend_chart': {
+				'labels': [row['date'].isoformat() for row in trends],
+				'views': [row['views'] for row in trends],
+				'visitors': [row['visitors'] for row in trends],
+			},
+			'sources': service.sources(),
+			'feeds': service.feeds(),
+			'export_query': request.GET.copy(),
+			**service.filter_options(),
+		}
+		context['export_query']['export'] = 'csv'
+		context['export_query'] = context['export_query'].urlencode()
+		return render(request, 'wagtailadmin/reports/content_analytics.html', context)
+
+	@require_admin_access
+	@require_GET
+	def content_analytics_articles(request):
+		"""分页返回文章表现片段，主报表无需等待文章聚合查询。"""
+
+		if not request.user.has_perm('blog.view_pageviewcount'):
+			raise PermissionDenied
+		filters = ContentAnalyticsFilters.from_request(request)
+		service = ContentAnalyticsQueryService(filters, Site.find_for_request(request))
+		paginator = Paginator(service.article_performance(), 10)
+		page_obj = paginator.get_page(request.GET.get('page'))
+		query_params = request.GET.copy()
+		query_params.pop('page', None)
+		return render(
+			request,
+			'wagtailadmin/reports/partials/content_analytics_articles.html',
+			{
+				'page_obj': page_obj,
+				'query_string': query_params.urlencode(),
+			},
+		)
+
 	return [
 		path('reports/page-views/', PageViewsReportView.as_view(), name='page_views_report'),
-		path('reports/page-views/edit/<int:count_id>/', PageViewCountEditView.as_view(), name='edit_page_view_count'),
 		path('reports/page-views/page/<int:page_id>/', page_view_counts_for_page, name='page_view_counts_detail'),
+		path('reports/content-analytics/', content_analytics_dashboard, name='content_analytics_dashboard'),
+		path(
+			'reports/content-analytics/articles/',
+			content_analytics_articles,
+			name='content_analytics_articles',
+		),
 	]
 
 
 # 注册自定义报告菜单项
+class AnalyticsMenuItem(MenuItem):
+	"""没有统计查看权限的后台用户不显示分析入口。"""
+
+	def is_shown(self, request):
+		return super().is_shown(request) and request.user.has_perm('blog.view_pageviewcount')
+
+
 @hooks.register('register_reports_menu_item')
 def register_page_views_report_menu_item():
-	return MenuItem(
+	return AnalyticsMenuItem(
 		label="页面访问统计",
 		url='/admin/reports/page-views/',
 		icon_name="site",
 		order=700
+	)
+
+
+@hooks.register('register_reports_menu_item')
+def register_content_analytics_menu_item():
+	return AnalyticsMenuItem(
+		label="内容分析",
+		url='/admin/reports/content-analytics/',
+		icon_name="site",
+		order=701,
 	)
 
 

@@ -40,6 +40,11 @@ def _env_float(name, default):
 # 本地项目运行在 20.5，数据库与基础设施服务运行在 20.2。
 SERVICE_HOST = os.environ.get("SERVICE_HOST", "192.168.20.2")
 
+# 分析明细清理默认关闭；生产必须在完成备份和独立授权后才可通过环境变量启用。
+BLOG_ANALYTICS_CLEANUP_ENABLED = _env_bool("BLOG_ANALYTICS_CLEANUP_ENABLED", False)
+BLOG_PAGEVIEW_RETENTION_DAYS = _env_int("BLOG_PAGEVIEW_RETENTION_DAYS", 30)
+BLOG_ANALYTICS_CLEANUP_BATCH_SIZE = _env_int("BLOG_ANALYTICS_CLEANUP_BATCH_SIZE", 500)
+
 # ==========================================================
 # MySQL 数据库配置
 # ==========================================================
@@ -244,6 +249,7 @@ def get_celery_config(time_zone, redis_host, redis_port, redis_password):
 			# 批量邮件发送任务 → email 队列
 			
 			'base.tasks.cleanup_email_logs': {'queue': 'maintenance'},
+			'blog.tasks.cleanup_analytics_details': {'queue': 'maintenance'},
 			# 邮件日志清理任务 → maintenance 队列
 			# 维护类任务使用独立队列，避免影响业务任务
 		},
@@ -373,6 +379,11 @@ def get_celery_config(time_zone, redis_host, redis_port, redis_password):
 			'dispatch-pending-log-index-sync': {
 				'task': 'observability.tasks.dispatch_pending_log_index_sync_jobs',
 				'schedule': 30,
+				'options': {'queue': 'maintenance'},
+			},
+			'cleanup-blog-analytics-details': {
+				'task': 'blog.tasks.cleanup_analytics_details',
+				'schedule': 60 * 60 * 24,
 				'options': {'queue': 'maintenance'},
 			},
 			

@@ -1,153 +1,184 @@
-# 博客页面访问计数服务
-"""
-页面访问计数服务 —— 纯 MySQL 版本。
+"""博客文章访问统计服务。"""
 
-PageView      : 审计日志，记录"谁、哪天、从哪个IP访问了哪篇文章"。
-                每个 (page, date, ip, user) 组合保存一条，
-                当天重复访问只更新 last_viewed_at，不新增行。
-                表可能很大，【绝不用于聚合展示】。
+from __future__ import annotations
 
-PageViewCount : 按天聚合的小表，每次真正新增 PageView 时同步 +1。
-                【所有展示统计都从这里读，永远快】。
-"""
 import logging
-from datetime import date
+from urllib.parse import urlparse
 
+from django.apps import apps
+from django.db import IntegrityError, transaction
+from django.db.models import F, Sum
 from django.utils import timezone
+from django.utils.crypto import salted_hmac
 
 logger = logging.getLogger(__name__)
 
 
-def _get_client_ip(request) -> str:
-    """按代理头和远端地址顺序获取客户端 IP。"""
-    x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
-    if x_forwarded_for:
-        return x_forwarded_for.split(',')[0].strip()
-    return request.META.get('REMOTE_ADDR', '0.0.0.0')
+def get_client_ip(request) -> str:
+    """在受信任反向代理已规范转发头部的前提下取得客户端地址。"""
+
+    forwarded = request.META.get("HTTP_X_FORWARDED_FOR", "")
+    if forwarded:
+        return forwarded.split(",", 1)[0].strip()
+    return request.META.get("REMOTE_ADDR", "0.0.0.0")
 
 
-@staticmethod
-def _get_model(model_name: str):
-    from django.apps import apps
-    return apps.get_model('blog', model_name)
+def visitor_key_for_request(request, visit_date=None) -> str:
+    """生成按日轮换的 HMAC 摘要，避免在分析表保存长期可关联标识。"""
+
+    visit_date = visit_date or timezone.localdate()
+    if getattr(request, "user", None) and request.user.is_authenticated:
+        value = f"user:{request.user.pk}:{visit_date.isoformat()}"
+    else:
+        value = ":".join(
+            (
+                "anonymous",
+                get_client_ip(request),
+                request.META.get("HTTP_USER_AGENT", ""),
+                visit_date.isoformat(),
+            )
+        )
+    return salted_hmac("blog.analytics.visitor", value, algorithm="sha256").hexdigest()
+
+
+def source_for_request(request) -> tuple[str, str]:
+    """仅保留来源域名与有限分类，避免把路径和查询参数写入审计数据。"""
+
+    referrer = request.META.get("HTTP_REFERER", "")
+    host = (urlparse(referrer).hostname or "").lower()
+    if not host:
+        return "direct", ""
+    request_host = request.get_host().split(":", 1)[0].lower()
+    if host == request_host:
+        return "internal", host
+    if any(name in host for name in ("google.", "bing.", "baidu.", "sogou.", "yahoo.")):
+        return "search", host
+    if any(name in host for name in ("github.", "zhihu.", "bilibili.", "facebook.", "twitter.", "x.com", "linkedin.")):
+        return "social", host
+    return "referral", host
 
 
 class PageViewCounter:
-    """
-    用法：
-        counter = PageViewCounter(page_id)
-        counter.record(request)   # 在 serve() 里调用
-        stats   = counter.get()   # 在模板里调用
-    """
+    """记录公开文章的 V2 访问量，并提供模板所需的聚合统计。"""
 
     def __init__(self, page_id: int):
         self.page_id = page_id
-        self.today   = date.today()
+        self.today = timezone.localdate()
 
     @staticmethod
-    def _get_model(model_name: str):
-        from django.apps import apps
-        return apps.get_model('blog', model_name)
+    def _model(name: str):
+        return apps.get_model("blog", name)
 
     def record(self, request) -> bool:
-        """
-        记录一次访问。
-        - 当天该 (page, date, ip, user) 首次访问 → 写 PageView + PageViewCount +1
-        - 当天重复访问 → 只更新 PageView.last_viewed_at，PageViewCount 不变
-        返回 True = 新访客已计数；False = 今天已访问过。
-        """
-        ip   = _get_client_ip(request)
+        """在成功响应之后写入；分析故障只能降级为日志，绝不能中断读者访问。"""
+
+        PageView = self._model("PageView")
+        PageViewCount = self._model("PageViewCount")
+        Traffic = self._model("PageTrafficSourceDaily")
+        now = timezone.now()
+        key = visitor_key_for_request(request, self.today)
+        source_category, referrer_host = source_for_request(request)
         user = request.user if request.user.is_authenticated else None
-        now  = timezone.now()
 
         try:
-            PageView      = self._get_model('PageView')
-            PageViewCount = self._get_model('PageViewCount')
+            with transaction.atomic():
+                try:
+                    with transaction.atomic():
+                        page_view, created = PageView.objects.get_or_create(
+                            page_id=self.page_id,
+                            date=self.today,
+                            visitor_key=key,
+                            defaults={
+                                "user": user,
+                                "ip_address": get_client_ip(request),
+                                "user_agent": request.META.get("HTTP_USER_AGENT", "")[:255],
+                                "view_count": 1,
+                                "first_viewed_at": now,
+                                "last_viewed_at": now,
+                                "source_category": source_category,
+                                "referrer_host": referrer_host,
+                            },
+                        )
+                except IntegrityError:
+                    # 唯一约束处理两个并发首访，第二个事务读取已写入的审计行。
+                    page_view = PageView.objects.get(
+                        page_id=self.page_id, date=self.today, visitor_key=key
+                    )
+                    created = False
 
-            lookup = {
-                'page_id':    self.page_id,
-                'date':       self.today,
-                'ip_address': ip,
-                'user':       user,
-            }
+                if not created:
+                    PageView.objects.filter(pk=page_view.pk).update(
+                        view_count=F("view_count") + 1,
+                        last_viewed_at=now,
+                    )
 
-            # 以页面、日期、IP 和用户作为幂等键；重复访问只更新审计时间，不重复增加聚合统计。
-            existing = PageView.objects.filter(**lookup).first()
+                try:
+                    with transaction.atomic():
+                        aggregate, _ = PageViewCount.objects.get_or_create(
+                            page_id=self.page_id,
+                            date=self.today,
+                            defaults={"v2_started_at": now},
+                        )
+                except IntegrityError:
+                    aggregate = PageViewCount.objects.get(
+                        page_id=self.page_id, date=self.today
+                    )
+                update = {"view_count_v2": F("view_count_v2") + 1}
+                if created:
+                    update["unique_visitor_count_v2"] = F("unique_visitor_count_v2") + 1
+                PageViewCount.objects.filter(pk=aggregate.pk).update(**update)
 
-            if existing:
-                # 今天已访问过，只刷新时间戳
-                PageView.objects.filter(pk=existing.pk).update(last_viewed_at=now)
-                return False
-
-            # 首次访问：先写明细审计记录，再更新按天聚合表。
-            PageView.objects.create(
-                page_id       = self.page_id,
-                date          = self.today,
-                user          = user,
-                ip_address    = ip,
-                user_agent    = request.META.get('HTTP_USER_AGENT', ''),
-                last_viewed_at = now,
-            )
-            # 聚合表只保存展示所需的每日计数，避免读取庞大的明细表。
-            self._increment_count(PageViewCount)
-            return True
-
-        except Exception as e:
-            logger.error(f"[PageViewCounter] record 失败 page={self.page_id}: {e}", exc_info=True)
+                try:
+                    with transaction.atomic():
+                        traffic, _ = Traffic.objects.get_or_create(
+                            page_id=self.page_id,
+                            date=self.today,
+                            source_category=source_category,
+                        )
+                except IntegrityError:
+                    traffic = Traffic.objects.get(
+                        page_id=self.page_id,
+                        date=self.today,
+                        source_category=source_category,
+                    )
+                traffic_update = {"view_count": F("view_count") + 1}
+                if created:
+                    traffic_update["unique_visitor_count"] = F("unique_visitor_count") + 1
+                Traffic.objects.filter(pk=traffic.pk).update(**traffic_update)
+            return created
+        except Exception:
+            logger.warning("page_view_record_failed page_id=%s", self.page_id, exc_info=True)
             return False
 
-    def _increment_count(self, PageViewCount):
-        """新增 PageView 时，同步更新 PageViewCount 当天聚合行。"""
-        from django.db.models import F
-        try:
-            obj, created = PageViewCount.objects.get_or_create(
-                page_id  = self.page_id,
-                date     = self.today,
-                defaults = {'count': 1, 'unique_count': 1}
-            )
-            if not created:
-                # 使用数据库端 F 表达式原子累加，避免并发请求先读后写造成丢计数。
-                PageViewCount.objects.filter(pk=obj.pk).update(
-                    count        = F('count') + 1,
-                    unique_count = F('unique_count') + 1,
-                )
-        except Exception as e:
-            logger.error(f"[PageViewCounter] PageViewCount 更新失败 page={self.page_id}: {e}", exc_info=True)
-
     def get(self) -> dict:
-        """
-        读取访问统计。
-        【只读 PageViewCount，永远不碰 PageView 大表】
-        PageViewCount 每天每篇文章只有 1 行，无论 PageView 有多少条都不影响速度。
-        """
+        """仅查询每日聚合；返回新旧口径的分离值，调用方不得相加。"""
+
         try:
-            from django.db.models import Sum
-            PageViewCount = self._get_model('PageViewCount')
-
-            # 今日统计只读取当天聚合行。
-            today_row = PageViewCount.objects.filter(
-                page_id = self.page_id,
-                date    = self.today,
-            ).values('count', 'unique_count').first()
-
-            today_count        = today_row['count']        if today_row else 0
-            today_unique_count = today_row['unique_count'] if today_row else 0
-
-            # 历史总计继续聚合小表，行数与文章天数相关，而不是与访问明细数相关。
-            totals = PageViewCount.objects.filter(
-                page_id = self.page_id,
-            ).aggregate(
-                total        = Sum('count'),
-                total_unique = Sum('unique_count'),
+            PageViewCount = self._model("PageViewCount")
+            rows = PageViewCount.objects.filter(page_id=self.page_id)
+            today = rows.filter(date=self.today).values(
+                "view_count_v2", "unique_visitor_count_v2", "count", "unique_count"
+            ).first() or {}
+            totals = rows.aggregate(
+                total=Sum("view_count_v2"),
+                total_unique=Sum("unique_visitor_count_v2"),
+                legacy_total=Sum("count"),
+                legacy_total_unique=Sum("unique_count"),
             )
-
             return {
-                'today':        today_count,
-                'today_unique': today_unique_count,
-                'total':        totals['total']        or 0,
-                'total_unique': totals['total_unique'] or 0,
+                "today": today.get("view_count_v2", 0),
+                "today_unique": today.get("unique_visitor_count_v2", 0),
+                "total": totals["total"] or 0,
+                "total_unique": totals["total_unique"] or 0,
+                "legacy_today": today.get("count", 0),
+                "legacy_today_unique": today.get("unique_count", 0),
+                "legacy_total": totals["legacy_total"] or 0,
+                "legacy_total_unique": totals["legacy_total_unique"] or 0,
             }
-
-        except Exception as e:
-            logger.error(f"[PageViewCounter] get 失败 page={self.page_id}: {e}", exc_info=True)
-            return {'today': 0, 'today_unique': 0, 'total': 0, 'total_unique': 0}
+        except Exception:
+            logger.warning("page_view_stats_failed page_id=%s", self.page_id, exc_info=True)
+            return {
+                "today": 0, "today_unique": 0, "total": 0, "total_unique": 0,
+                "legacy_today": 0, "legacy_today_unique": 0,
+                "legacy_total": 0, "legacy_total_unique": 0,
+            }

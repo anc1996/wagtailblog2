@@ -1588,23 +1588,122 @@ footer .subscribe-section .text {
     color: #bdb4aa;
 }
 
-footer .subscribe-form input {
-    border-color: rgba(255, 255, 255, .18);
+footer .subscribe-links {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    margin-top: 22px;
+}
+
+footer .subscribe-rss-link {
+    display: inline-flex;
+    min-height: 42px;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 10px 18px;
+    color: #fff;
+    background: var(--site-primary);
+    line-height: 1.2;
+}
+
+footer .subscribe-rss-link:hover,
+footer .subscribe-rss-link:focus-visible {
+    color: #fff;
+    background: #be612a;
+}
+
+footer .subscribe-atom-link {
+    color: #e7dfd6;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
+
+footer .subscribe-atom-link:hover,
+footer .subscribe-atom-link:focus-visible {
+    color: #fff;
 }
 
 footer .social-boxed {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
     padding: 28px 20px;
     color: #bdb4aa;
 }
 
-footer .social-icon-two li {
-    margin: 0 4px;
+footer .social-boxed__label {
+    flex: 0 0 auto;
+    margin: 0;
+    white-space: nowrap;
 }
 
-footer .social-icon-two li a {
+footer .social-boxed .social-icon-two {
+    display: flex;
+    flex: 0 1 auto;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+/* 页脚仅加载社交图标所需的本地 FA6 字体，避免覆盖旧主题的 FA4 图标。 */
+@font-face {
+    font-family: "Footer Social Brands";
+    font-style: normal;
+    font-weight: 400;
+    font-display: block;
+    src: url("../webfonts/fa-brands-400.woff2") format("woff2");
+}
+
+@font-face {
+    font-family: "Footer Social Free";
+    font-style: normal;
+    font-weight: 900;
+    font-display: block;
+    src: url("../webfonts/fa-solid-900.woff2") format("woff2");
+}
+
+footer .footer-social-icon {
+    display: inline-block;
+    font-family: "Footer Social Brands";
+    font-style: normal;
+    font-weight: 400;
+    line-height: 1;
+}
+
+footer .footer-social-icon::before {
+    content: "\f2bd";
+}
+
+footer .footer-social-icon--github::before { content: "\f09b"; }
+footer .footer-social-icon--linkedin::before { content: "\f08c"; }
+footer .footer-social-icon--zhihu::before { content: "\f63f"; }
+footer .footer-social-icon--bilibili::before { content: "\e3d9"; }
+footer .footer-social-icon--weixin::before { content: "\f1d7"; }
+footer .footer-social-icon--facebook::before { content: "\f09a"; }
+footer .footer-social-icon--google::before { content: "\f1a0"; }
+footer .footer-social-icon--instagram::before { content: "\f16d"; }
+
+footer .footer-social-icon--website {
+    font-family: "Footer Social Free";
+    font-weight: 900;
+}
+
+footer .footer-social-icon--website::before { content: "\f0ac"; }
+
+footer .social-boxed .social-icon-two li {
+    display: block;
+    margin: 0;
+}
+
+footer .social-boxed .social-icon-two li a {
     display: inline-flex;
-    width: 36px;
-    height: 36px;
+    width: 42px;
+    height: 42px;
     align-items: center;
     justify-content: center;
     color: #e7dfd6;
@@ -1615,6 +1714,23 @@ footer .social-icon-two li a {
 footer .social-icon-two li a:hover {
     color: #fff;
     background: var(--site-primary);
+}
+
+@media (max-width: 460px) {
+    footer .social-boxed {
+        gap: 9px;
+        padding-right: 12px;
+        padding-left: 12px;
+    }
+
+    footer .social-boxed .social-icon-two {
+        gap: 6px;
+    }
+
+    footer .social-boxed .social-icon-two li a {
+        width: 40px;
+        height: 40px;
+    }
 }
 
 footer .main-footer {
@@ -2162,6 +2278,11 @@ footer .main-footer {
 
     footer .subscribe-section {
         padding: 36px 0;
+    }
+
+    footer .subscribe-links {
+        flex-wrap: wrap;
+        gap: 14px;
     }
 }
 

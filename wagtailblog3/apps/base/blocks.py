@@ -1,5 +1,7 @@
 # 基础应用的 StreamField 块定义
 
+from django.core.exceptions import ValidationError
+
 # 导入 Wagtail StreamField 中常用的块类型
 from wagtail.blocks import (
     CharBlock,  # 用于简单的文本输入框
@@ -7,7 +9,10 @@ from wagtail.blocks import (
     RichTextBlock, # 用于所见即所得的富文本编辑器
     StreamBlock, # 用于定义 StreamField，包含多个不同类型的块
     StructBlock, # 用于将多个字段组合成一个结构化的块
+    URLBlock,  # 用于录入外部链接
 )
+
+from base.services.social_links import SocialLinkValidationError, normalize_social_url
 
 # 导入用于嵌入外部内容的块类型（如 YouTube 视频、Twitter 推文等）
 from wagtail.embeds.blocks import EmbedBlock
@@ -87,3 +92,27 @@ class BaseStreamBlock(StreamBlock):
         help_text="插入要嵌入的 URL。例如： https://www.youtube.com/watch?v=SGJFWirQ3ks",
         icon="media",
     )
+
+
+class SocialLinkBlock(StructBlock):
+    """用于站点设置中可排序的社交链接。"""
+
+    url = URLBlock(label="链接地址")
+    label = CharBlock(
+        required=False,
+        label="显示名称",
+        help_text="留空时，网站会根据链接域名显示平台名称。",
+    )
+
+    def clean(self, value):
+        result = super().clean(value)
+        try:
+            normalize_social_url(result["url"])
+        except SocialLinkValidationError as error:
+            raise ValidationError({"url": error.messages}) from error
+        return result
+
+    class Meta:
+        icon = "link"
+        label = "社交链接"
+        help_text = "仅支持 HTTP 或 HTTPS 链接，图标会根据域名自动识别。"

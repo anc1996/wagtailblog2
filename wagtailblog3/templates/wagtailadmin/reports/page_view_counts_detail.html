@@ -1,59 +1,15 @@
 {% extends "wagtailadmin/base.html" %}
-{% load i18n wagtailadmin_tags %}
 
-{% block titletag %}{% trans "页面访问详情" %}{% endblock %}
+{% block titletag %}页面访问详情{% endblock %}
 
 {% block content %}
-<header class="nice-padding">
-  <div class="row">
-    <div class="left">
-      <h1 class="icon icon-site">{% trans "页面访问详情" %}</h1>
-    </div>
-  </div>
-</header>
-
+<header class="nice-padding"><div class="row"><div class="left"><h1 class="icon icon-site">页面访问详情</h1></div></div></header>
 <div class="nice-padding">
-  <div class="page-info">
-    <h2>{{ page.title }}</h2>
-    <p><a href="{{ page.url }}" target="_blank" class="button button-small">查看页面</a></p>
-    <p><a href="{% url 'page_views_report' %}" class="button button-small">返回统计列表</a></p>
-  </div>
-  
-  <div class="stats-summary">
-    <h3>总计</h3>
-    <p><strong>总访问量:</strong> {{ total_views }}</p>
-    <p><strong>唯一访问量:</strong> {{ total_unique_views }}</p>
-  </div>
-  
-  <h3>每日访问统计</h3>
-  
-  {% if counts %}
-    <div class="listing">
-      <table class="listing">
-        <thead>
-          <tr>
-            <th>日期</th>
-            <th>总访问量</th>
-            <th>唯一访问量</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for count in counts %}
-            <tr>
-              <td>{{ count.date|date:"Y-m-d" }}</td>
-              <td>{{ count.count }}</td>
-              <td>{{ count.unique_count }}</td>
-              <td>
-                <a href="{% url 'edit_page_view_count' count.id %}" class="button button-small">编辑</a>
-              </td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  {% else %}
-    <p>暂无详细访问记录</p>
-  {% endif %}
+  <h2>{{ page.title }}</h2>
+  <p><a href="{{ page.url }}" target="_blank" rel="noopener" class="button button-small">查看页面</a> <a href="{% url 'page_views_report' %}" class="button button-secondary button-small">返回统计列表</a></p>
+  <p><strong>V2 总浏览量：</strong>{{ total_views }}　<strong>V2 独立访客：</strong>{{ total_unique_views }}</p>
+  <table class="listing"><thead><tr><th>日期</th><th>V2 浏览量</th><th>V2 独立访客</th><th>有效阅读</th><th>到达 50%</th><th>到达 90%</th><th>活跃秒数</th><th>旧浏览量</th><th>旧独立量</th></tr></thead>
+  <tbody>{% for count in counts %}<tr><td>{{ count.date|date:"Y-m-d" }}</td><td>{{ count.view_count_v2 }}</td><td>{{ count.unique_visitor_count_v2 }}</td><td>{{ count.engaged_visitor_count }}</td><td>{{ count.scroll_50_visitor_count }}</td><td>{{ count.scroll_90_visitor_count }}</td><td>{{ count.active_reading_seconds }}</td><td>{{ count.count }}</td><td>{{ count.unique_count }}</td></tr>{% empty %}<tr><td colspan="9">暂无统计数据。</td></tr>{% endfor %}</tbody></table>
+  <p class="help-block">旧口径仅供历史核对，不与 V2 指标相加。</p>
 </div>
 {% endblock %}

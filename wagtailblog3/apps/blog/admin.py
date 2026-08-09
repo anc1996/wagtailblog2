@@ -28,13 +28,20 @@ class PageViewAdmin(admin.ModelAdmin):
 
 @admin.register(PageViewCount)
 class PageViewCountAdmin(admin.ModelAdmin):
-    list_display = ('page', 'date', 'count', 'unique_count')
+    list_display = ('page', 'date', 'view_count_v2', 'unique_visitor_count_v2')
     list_filter = ('date',)
     search_fields = ('page__title',)
     date_hierarchy = 'date'
     
     def has_add_permission(self, request):
         # 不允许手动添加，应通过数据同步生成
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        # 聚合统计只能由服务端原子写入，后台不得手工篡改统计口径。
+        return False
+
+    def has_delete_permission(self, request, obj=None):
         return False
 
 @admin.register(ReactionType)

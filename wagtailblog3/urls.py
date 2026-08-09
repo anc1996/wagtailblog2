@@ -28,6 +28,8 @@ if settings.DEBUG:
 
 urlpatterns = urlpatterns + i18n_patterns(
     path('test-search/', test_search_backend, name='test_search_backend'),
+    # Feed必须在Wagtail页面通配路由之前注册，且保持站点根级的规范订阅地址。
+    path('feed/', include('blog.feed_urls', namespace='blog_feed')),
     path('comments/', include('comments.urls', namespace='comments')),
     # 添加博客API URLs
     path('blog/', include('blog.urls', namespace='blog')),

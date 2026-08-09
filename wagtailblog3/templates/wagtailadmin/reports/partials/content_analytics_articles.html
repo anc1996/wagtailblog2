@@ -1,0 +1,46 @@
+<div class="analytics-table-wrap">
+  <table class="listing">
+    <thead>
+      <tr>
+        <th>文章</th>
+        <th>作者</th>
+        <th>浏览量</th>
+        <th>独立访客</th>
+        <th>有效阅读</th>
+        <th>到达 90%</th>
+        <th>平均活跃时间</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for page in page_obj %}
+        <tr>
+          <td><a href="{{ page.url }}" target="_blank" rel="noopener">{{ page.title }}</a></td>
+          <td>{% for author in page.authors.all %}{{ author.name }}{% if not forloop.last %}、{% endif %}{% empty %}-{% endfor %}</td>
+          <td>{{ page.analytics_views }}</td>
+          <td>{{ page.analytics_visitors }}</td>
+          <td>{{ page.analytics_engaged }}</td>
+          <td>{{ page.analytics_reached_90 }}</td>
+          <td>{% if page.analytics_visitors %}{% widthratio page.analytics_active_seconds page.analytics_visitors 1 %} 秒{% else %}0 秒{% endif %}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="7">当前筛选范围暂无 V2 数据。</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if page_obj.paginator.num_pages > 1 %}
+  <nav class="analytics-pagination" aria-label="文章表现分页">
+    <span>第 {{ page_obj.number }} / {{ page_obj.paginator.num_pages }} 页，共 {{ page_obj.paginator.count }} 篇</span>
+    <div class="analytics-pagination__actions">
+      {% if page_obj.has_previous %}
+        <a class="button button-small" data-analytics-page href="{{ request.path }}?{% if query_string %}{{ query_string }}&amp;{% endif %}page=1">首页</a>
+        <a class="button button-small" data-analytics-page href="{{ request.path }}?{% if query_string %}{{ query_string }}&amp;{% endif %}page={{ page_obj.previous_page_number }}">上一页</a>
+      {% endif %}
+      {% if page_obj.has_next %}
+        <a class="button button-small" data-analytics-page href="{{ request.path }}?{% if query_string %}{{ query_string }}&amp;{% endif %}page={{ page_obj.next_page_number }}">下一页</a>
+        <a class="button button-small" data-analytics-page href="{{ request.path }}?{% if query_string %}{{ query_string }}&amp;{% endif %}page={{ page_obj.paginator.num_pages }}">末页</a>
+      {% endif %}
+    </div>
+  </nav>
+{% endif %}

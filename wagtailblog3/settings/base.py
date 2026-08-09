@@ -180,7 +180,7 @@ wagtail.contrib.settings.context_processors.settings 的作用：
     在每次渲染模板之前，它会去数据库中查找你通过 wagtail.contrib.settings 定义的所有全局设置（比如 NavigationSettings）。
     然后，它会将这些设置对象打包到一个名为 settings 的变量中，并添加到模板的上下文中。
     这个 settings 变量是一个特殊的结构，你可以通过 settings.app_label.SettingModelName.field_name 的方式来访问具体的设置值。
-        例如，你创建的 NavigationSettings 模型在 base 应用中，所以你在模板中可以通过 settings.base.NavigationSettings.linkedin_url 来访问 LinkedIn URL。
+        例如，NavigationSettings 位于 base 应用，可通过 settings.base.NavigationSettings.social_links 访问结构化社交链接。
 """
 
 # WSGI应用程序
@@ -293,6 +293,16 @@ DATA_UPLOAD_MAX_NUMBER_FIELDS = 10_000
 
 # Wagtail 设置
 WAGTAIL_SITE_NAME = "wagtailblog3"
+
+# 订阅源只缓存公开文章元数据；代次由发布信号主动切换，TTL用于异常兜底。
+BLOG_FEED_CACHE_ALIAS = "default"
+BLOG_FEED_CACHE_NAMESPACE = "blog-feed:v1"
+BLOG_FEED_CACHE_TTL = 300
+BLOG_FEED_CLIENT_MAX_AGE = 60
+BLOG_FEED_ITEM_LIMIT = 20
+BLOG_FEED_SUMMARY_LENGTH = 300
+# Feed兴趣统计可在只读或降级环境关闭，关闭时不影响RSS与Atom可用性。
+BLOG_FEED_ANALYTICS_ENABLED = True
 
 
 

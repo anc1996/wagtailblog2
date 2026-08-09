@@ -149,7 +149,10 @@
           </div>
 
             <!-- 中间栏：文章 -->
-            <main class="blog-center-column" data-article-reading>
+            <main class="blog-center-column" data-article-reading
+                  data-analytics-url="{% url 'blog:engagement' %}"
+                  data-page-id="{{ page.pk }}"
+                  data-csrf-token="{{ csrf_token }}">
                 <div id="article-scroll-container" class="article-scroll-container">
                     <div class="article-body-content">
                         <div class="content-blocks" data-reading-content data-content-image-gallery>
@@ -341,6 +344,7 @@
 
     <script src="{% static 'blog/js/blog_page.js' %}?v=20260728-3" defer></script>
     <script src="{% static 'blog/js/adaptive-blog-scroll.js' %}?v=20260730-2127" defer></script>
+    <script src="{% static 'blog/js/engagement-tracker.js' %}?v=20260809-3" defer></script>
 
     <!-- 🆕 添加拖动布局JS -->
     <script src="{% static 'blog/js/resize-manager.js' %}?v=20260808-1"></script>

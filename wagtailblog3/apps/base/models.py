@@ -18,7 +18,7 @@ from wagtail.contrib.settings.models import (
 	BaseGenericSetting,  # 定义适用于所有网页（而不仅仅是一个页面）的设置模型。
 	register_setting,  # 注册设置模型的装饰器。
 )
-from wagtail.fields import RichTextField
+from wagtail.fields import RichTextField, StreamField
 from wagtail.models import (
 	DraftStateMixin,  # 草稿状态混合类：用于处理草稿状态的模型混合类。
 	PreviewableMixin,  # 可预览混合类：用于处理预览功能的模型混合类。
@@ -28,6 +28,9 @@ from wagtail.models import (
 
 from wagtail.snippets.models import register_snippet
 
+from base.blocks import SocialLinkBlock
+from base.services.social_links import SocialLinkValidationError, normalize_social_url
+
 # 初始化日志记录器
 logger = logging.getLogger(__name__)
 
@@ -36,24 +39,36 @@ logger = logging.getLogger(__name__)
 @register_setting
 class NavigationSettings(BaseGenericSetting):
 	# 定义导航设置的字段
-	linkedin_url = models.URLField(verbose_name="LinkedIn URL", blank=True)  # 领英链接地址
-	github_url = models.URLField(verbose_name="GitHub URL", blank=True)  # GitHub 仓库链接地址
-	bilibili_url = models.URLField(verbose_name="Bilibili URL", blank=True)  # 哔哩哔哩链接地址
-	wechat_url = models.URLField(verbose_name="WeChat URL", blank=True)  # 微信链接地址
-	instagram_url = models.URLField(verbose_name="Instagram URL", blank=True)  # Instagram 链接地址
+	social_links = StreamField(
+		[("social_link", SocialLinkBlock())],
+		blank=True,
+		use_json_field=True,
+		verbose_name="社交链接",
+		help_text="按需添加并拖动排序。图标根据链接域名自动识别。",
+	)
 	
 	panels = [
 		MultiFieldPanel(
 			[
-				FieldPanel('linkedin_url'),
-				FieldPanel('github_url'),
-				FieldPanel('bilibili_url'),
-				FieldPanel('wechat_url'),
-				FieldPanel('instagram_url'),
+				FieldPanel('social_links'),
 			],
 			"社交链接",
-		)
+		),
 	]
+
+	def clean(self):
+		super().clean()
+		seen_urls = set()
+		for block in self.social_links or ():
+			if block.block_type != "social_link":
+				continue
+			try:
+				normalized_url = normalize_social_url(block.value.get("url", ""))
+			except SocialLinkValidationError as error:
+				raise ValidationError({"social_links": error.messages}) from error
+			if normalized_url in seen_urls:
+				raise ValidationError({"social_links": "社交链接不能重复。"})
+			seen_urls.add(normalized_url)
 	
 	class Meta:
 		verbose_name = "社交链接"

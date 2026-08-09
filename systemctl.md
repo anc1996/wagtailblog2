@@ -23,8 +23,8 @@ uWSGI 的 6051 是仅供本机诊断的 HTTP 端口，不作为对外入口。
 | 服务 | 职责 | 是否开机启动 |
 | --- | --- | --- |
 | `wagtailblog3.service` | uWSGI / Django 网站 | 是 |
-| `wagtailblog3-celery-maintenance.service` | 日志索引同步和维护队列 | 是 |
-| `wagtailblog3-celery-beat.service` | 每 30 秒补偿日志索引 outbox | 是 |
+| `wagtailblog3-celery-maintenance.service` | 日志索引同步和维护队列；可执行博客分析明细清理 | 是 |
+| `wagtailblog3-celery-beat.service` | 补偿日志索引 outbox，并每日调度博客分析明细清理检查 | 是 |
 | `wagtailblog3-filebeat.service` | 采集项目日志并写入 Elasticsearch | 是 |
 
 ## 分支与环境配置
@@ -103,7 +103,8 @@ EnvironmentFile=/home/source/Django/wagtail/wagtailblog3/wagtailblog3/settings/.
 当前日志系统改造涉及并必须启动的服务为：
 
 - `wagtailblog3-celery-maintenance.service`：消费 `maintenance` 队列，执行日志索引同步和维护任务；
-- `wagtailblog3-celery-beat.service`：调度定时任务和失败补偿；
+- `wagtailblog3-celery-beat.service`：调度定时任务和失败补偿；博客分析清理任务默认由
+  `BLOG_ANALYTICS_CLEANUP_ENABLED=false` 禁用，只有完成备份、影响确认和独立授权后才可启用；
 - `wagtailblog3-filebeat.service`：采集项目日志并写入 Elasticsearch。
 
 后续如果新增其他服务，必须把它加入“必须运行的应用服务”表、重启验收命令、

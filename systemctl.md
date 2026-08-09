@@ -40,6 +40,18 @@ git status --short --branch
 只有通过测试的精确 commit 才能部署到生产。不得部署未提交的工作区内容，也不得
 因为环境不同而直接修改 `settings/base.py`。
 
+### Codex 工具与发布门禁
+
+Codex MCP、Skill 和插件只运行在开发协作环境中，不属于生产服务拓扑，也不得安装为生产
+常驻进程或写入 systemd unit。仓库的 pre-commit hook 与 GitHub Actions 是提交和远端检查
+门禁，不代表生产已经同步或验收通过；文档-only 变更无需因此重启任何服务。
+
+生产状态检查和代码同步可使用已安装的 `wagtailblog-ssh-ops` 插件，或使用 WSL2 中现有的
+SSH 工作流。两种写入口不得在同一任务中并发使用；无论使用哪一种，都必须先核实生产路径、
+分支、远程地址、工作树状态和目标 SHA，再依次执行 `fetch`、差异清单检查和
+`merge --ff-only`。工具具备 SSH、同步或重启能力不等于已经获得生产数据、迁移、环境文件、
+systemd unit、端口、队列或服务重启授权，相关操作继续执行本文的备份、确认与回滚门禁。
+
 数据库、Redis、MongoDB、MinIO、Wagtail Elasticsearch、SMTP 和 Django 密钥统一放在：
 
 ```text

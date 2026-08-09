@@ -73,6 +73,25 @@ Git 发布入口。因为工作树共享，任一端修改文件或创建 commit
 范围受控的证据；不得为了调用工具而扩大任务范围，也不得用工具结果替代代码、配置、日志、
 数据库和运行状态的交叉核验。调用前先确认工具可用、目标环境正确、权限与数据影响明确。
 
+### 当前 Codex 能力基线
+
+截至 2026-08-09，本机已核实以下能力。这里的“已安装插件”“已安装 Skill”“已配置 MCP”与
+“当前会话可调用”是不同状态；每个新会话仍应以实际暴露的 Skill 和工具声明为准，不得只因
+本节有记录就假定连接、认证或目标数据源可用。
+
+- 当前会话已暴露 `context7`、`fetch`、`playwright`、`github` 和 `openrouter` MCP；
+- `openrouter` 当前声明可选模型为 `gpt-5.6-terra` 与 `gpt-5.6-sol`，只在任务确有必要时调用；
+- `google-toolbox` 已登记在本机 Codex 配置中，但本次核实时未向当前会话暴露工具。使用前必须先
+  检查工具声明与测试数据源；不可用时按下文规则回退，不得声称已通过 MCP 查询；
+- 已安装项目 Skill：`django-wagtail-development`、`playwright`；
+- 已安装插件：`github`、`build-web-apps`、`coderabbit`、`plugin-eval` 和个人插件
+  `wagtailblog-ssh-ops`；插件通常通过其 Skill 或 MCP 能力触发，不以插件名称作为固定命令；
+- 当前可见的相关插件 Skill 包括 GitHub 仓库/CI/发布工作流、`frontend-testing-debugging`、
+  `frontend-app-builder`、`coderabbit:code-review` 和 `plugin-eval` 系列；具体名称以会话清单为准。
+
+不要重复安装上述能力。若某项已安装但当前未暴露，先检查 Codex 配置、连接器状态和是否需要
+重启会话；仍不可用时记录原因，再使用任务允许的本地命令或既有 SSH 工作流。
+
 ### Django/Wagtail 与技术文档
 
 - Django、Wagtail 模型、StreamField、后台、模板、搜索、迁移或兼容性任务使用
@@ -81,6 +100,8 @@ Git 发布入口。因为工作树共享，任一端修改文件或创建 commit
   推断已变更或废弃的接口；
 - 已知具体 URL、README、部署文档或普通网页时使用 `fetch`；Context7 找不到准确内容时，
   再用 Fetch 读取官方来源；
+- Fetch MCP 同时可能暴露写入型 HTTP 方法；读取网页不构成调用 POST、PUT、PATCH 或 DELETE
+  的授权，任何外部写操作仍须符合用户当前任务与数据保护边界；
 - `openrouter` 仅在任务确实需要其模型或接口能力时调用，不得把项目源码、凭据、数据库内容
   或生产日志无目的地发送到外部模型服务。
 
@@ -123,6 +144,18 @@ Git 发布入口。因为工作树共享，任一端修改文件或创建 commit
 - 不读取与任务无关的整个代码库、完整数据库、全量日志或大型浏览器产物；
 - 工具输出包含敏感信息时只报告状态和必要字段，不在回复中复述秘密值；
 - 同一事实已有可靠证据时不重复调用多个重叠工具，只有结果冲突或证据不足时才交叉验证。
+
+### 本地与 GitHub 自动化门禁
+
+- `.pre-commit-config.yaml` 当前包含 staged diff 格式检查，以及在 WSL2 的
+  `wagtailblog-test` 环境执行 Django system check；Git 写操作仍统一从 WSL2 发起；
+- `.github/workflows/django-ci.yml` 在 `main` push、面向 `main` 的 PR 和手动触发时运行，
+  使用 Python 3.13、MySQL 8.4、`requirements.txt` 和 `python manage.py check`；
+- 2026-08-09 核实自动化基线时，本地 `HEAD` 与 `origin/main` 均为
+  `b377231cb6dadca6db369b85f1f402f11cb2cb68`。该 SHA 只是核实记录，不是永久发布目标；每次
+  测试、提交和生产同步都必须重新读取实际 SHA 与 GitHub 检查状态；
+- pre-commit 和 GitHub Actions 是补充门禁，不能替代与变更相称的 WSL2 测试、迁移检查、
+  浏览器验收、生产备份、服务健康检查或人工授权。
 
 ## 研发与发布闭环
 

@@ -1,12 +1,52 @@
 # 博客应用的模板标签
+import logging
 from collections import Counter
 from django import template
+from django.core.exceptions import ValidationError
+from django.utils.encoding import smart_str
+from django.utils.html import format_html
 from wagtail.models import Site  # Site 用于获取站点根页面
 
 # 确保导入你项目中实际使用的页面模型
 from blog.models import BlogPage, BlogTagIndexPage, Author  # 假设这些是你已有的导入
+from blog.inline_title_renderer import InlineTitleRenderer
 
 register = template.Library()
+logger = logging.getLogger(__name__)
+
+
+@register.simple_tag
+def render_display_title(page):
+	"""Render the native Wagtail Page.title as safe inline Markdown."""
+	if page is None:
+		return ""
+	title = getattr(page, "title", "") or ""
+	try:
+		rendered = InlineTitleRenderer.render(title)
+	except ValidationError:
+		logger.warning(
+			"invalid_markdown_title_fallback page_id=%s",
+			getattr(page, "pk", None),
+		)
+		return format_html('<span class="markdown-title">{}</span>', title)
+	has_math = 'class="arithmatex"' in str(rendered)
+	if has_math:
+		return format_html(
+			'<span class="markdown-title" data-title-math="true">{}</span>',
+			rendered,
+		)
+	return format_html('<span class="markdown-title">{}</span>', rendered)
+
+
+@register.filter
+def inline_title_text(value):
+	"""Return the semantic plain-text form of a Markdown Page.title."""
+	title = value if isinstance(value, str) else getattr(value, "title", value)
+	title = title or ""
+	try:
+		return InlineTitleRenderer.plain_text(title)
+	except ValidationError:
+		return smart_str(title)
 
 @register.simple_tag
 def get_user_reaction(page, request):

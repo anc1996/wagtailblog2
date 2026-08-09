@@ -1,4 +1,4 @@
-{% load wagtailcore_tags wagtailimages_tags search_tags %}
+{% load wagtailcore_tags wagtailimages_tags search_tags blog_tags %}
 
 <div class="search-results-fragment">
     <h2 id="search-results-heading" class="sr-only sr-only-focusable" tabindex="-1">搜索结果</h2>
@@ -42,7 +42,7 @@
                         {% endif %}
                     </div>
 
-                    <h3 class="result-title"><a href="{% pageurl result %}">{{ result.title }}</a></h3>
+                    <h3 class="result-title"><a href="{% pageurl result %}">{% render_display_title result %}</a></h3>
 
                     {% if result.specific.intro %}
                         <p class="result-intro">{{ result.specific.intro|striptags|truncatechars:190 }}</p>

@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% load wagtailcore_tags wagtailimages_tags static blog_tags comment_tags %}
-{% block title %}{{ page.title }}{% endblock %}
+{% block title %}{{ page.title|inline_title_text }}{% endblock %}
 
 {% block extra_css %}
     {{ block.super }}
@@ -54,7 +54,7 @@
                     {% endif %}
                 </div>
                 {% with title_length=page.title|length %}
-                    <h1 class="blog-title{% if title_length > 36 %} blog-title--long{% elif title_length > 22 %} blog-title--medium{% else %} blog-title--short{% endif %}">{{ page.title }}</h1>
+                    <h1 class="blog-title{% if title_length > 36 %} blog-title--long{% elif title_length > 22 %} blog-title--medium{% else %} blog-title--short{% endif %}">{% render_display_title page %}</h1>
                 {% endwith %}
                 {% if page.intro %}
                     <div class="blog-intro" data-blog-intro>
@@ -206,7 +206,7 @@
                                                 {% endif %}
                                             </div>
                                             <div class="related-info">
-                                                <h5>{{ post.title }}</h5>
+                                                <h5>{% render_display_title post %}</h5>
                                                 <span class="date">{{ post.date|date:"m-d" }}</span>
                                             </div>
                                         </a>
@@ -222,13 +222,13 @@
                                 {% if prev_post %}
                                     <a href="{{ prev_post.url }}" class="nav-btn prev">
                                         <span class="label"><i class="fa fa-angle-left"></i> 上一篇</span>
-                                        <span class="title">{{ prev_post.title }}</span>
+                                        <span class="title">{% render_display_title prev_post %}</span>
                                     </a>
                                 {% endif %}
                                 {% if next_post %}
                                     <a href="{{ next_post.url }}" class="nav-btn next">
                                         <span class="label">下一篇 <i class="fa fa-angle-right"></i></span>
-                                        <span class="title">{{ next_post.title }}</span>
+                                        <span class="title">{% render_display_title next_post %}</span>
                                     </a>
                                 {% endif %}
                             </div>

@@ -23,7 +23,7 @@ from wagtail.admin.rich_text.editors.draftail import features as draftail_featur
 from wagtail.admin.rich_text.converters.html_to_contentstate import InlineStyleElementHandler
 from wagtail.snippets.models import register_snippet
 
-from .admin import TagsSnippetViewSet
+from .admin import PageViewSnippetViewSet, TagsSnippetViewSet
 from .models import PageViewCount
 from .forms import PageViewCountForm
 from .admin_image_upload import upload_vditor_image
@@ -88,8 +88,6 @@ def editor_js():
 		reverse('blog_vditor_image_upload'),
 		getattr(settings, 'WAGTAILIMAGES_MAX_UPLOAD_SIZE', 10 * 1024 * 1024),
 	)
-
-
 	# 编辑页面后清空 body 字段，避免正文再次写入 MySQL。
 @hooks.register('after_edit_page')
 def after_edit_page(request, page):
@@ -280,3 +278,4 @@ def register_underline_feature(features):
 
 # 注册这个视图集，生成管理 UI
 register_snippet(TagsSnippetViewSet)
+register_snippet(PageViewSnippetViewSet)

@@ -1,6 +1,7 @@
 from django.contrib import admin
 from django.db.models import Count
 from taggit.models import Tag
+from wagtail.permission_policies import ModelPermissionPolicy
 from wagtail.snippets.views.snippets import SnippetViewSet
 from wagtail.admin.panels import FieldPanel
 from .models import PageView, PageViewCount, ReactionType, Reaction
@@ -15,6 +16,14 @@ class PageViewAdmin(admin.ModelAdmin):
     
     def has_add_permission(self, request):
         # 不允许手动添加，应通过中间件自动生成
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        # 访问记录属于审计数据，只能由访问计数服务写入。
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        # 防止后台操作破坏访问审计记录。
         return False
 
 @admin.register(PageViewCount)
@@ -71,3 +80,53 @@ class TagsSnippetViewSet(SnippetViewSet):
         qs = self.model.objects.all()
         qs = qs.annotate(post_count=Count('blog_blogpagetag_items'))
         return qs
+
+
+class ReadOnlyPageViewPermissionPolicy(ModelPermissionPolicy):
+    """Allow viewing PageView rows while blocking all mutations."""
+
+    MUTATING_ACTIONS = {"add", "change", "delete"}
+
+    def user_has_permission(self, user, action):
+        if action in self.MUTATING_ACTIONS:
+            return False
+        return super().user_has_permission(user, action)
+
+
+class PageViewSnippetViewSet(SnippetViewSet):
+    """Read-only Wagtail listing for the page-view audit table."""
+
+    model = PageView
+    icon = "date"
+    menu_label = "页面访问记录"
+    add_to_admin_menu = False
+    ordering = ("-last_viewed_at", "-pk")
+    list_display = [
+        "admin_page_title",
+        "admin_user",
+        Column("ip_address", label="IP 地址", sort_key="ip_address"),
+        Column("date", label="访问日期", sort_key="date"),
+        Column(
+            "last_viewed_at",
+            label="最后访问时间",
+            sort_key="last_viewed_at",
+        ),
+    ]
+    search_fields = ("page__title", "ip_address", "user__username")
+    list_filter = ("date",)
+    inspect_view_enabled = True
+    inspect_view_fields = (
+        "page",
+        "user",
+        "ip_address",
+        "date",
+        "last_viewed_at",
+        "user_agent",
+    )
+
+    @property
+    def permission_policy(self):
+        return ReadOnlyPageViewPermissionPolicy(self.model)
+
+    def get_queryset(self, request):
+        return self.model.objects.select_related("page", "user")

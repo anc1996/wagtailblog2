@@ -1,4 +1,4 @@
-{% load wagtailcore_tags wagtailimages_tags %}
+{% load wagtailcore_tags wagtailimages_tags blog_tags %}
 
 <p class="lead archive-result-total" data-archive-results-heading tabindex="-1">共 {{ total_count }} 篇文章</p>
 
@@ -59,7 +59,7 @@
 <div class="blog-list">
     {% for post in pages %}
         <article class="blog-item">
-            <h3><a href="{% pageurl post %}">{{ post.title }}</a></h3>
+            <h3><a href="{% pageurl post %}">{% render_display_title post %}</a></h3>
 
             <div class="meta archive-post-meta">
                 <span class="archive-post-date"><i class="fa fa-calendar-o" aria-hidden="true"></i>{{ post.date|date:"Y年m月d日" }}</span>

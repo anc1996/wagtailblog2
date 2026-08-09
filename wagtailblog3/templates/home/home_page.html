@@ -143,13 +143,13 @@
                                         {# 性能优化: 这里的图片在首屏下方，必须开启 lazy loading #}
                                         {% image post.featured_image fill-400x300 format-webp as post_img %}
                                         <img src="{{ post_img.url }}"
-                                             alt="{{ post.title }}"
+                                             alt="{{ post.title|inline_title_text }}"
                                              loading="lazy"
                                              width="{{ post_img.width }}"
                                              height="{{ post_img.height }}"
                                              class="transition-image" />
                                     {% else %}
-                                        <img src="{% static 'gretzia/images/resource/news-7.jpg' %}" alt="{{ post.title }}" loading="lazy" />
+                                        <img src="{% static 'gretzia/images/resource/news-7.jpg' %}" alt="{{ post.title|inline_title_text }}" loading="lazy" />
                                     {% endif %}
                                 </div>
                                 <div class="lower-content">
@@ -164,7 +164,7 @@
                                         </div>
                                     {% endif %}
 
-                                    <h2><a href="{% pageurl post %}">{{ post.title }}</a></h2>
+                                    <h2><a href="{% pageurl post %}">{% render_display_title post %}</a></h2>
 
                                     <div class="post-date">{{ post.date|date:"F d, Y" }}</div>
 
@@ -173,7 +173,7 @@
                                         {% if post.intro %}
                                             {{ post.intro|striptags|truncatechars:60 }}
                                         {% else %}
-                                            {{ post.title }} - 点击阅读更多精彩内容...
+                                            {{ post.title|inline_title_text }} - 点击阅读更多精彩内容...
                                         {% endif %}
                                     </div>
 

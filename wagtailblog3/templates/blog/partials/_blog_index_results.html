@@ -1,4 +1,4 @@
-{% load wagtailcore_tags wagtailimages_tags static %}
+{% load wagtailcore_tags wagtailimages_tags static blog_tags %}
 
 <section class="filters-section" aria-labelledby="blog-filter-title">
     <div class="filter-card-header">
@@ -80,18 +80,18 @@
         {% for post in blog_pages %}
             <article class="post-list-item">
                 {% if post.specific.featured_image %}
-                    <a class="post-card-image post-card-image--actual" href="{% pageurl post %}" aria-label="阅读 {{ post.title }}">
+                    <a class="post-card-image post-card-image--actual" href="{% pageurl post %}" aria-label="阅读 {{ post.title|inline_title_text }}">
                         {% image post.specific.featured_image width-420 as img %}
-                        <img src="{{ img.url }}" alt="{{ post.title }}" width="{{ img.width }}" height="{{ img.height }}">
+                        <img src="{{ img.url }}" alt="{{ post.title|inline_title_text }}" width="{{ img.width }}" height="{{ img.height }}">
                     </a>
                 {% else %}
-                    <a class="post-card-image post-card-image--fallback" href="{% pageurl post %}" aria-label="阅读 {{ post.title }}">
-                        <img src="{% static 'gretzia/images/resource/news-15.jpg' %}" alt="{{ post.title }}">
+                    <a class="post-card-image post-card-image--fallback" href="{% pageurl post %}" aria-label="阅读 {{ post.title|inline_title_text }}">
+                        <img src="{% static 'gretzia/images/resource/news-15.jpg' %}" alt="{{ post.title|inline_title_text }}">
                     </a>
                 {% endif %}
 
                 <div class="post-card-content">
-                    <h3 class="post-card-title"><a href="{% pageurl post %}">{{ post.title }}</a></h3>
+                    <h3 class="post-card-title"><a href="{% pageurl post %}">{% render_display_title post %}</a></h3>
 
                     <div class="post-meta-info">
                         {% with authors=post.specific.authors.all %}

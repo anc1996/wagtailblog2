@@ -1,4 +1,4 @@
-{% load wagtailcore_tags wagtailimages_tags %}
+{% load wagtailcore_tags wagtailimages_tags blog_tags %}
 
 <section class="portfolio-featured" aria-labelledby="portfolio-featured-{{ block.id }}">
     <header class="portfolio-section-heading">
@@ -17,10 +17,10 @@
         {% for selected_page in self.posts %}
             {% with post=selected_page.specific %}
                 <article class="portfolio-post-card">
-                    <a class="portfolio-post-media{% if not post.featured_image %} portfolio-post-media--fallback{% endif %}" href="{% pageurl post %}" aria-label="阅读《{{ post.title }}》">
+                    <a class="portfolio-post-media{% if not post.featured_image %} portfolio-post-media--fallback{% endif %}" href="{% pageurl post %}" aria-label="阅读《{{ post.title|inline_title_text }}》">
                         {% if post.featured_image %}
                             {% image post.featured_image width-520 as post_img %}
-                            <img src="{{ post_img.url }}" alt="{{ post_img.alt|default:post.title }}" width="{{ post_img.width }}" height="{{ post_img.height }}">
+                            <img src="{{ post_img.url }}" alt="{{ post_img.alt|default:post.title|inline_title_text }}" width="{{ post_img.width }}" height="{{ post_img.height }}">
                         {% else %}
                             <span class="portfolio-post-placeholder" aria-hidden="true">
                                 <i class="fa fa-file-text-o"></i>
@@ -44,7 +44,7 @@
                             {% endwith %}
                         </div>
 
-                        <h3><a href="{% pageurl post %}">{{ post.title }}</a></h3>
+                        <h3><a href="{% pageurl post %}">{% render_display_title post %}</a></h3>
 
                         {% if post.intro %}
                             <div class="portfolio-post-intro portfolio-richtext">

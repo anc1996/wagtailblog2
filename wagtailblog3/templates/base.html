@@ -1,4 +1,4 @@
-{% load static wagtailcore_tags wagtailuserbar %}
+{% load static wagtailcore_tags wagtailuserbar blog_tags %}
 
 <!DOCTYPE html>
 <html lang="zh-Hans"> {# 1. 修改语言代码为中文 #}
@@ -6,7 +6,7 @@
     <meta charset="utf-8" />
     <title>
         {% block title %}
-            {% if page.seo_title %}{{ page.seo_title }}{% else %}{{ page.title }}{% endif %}
+            {% if page.seo_title %}{{ page.seo_title }}{% else %}{{ page.title|inline_title_text }}{% endif %}
         {% endblock %}
         {% block title_suffix %}
             {% wagtail_site as current_site %}
@@ -37,7 +37,7 @@
     </script>
 
     {# Open Graph 标签 (社交分享优化) #}
-    <meta property="og:title" content="{% if page.seo_title %}{{ page.seo_title }}{% else %}{{ page.title }}{% endif %}" />
+    <meta property="og:title" content="{% if page.seo_title %}{{ page.seo_title }}{% else %}{{ page.title|inline_title_text }}{% endif %}" />
     <meta property="og:description" content="{{ page.search_description|default:'' }}" />
     <meta property="og:type" content="website" />
     {# 如果有图片，建议在这里动态添加 og:image #}
@@ -62,12 +62,20 @@
 
     {# 3. 最后加载自定义样式 (确保我们可以覆盖上面的所有样式) #}
     <link rel="stylesheet" href="{% static 'css/blog_interactions.css' %}">
+    <link rel="stylesheet" href="{% static 'blog/css/markdown-title.css' %}?v=20260809-2">
 
     {% block extra_css %}{% endblock %}
 
     {# Shared visual system. Keep this last so page-specific legacy styles stay compatible. #}
     <link rel="stylesheet" href="{% static 'css/site-theme.css' %}?v=20260731-7">
     <script src="{% static 'js/site-theme.js' %}?v=20260731-1" defer></script>
+    <script
+        src="{% static 'blog/js/title-rendering.js' %}?v=20260809-2"
+        data-katex-css="{% static 'vendor/katex/katex.min.css' %}?v=20260728-1"
+        data-katex-script="{% static 'vendor/katex/katex.min.js' %}?v=20260728-1"
+        data-katex-auto-render-script="{% static 'vendor/katex/auto-render.min.js' %}?v=20260728-1"
+        defer
+    ></script>
     {% block extra_css_after_site_theme %}{% endblock %}
 
 </head>

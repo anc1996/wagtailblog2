@@ -1,4 +1,4 @@
-{% load wagtailcore_tags wagtailimages_tags %}
+{% load wagtailcore_tags wagtailimages_tags blog_tags %}
 
 <header class="tag-page-hero">
     <div class="tag-page-eyebrow"><i class="fa fa-tag" aria-hidden="true"></i> 文章标签</div>
@@ -76,7 +76,7 @@
                         <span><i class="fa fa-tag" aria-hidden="true"></i>{{ current_tag.name }}</span>
                     </div>
 
-                    <h2><a href="{% pageurl post %}">{{ post.title }}</a></h2>
+                    <h2><a href="{% pageurl post %}">{% render_display_title post %}</a></h2>
                     {% if post.intro %}<p class="tag-article-intro">{{ post.intro|striptags|truncatechars:180 }}</p>{% endif %}
 
                     <div class="tag-article-footer">

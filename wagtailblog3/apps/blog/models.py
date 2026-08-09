@@ -1108,7 +1108,6 @@ class BlogPageGalleryImage(Orderable):
 
 
 # 页面访问记录模型
-@register_snippet
 class PageView(models.Model):
     page           = models.ForeignKey('wagtailcore.Page', on_delete=models.CASCADE, related_name='page_views')
     date           = models.DateField()                                          # 访问日期，用于按天查询
@@ -1124,6 +1123,31 @@ class PageView(models.Model):
             models.Index(fields=['page', 'date']),
             models.Index(fields=['page', 'date', 'ip_address']),                 # 加速唯一性查询
         ]
+
+    def admin_page_title(self):
+        """Return the page title used by the read-only Wagtail listing."""
+        return self.page.title
+
+    admin_page_title.short_description = "访问页面"
+    admin_page_title.admin_order_field = "page__title"
+
+    def admin_user(self):
+        """Show a stable label for both authenticated users and visitors."""
+        return self.user.get_username() if self.user_id else "访客"
+
+    admin_user.short_description = "用户"
+    admin_user.admin_order_field = "user__username"
+
+    def __str__(self):
+        page_title = self.page.title
+        user_label = self.user.get_username() if self.user_id else "访客"
+        last_viewed = timezone.localtime(self.last_viewed_at).strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
+        return (
+            f"{page_title} | 用户：{user_label} | IP：{self.ip_address} "
+            f"| 最后访问：{last_viewed}"
+        )
 
 # 访问统计聚合模型
 @register_snippet

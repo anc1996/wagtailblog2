@@ -1,4 +1,4 @@
-{% load static wagtailcore_tags wagtailimages_tags %}
+{% load static wagtailcore_tags wagtailimages_tags blog_tags %}
 
 <section class="blog-list-section" aria-labelledby="author-posts-heading">
     <div class="blog-list-heading-row">
@@ -29,18 +29,18 @@
         {% for post in blog_posts %}
             <article class="post-list-item">
                 {% if post.featured_image %}
-                    <a class="post-card-image post-card-image--actual" href="{% pageurl post %}" aria-label="阅读 {{ post.title }}">
+                    <a class="post-card-image post-card-image--actual" href="{% pageurl post %}" aria-label="阅读 {{ post.title|inline_title_text }}">
                         {% image post.featured_image width-420 as post_img %}
-                        <img src="{{ post_img.url }}" alt="{{ post.title }}" width="{{ post_img.width }}" height="{{ post_img.height }}">
+                        <img src="{{ post_img.url }}" alt="{{ post.title|inline_title_text }}" width="{{ post_img.width }}" height="{{ post_img.height }}">
                     </a>
                 {% else %}
-                    <a class="post-card-image post-card-image--fallback" href="{% pageurl post %}" aria-label="阅读 {{ post.title }}">
-                        <img src="{% static 'gretzia/images/resource/news-15.jpg' %}" alt="{{ post.title }}">
+                    <a class="post-card-image post-card-image--fallback" href="{% pageurl post %}" aria-label="阅读 {{ post.title|inline_title_text }}">
+                        <img src="{% static 'gretzia/images/resource/news-15.jpg' %}" alt="{{ post.title|inline_title_text }}">
                     </a>
                 {% endif %}
 
                 <div class="post-card-content">
-                    <h3 class="post-card-title"><a href="{% pageurl post %}">{{ post.title }}</a></h3>
+                    <h3 class="post-card-title"><a href="{% pageurl post %}">{% render_display_title post %}</a></h3>
 
                     <div class="post-meta-info">
                         <span class="date">

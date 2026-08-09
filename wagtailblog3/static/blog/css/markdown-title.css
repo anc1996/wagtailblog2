@@ -1,0 +1,48 @@
+.markdown-title {
+    display: inline;
+    letter-spacing: 0;
+}
+
+.markdown-title code {
+    display: inline;
+    padding: 0.08em 0.28em;
+    border: 1px solid rgba(180, 35, 98, 0.2);
+    border-radius: 4px;
+    background: #f9edf3;
+    color: #a31f5a;
+    font-family: Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.88em;
+    font-weight: 600;
+    line-height: inherit;
+    overflow-wrap: anywhere;
+    white-space: normal;
+}
+
+.markdown-title sup,
+.markdown-title sub {
+    position: relative;
+    font-size: 0.7em;
+    line-height: 0;
+    vertical-align: baseline;
+}
+
+.markdown-title sup {
+    top: -0.55em;
+}
+
+.markdown-title sub {
+    bottom: -0.2em;
+}
+
+.markdown-title .arithmatex,
+.markdown-title .katex {
+    display: inline;
+    font-size: 1em;
+    white-space: nowrap;
+}
+
+[data-theme="dark"] .markdown-title code {
+    border-color: rgba(244, 114, 182, 0.32);
+    background: #382331;
+    color: #f9a8d4;
+}

@@ -102,6 +102,83 @@ EnvironmentFile=/home/source/Django/wagtail/wagtailblog3/wagtailblog3/settings/.
 前仍须单独授权、记录回滚值，并按实际影响重启 `wagtailblog3.service`；标题索引创建、回填和 alias
 切换另行执行数据/索引变更门禁。
 
+### 生产空内容索引创建门禁
+
+发布包含 `search_create_production_content_index` 的代码后，生产创建独立内容搜索空索引必须使用
+该命令，不能通过伪造 `WAGTAILBLOG_ENV=test` 调用测试命令。命令默认仅输出 dry-run JSON，不连接
+Elasticsearch 或写入 MySQL；它不会创建 read alias、回填 Mongo 正文、启用 Producer/Consumer 或改变前台搜索。
+
+执行前由受保护的生产环境文件显式提供以下非凭据配置，默认均为空或 `false`：
+
+```ini
+CONTENT_SEARCH_PRODUCTION_CONNECTION_NAME=<独立 ES 连接名，不能是 default>
+CONTENT_SEARCH_PRODUCTION_INDEX_PREFIX=<含 prod 标识的精确前缀>
+CONTENT_SEARCH_PRODUCTION_BACKUP_ROOT=/home/source/Django/wagtail/backups
+CONTENT_SEARCH_PRODUCTION_INDEX_CREATE_ENABLED=false
+```
+
+命令要求精确的 `--target`、`--index-name` 和已校验的 `--backup-reference`；仅当备份目录内存在
+`checksums.sha256`、独立连接已配置、所有搜索读写 flag 仍关闭，且同时提供 `--confirm` 和
+`--confirm-production-index-create` 时才会创建 template、物理索引及禁用状态的 Target/Build 记录。
+创建前必须单独获得生产索引写入授权；创建后立即把
+`CONTENT_SEARCH_PRODUCTION_INDEX_CREATE_ENABLED` 恢复为 `false`。该命令只由一次性管理命令进程读取，
+不因该开关变更重启 Django、Worker、Beat 或 Filebeat。
+
+### 生产 Elasticsearch snapshot 备份
+
+生产现有 Elasticsearch 由 Docker Compose 项目
+`/home/software/docker/compose/elasticsearch8/docker-compose.yml` 管理，容器为
+`elasticsearch8.17.0`，端口为 `9200`/`9300`，数据目录为
+`/home/software/docker/containers/elasticsearch8.17.0/data`，日志目录为
+`/home/software/docker/containers/elasticsearch8.17.0/logs`。
+
+2026-08-11 在生产部署搜索代码前创建了独立备份目录：
+
+```text
+/home/source/Django/wagtail/backups/wagtailblog3-pre-search-20260811-221511/
+```
+
+为创建可恢复的 Elasticsearch snapshot，保留原 compose 文件后增加了
+`docker-compose.snapshot-override.yml`，将以下目录以读写方式挂载到容器：
+
+```text
+/home/source/Django/wagtail/backups/wagtailblog3-pre-search-20260811-221511/elasticsearch/snapshot-repository
+/usr/share/elasticsearch/snapshots
+```
+
+override 同时向 Elasticsearch 传入
+`-Epath.repo=/usr/share/elasticsearch/snapshots`。容器使用原有 image、数据卷、日志卷、端口和
+`restart=always`，仅因新增 snapshot 挂载执行过一次 `--force-recreate`。重建后 9200 立即恢复，
+32 个索引仍可见，57 个 primary shard active，项目四个 systemd 服务均 active/enabled。
+
+snapshot repository 和快照名称均为：
+
+```text
+wagtailblog3-pre-search-20260811-221511
+pre-search-20260811-221511
+```
+
+快照状态为 `SUCCESS`，46 个索引、46/46 shard 成功、失败 0；快照文件约 52 MiB。快照使用
+`include_global_state=false`，恢复时不得覆盖生产集群级设置。当前单节点仍为 `yellow`，15 个未分配
+副本是单节点无副本的既有容量状态；不得为了“变绿”在本备份窗口擅自修改副本数或删除索引。
+
+备份目录中的 `snapshot-status.json`、`repository-list.json`、`snapshot-create.json`、
+`elasticsearch8-docker-compose.yml.before-snapshot` 和
+`elasticsearch8-snapshot-override.yml` 是恢复所需证据。删除 snapshot、repository、数据卷或
+override 前必须单独备份并获得授权。
+
+恢复 ES 容器配置时，先确认应用、Kibana、Filebeat 的依赖状态；保留数据卷和 snapshot 目录，
+优先执行：
+
+```bash
+cd /home/software/docker/compose/elasticsearch8
+docker compose -f docker-compose.yml -f docker-compose.snapshot-override.yml config --quiet
+docker compose -f docker-compose.yml -f docker-compose.snapshot-override.yml up -d --force-recreate elasticsearch8
+```
+
+恢复后检查 `_cluster/health`、snapshot 状态、索引计数、Kibana、Filebeat、Django 首页和旧搜索。
+禁止使用 `docker compose down -v`、`docker volume rm` 或删除 snapshot 目录作为普通故障处理。
+
 ### WP6 测试独立 Elasticsearch 集群
 
 WP6 测试集群运行在 WSL2 测试主机 `192.168.20.5`，不连接或替代 `192.168.20.2:9200` 的共享

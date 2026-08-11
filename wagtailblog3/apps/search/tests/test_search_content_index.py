@@ -32,6 +32,18 @@ from search.services.elasticsearch import (
 from search.services.mongo import read_formal_contents_by_id
 
 
+PRODUCTION_INDEX_SETTINGS = {
+    "CONTENT_SEARCH_PRODUCTION_CONNECTION_NAME": "content_production",
+    "CONTENT_SEARCH_PRODUCTION_INDEX_PREFIX": "wagtailblog-prod-content",
+    "CONTENT_SEARCH_PRODUCTION_BACKUP_ROOT": "/backups",
+    "CONTENT_SEARCH_PRODUCTION_INDEX_CREATE_ENABLED": True,
+    "CONTENT_SEARCH_INDEX_SHARDS": 1,
+    "CONTENT_SEARCH_INDEX_REPLICAS": 0,
+    "CONTENT_SEARCH_INDEX_REFRESH_INTERVAL": "30s",
+    "WAGTAILSEARCH_BACKENDS": {"content_production": {"BACKEND": "test"}},
+}
+
+
 class _Relation:
     def __init__(self, values):
         self.values = values
@@ -277,3 +289,93 @@ class ContentIndexCreateCommandTests(TestCase):
 
         create_index.assert_not_called()
         self.assertIn("test_environment_required", output.getvalue())
+
+
+class ProductionContentIndexCreateCommandTests(TestCase):
+    """生产入口必须在写入前完成独立连接、备份和双重确认检查。"""
+
+    def _call(self, *args, **kwargs):
+        return call_command(
+            "search_create_production_content_index",
+            "--target",
+            "prod-content-v001",
+            "--index-name",
+            "wagtailblog-prod-content-v001",
+            "--backup-reference",
+            "wagtailblog3-pre-search-20260811-221511",
+            *args,
+            **kwargs,
+        )
+
+    @override_settings(**PRODUCTION_INDEX_SETTINGS)
+    def test_dry_run_never_writes_or_requires_the_write_flag(self):
+        output = StringIO()
+        with patch.dict(os.environ, {"WAGTAILBLOG_ENV": "production"}), patch(
+            "search.management.commands.search_create_production_content_index.Path"
+        ) as path, patch(
+            "search.management.commands.search_create_production_content_index.create_content_search_index"
+        ) as create_index:
+            path.return_value.__truediv__.return_value.__truediv__.return_value.is_file.return_value = True
+            self._call(stdout=output)
+
+        report = json.loads(output.getvalue())
+        self.assertTrue(report["dry_run"])
+        self.assertTrue(report["ready_for_confirm"])
+        create_index.assert_not_called()
+        self.assertFalse(ContentSearchTarget.objects.filter(target_id="prod-content-v001").exists())
+
+    @override_settings(**PRODUCTION_INDEX_SETTINGS)
+    def test_confirm_requires_second_confirmation_before_es_write(self):
+        output = StringIO()
+        with patch.dict(os.environ, {"WAGTAILBLOG_ENV": "production"}), patch(
+            "search.management.commands.search_create_production_content_index.Path"
+        ) as path, patch(
+            "search.management.commands.search_create_production_content_index.create_content_search_index"
+        ) as create_index, self.assertRaises(CommandError):
+            path.return_value.__truediv__.return_value.__truediv__.return_value.is_file.return_value = True
+            self._call("--confirm", stdout=output)
+
+        create_index.assert_not_called()
+        self.assertIn("second_production_confirmation_required", output.getvalue())
+
+    @override_settings(**PRODUCTION_INDEX_SETTINGS)
+    def test_confirm_creates_only_disabled_building_target(self):
+        output = StringIO()
+        with patch.dict(os.environ, {"WAGTAILBLOG_ENV": "production"}), patch(
+            "search.management.commands.search_create_production_content_index.Path"
+        ) as path, patch(
+            "search.management.commands.search_create_production_content_index.create_content_search_index",
+            return_value=ContentSearchIndexCreateResult(True, True),
+        ) as create_index:
+            path.return_value.__truediv__.return_value.__truediv__.return_value.is_file.return_value = True
+            self._call(
+                "--confirm",
+                "--confirm-production-index-create",
+                stdout=output,
+            )
+
+        target = ContentSearchTarget.objects.get(target_id="prod-content-v001")
+        self.assertEqual(target.connection_name, "content_production")
+        self.assertFalse(target.enabled)
+        self.assertFalse(target.required)
+        self.assertEqual(target.role, ContentSearchTargetRole.BUILDING)
+        self.assertEqual(SearchIndexBuild.objects.get(target=target).status, SearchIndexBuildStatus.CREATED)
+        create_index.assert_called_once()
+
+    @override_settings(**PRODUCTION_INDEX_SETTINGS)
+    def test_confirm_refuses_when_a_search_feature_is_enabled(self):
+        output = StringIO()
+        with patch.dict(os.environ, {"WAGTAILBLOG_ENV": "production"}), patch(
+            "search.management.commands.search_create_production_content_index.Path"
+        ) as path, patch(
+            "search.management.commands.search_create_production_content_index.create_content_search_index"
+        ) as create_index, self.settings(CONTENT_SEARCH_QUERY_ENABLED=True), self.assertRaises(CommandError):
+            path.return_value.__truediv__.return_value.__truediv__.return_value.is_file.return_value = True
+            self._call(
+                "--confirm",
+                "--confirm-production-index-create",
+                stdout=output,
+            )
+
+        create_index.assert_not_called()
+        self.assertIn("search_feature_flags_must_remain_disabled", output.getvalue())

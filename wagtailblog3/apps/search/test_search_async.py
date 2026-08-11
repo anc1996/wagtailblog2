@@ -142,7 +142,7 @@ class SearchResultsApiTests(SimpleTestCase):
             response = search_results_api(request)
 
         payload = json.loads(response.content)
-        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.status_code, 503)
         self.assertEqual(response["Cache-Control"], "private, no-store")
         self.assertEqual(payload["error"]["code"], "search_unavailable")
         self.assertEqual(payload["error"]["message"], "搜索结果暂时无法加载，请稍后重试。")

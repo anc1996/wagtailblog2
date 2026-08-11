@@ -158,7 +158,8 @@
                 start_date: parsedUrl.searchParams.get('start_date') || '',
                 end_date: parsedUrl.searchParams.get('end_date') || '',
                 order_by: parsedUrl.searchParams.get('order_by') || '',
-                page: parsedUrl.searchParams.get('page') || ''
+                page: parsedUrl.searchParams.get('page') || '',
+                cursor: parsedUrl.searchParams.get('cursor') || ''
             };
         }
 
@@ -172,13 +173,14 @@
                 order_by: String(formData.get('order_by') || ''),
                 page: form.matches('.jump-to-page-form')
                     ? String(formData.get('page') || '')
-                    : ''
+                    : '',
+                cursor: ''
             };
         }
 
         function requestParams(params) {
             var values = { type: params.type || 'all' };
-            ['query', 'start_date', 'end_date', 'order_by', 'page'].forEach(function (key) {
+            ['query', 'start_date', 'end_date', 'order_by', 'page', 'cursor'].forEach(function (key) {
                 if (params[key]) {
                     values[key] = params[key];
                 }

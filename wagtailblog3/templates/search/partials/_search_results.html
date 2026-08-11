@@ -3,7 +3,12 @@
 <div class="search-results-fragment">
     <h2 id="search-results-heading" class="sr-only sr-only-focusable" tabindex="-1">搜索结果</h2>
 
-    {% if search_query and search_query != 'None' %}
+    {% if search_error %}
+        <div class="search-results-info" role="alert">
+            <i class="fa fa-exclamation-triangle" aria-hidden="true"></i>
+            <span>{{ search_error }}</span>
+        </div>
+    {% elif search_query and search_query != 'None' %}
         <div class="search-results-info" role="status">
             <i class="fa {% if search_results.paginator.count > 0 %}fa-check-circle{% else %}fa-info-circle{% endif %}" aria-hidden="true"></i>
             <span>
@@ -44,7 +49,13 @@
 
                     <h3 class="result-title"><a href="{% pageurl result %}">{% render_display_title result %}</a></h3>
 
-                    {% if result.specific.intro %}
+                    {% if result.search_highlight_fragments %}
+                        <div class="result-highlights" aria-label="命中片段">
+                            {% for fragment in result.search_highlight_fragments %}
+                                <p class="result-highlight">{{ fragment }}</p>
+                            {% endfor %}
+                        </div>
+                    {% elif result.specific.intro %}
                         <p class="result-intro">{{ result.specific.intro|striptags|truncatechars:190 }}</p>
                     {% elif result.search_description %}
                         <p class="result-intro">{{ result.search_description|striptags|truncatechars:190 }}</p>
@@ -54,7 +65,7 @@
                 </div>
             </article>
         {% empty %}
-            {% if search_query and search_query != 'None' %}
+            {% if search_query and search_query != 'None' and not search_error %}
                 <div class="no-results">
                     <i class="fa fa-search-minus" aria-hidden="true"></i>
                     <h3>没有找到相关内容</h3>
@@ -79,6 +90,25 @@
 
     {% if search_results.has_other_pages %}
         <nav class="search-pagination" aria-label="搜索结果分页">
+            {% if cursor_mode %}
+                {% if search_results.has_previous %}
+                    <a href="{{ previous_cursor_url }}" class="pagination-button" rel="prev">
+                        <i class="fa fa-angle-left" aria-hidden="true"></i> 上一页
+                    </a>
+                {% else %}
+                    <span class="pagination-button disabled"><i class="fa fa-angle-left" aria-hidden="true"></i> 上一页</span>
+                {% endif %}
+
+                <span class="pagination-info">游标浏览</span>
+
+                {% if search_results.has_next %}
+                    <a href="{{ next_cursor_url }}" class="pagination-button" rel="next">
+                        下一页 <i class="fa fa-angle-right" aria-hidden="true"></i>
+                    </a>
+                {% else %}
+                    <span class="pagination-button disabled">下一页 <i class="fa fa-angle-right" aria-hidden="true"></i></span>
+                {% endif %}
+            {% else %}
             {% if search_results.has_previous %}
                 <a href="?{% if search_query and search_query != 'None' %}query={{ search_query|urlencode }}&amp;{% endif %}type={{ search_type }}&amp;page={{ search_results.previous_page_number }}{% if start_date and start_date != 'None' %}&amp;start_date={{ start_date }}{% endif %}{% if end_date and end_date != 'None' %}&amp;end_date={{ end_date }}{% endif %}{% if order_by and order_by != 'None' %}&amp;order_by={{ order_by }}{% endif %}" class="pagination-button" rel="prev">
                     <i class="fa fa-angle-left" aria-hidden="true"></i> 上一页
@@ -107,6 +137,7 @@
                 </a>
             {% else %}
                 <span class="pagination-button disabled">下一页 <i class="fa fa-angle-right" aria-hidden="true"></i></span>
+            {% endif %}
             {% endif %}
         </nav>
     {% endif %}

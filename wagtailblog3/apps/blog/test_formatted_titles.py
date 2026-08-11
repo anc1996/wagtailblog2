@@ -75,6 +75,20 @@ class MarkdownTitleTemplateTagTests(SimpleTestCase):
         self.assertIn("plain title", rendered)
         self.assertIn('class="markdown-title"', rendered)
 
+    def test_highlighted_title_preserves_code_and_math_markup(self):
+        page = SimpleNamespace(
+            title="`check_highlight`: 标题代码高亮测试用例 $x^2$",
+            search_title_highlight="<mark>check_highlight</mark>",
+            search_title_query="check_highlight",
+        )
+
+        template = Template("{% load blog_tags %}{% render_display_title page %}")
+        rendered = template.render(Context({"page": page}))
+
+        self.assertIn("<code><mark>check_highlight</mark></code>", rendered)
+        self.assertIn('class="arithmatex"', rendered)
+        self.assertIn('data-title-math="true"', rendered)
+
     def test_disallowed_markdown_falls_back_to_escaped_source(self):
         page = SimpleNamespace(
             pk=42,

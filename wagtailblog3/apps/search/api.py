@@ -1,8 +1,11 @@
 # 搜索应用的接口视图
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
-from .core import perform_search, format_search_results_for_api, get_search_suggestions
+from django.conf import settings
+from .core import MAX_RESULT_WINDOW, SearchUnavailableError, format_search_results_for_api, get_search_suggestions, perform_search
 from .cache import SearchCache
+from .services.content_query import ContentSearchResults
+from .services.cursor import ContentSearchCursorError
 import logging
 
 logger = logging.getLogger(__name__)
@@ -21,21 +24,39 @@ def search_api(request):
 	"""
 	query = request.GET.get('q', '')
 	search_type = request.GET.get('type', 'all')
-	page = int(request.GET.get('page', 1))
-	per_page = int(request.GET.get('per_page', 10))
+	cursor = clean_search_param(request.GET.get('cursor'))
+	query_for_mode = clean_search_param(query)
+	cursor_mode = bool(
+		query_for_mode
+		and search_type == 'blog'
+		and getattr(settings, 'CONTENT_SEARCH_QUERY_ENABLED', False)
+		and getattr(settings, 'CONTENT_SEARCH_CURSOR_ENABLED', False)
+	)
+	try:
+		page = int(request.GET.get('page', 1))
+		per_page = int(request.GET.get('per_page', 10))
+	except (TypeError, ValueError):
+		return Response({'error': {'code': 'invalid_pagination', 'message': '分页参数无效。'}}, status=400)
+	if page < 1 or not 1 <= per_page <= 100:
+		return Response({'error': {'code': 'invalid_pagination', 'message': '分页参数无效。'}}, status=400)
+	start = (page - 1) * per_page
+	if not cursor_mode and (start >= MAX_RESULT_WINDOW or start + per_page > MAX_RESULT_WINDOW):
+		return Response({'error': {'code': 'result_window_exceeded', 'message': '搜索结果最多支持前 10000 条。'}}, status=400)
 	
 	start_date = clean_search_param(request.GET.get('start_date', None))
 	end_date = clean_search_param(request.GET.get('end_date', None))
 	order_by = clean_search_param(request.GET.get('order_by', None))
 	query = clean_search_param(query)
+	if cursor and not cursor_mode:
+		return Response({'error': {'code': 'invalid_cursor', 'message': '搜索游标不适用于当前查询。'}}, status=400)
 	
 	if not query:
 		return Response({
 			'query': '', 'total': 0, 'page': page, 'per_page': per_page, 'results': []
 		})
 	
-	# 1. 先读取缓存，命中时直接返回，避免重复访问搜索引擎。
-	cached_results = SearchCache.get_cached_results(
+	# 游标携带查询边界和排序锚点，不能复用按页码缓存。
+	cached_results = None if cursor_mode else SearchCache.get_cached_results(
 		query, search_type, page, start_date, end_date, order_by
 	)
 	if cached_results:
@@ -43,7 +64,7 @@ def search_api(request):
 		return Response(cached_results)
 	
 	try:
-		# 2. 构造并执行原生搜索引擎查询。
+		# 2. 在公开 QuerySet 范围内构造并执行搜索。
 		search_results = perform_search(
 			query, search_type,
 			start_date=start_date,
@@ -51,14 +72,16 @@ def search_api(request):
 			order_by=order_by
 		)
 		
-		# 3. 先取总数，再按当前页切片；结果代理会复用总数缓存。
-		total_count = search_results.count()
-		
-		start = (page - 1) * per_page
-		end = start + per_page
-		
-		# 结果代理统一支持切片，超出搜索引擎窗口时由代理截断。
-		paginated_results = search_results[start:end]
+		if cursor_mode and isinstance(search_results, ContentSearchResults):
+			paginated_results = search_results.cursor_page(
+				cursor, per_page, search_type=search_type,
+				locale=getattr(request, 'LANGUAGE_CODE', ''),
+			)
+			total_count = paginated_results.paginator.count
+		else:
+			# 旧 page= 协议继续受窗口限制，并复用既有缓存。
+			total_count = search_results.count()
+			paginated_results = search_results[start:start + per_page]
 		
 		# 4. 转换为接口格式并写入缓存，供相同条件的请求复用。
 		results_data = format_search_results_for_api(paginated_results)
@@ -66,22 +89,35 @@ def search_api(request):
 		data = {
 			'query': query,
 			'total': total_count,
-			'page': page,
+			'page': None if cursor_mode else page,
 			'per_page': per_page,
 			'start_date': start_date or "",
 			'end_date': end_date or "",
 			'order_by': order_by or "",
 			'results': results_data
 		}
+		if cursor_mode:
+			data['pagination'] = {
+				'mode': 'cursor',
+				'has_previous': paginated_results.has_previous(),
+				'has_next': paginated_results.has_next(),
+				'previous_cursor': paginated_results.previous_cursor,
+				'next_cursor': paginated_results.next_cursor,
+			}
 		
 		SearchCache.set_cached_results(
 			query, data, search_type, page, start_date, end_date, order_by
 		)
 		
 		return Response(data)
+	except SearchUnavailableError:
+		logger.error("API 搜索后端不可用", exc_info=True)
+		return Response({'error': {'code': 'search_unavailable', 'message': '搜索服务暂时不可用，请稍后重试。'}}, status=503)
+	except ContentSearchCursorError as error:
+		return Response({'error': {'code': error.code, 'message': '搜索游标无效或已过期，请重新搜索。'}}, status=400)
 	except Exception as e:
 		logger.error(f"API搜索网关层发生故障: {e}", exc_info=True)
-		return Response({'error': '搜索服务由于异构切换产生短暂毛刺，请稍后再试'}, status=500)
+		return Response({'error': {'code': 'search_unavailable', 'message': '搜索服务暂时不可用，请稍后重试。'}}, status=503)
 
 
 @api_view(['GET'])

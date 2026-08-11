@@ -20,6 +20,54 @@ class _RenderedTagCollector(HTMLParser):
     def handle_starttag(self, tag, attrs):
         self.tags.append(tag)
 
+
+class _TitleHighlightParser(HTMLParser):
+    """只在已经安全渲染的标题文本节点中插入 mark。"""
+
+    def __init__(self, terms):
+        super().__init__(convert_charrefs=False)
+        self.parts = []
+        self.terms = tuple(sorted(set(terms), key=len, reverse=True))
+        self.math_depth = 0
+
+    def handle_starttag(self, tag, attrs):
+        self.parts.append(self.get_starttag_text())
+        if tag == "span" and dict(attrs).get("class") == "arithmatex":
+            self.math_depth += 1
+
+    def handle_startendtag(self, tag, attrs):
+        self.parts.append(self.get_starttag_text())
+
+    def handle_endtag(self, tag):
+        self.parts.append(f"</{tag}>")
+        if tag == "span" and self.math_depth:
+            self.math_depth -= 1
+
+    def handle_data(self, data):
+        if self.math_depth or not self.terms:
+            self.parts.append(html.escape(data, quote=False))
+            return
+        pattern = re.compile("|".join(re.escape(term) for term in self.terms), re.IGNORECASE)
+        chunks = []
+        cursor = 0
+        for match in pattern.finditer(data):
+            chunks.append(html.escape(data[cursor:match.start()], quote=False))
+            chunks.append("<mark>")
+            chunks.append(html.escape(match.group(0), quote=False))
+            chunks.append("</mark>")
+            cursor = match.end()
+        chunks.append(html.escape(data[cursor:], quote=False))
+        self.parts.append("".join(chunks))
+
+    def handle_entityref(self, name):
+        self.parts.append(f"&{name};")
+
+    def handle_charref(self, name):
+        self.parts.append(f"&#{name};")
+
+    def render(self):
+        return "".join(self.parts)
+
     def handle_startendtag(self, tag, attrs):
         self.tags.append(tag)
 
@@ -93,6 +141,19 @@ class InlineTitleRenderer:
             link_rel=None,
         )
         return mark_safe(cleaned)
+
+    @classmethod
+    def render_highlighted(cls, source, query):
+        """保留标题原有 Markdown/公式结构，只在普通文本节点中加入 mark。"""
+
+        rendered = str(cls.render(source))
+        terms = re.findall(r"[A-Za-z0-9_]+|[\u4e00-\u9fff]+", smart_str(query or ""))
+        if not terms:
+            return mark_safe(rendered)
+        parser = _TitleHighlightParser(terms)
+        parser.feed(rendered)
+        parser.close()
+        return mark_safe(parser.render())
 
     @classmethod
     def plain_text(cls, source):

@@ -51,7 +51,8 @@
         <base target="_blank">
     {% endif %}
 
-    {# --- 性能优化：Favicon --- #}
+    {# 开发和生产共用已有静态图标，避免浏览器请求不存在的根路径 favicon。 #}
+    <link rel="icon" type="image/png" href="{% static 'gretzia/images/icons/search-icon.png' %}">
 
 
     {# --- CSS 样式表 (优化加载顺序) --- #}

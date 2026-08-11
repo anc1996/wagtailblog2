@@ -53,7 +53,7 @@ LOGGING = get_logging_config(log_dir=LOG_DIR)
 INSTALLED_APPS = [
     "observability",  # Wagtail 后台系统日志中心和清理审计
     "home",  # 首页应用
-    "search",  # 搜索应用
+    "search.apps.SearchConfig",  # 搜索应用
     "blog",  # 添加博客应用
     "comments", # 添加评论系统
     "archive",  # 添加归档应用

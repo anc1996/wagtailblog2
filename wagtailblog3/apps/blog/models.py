@@ -6,7 +6,7 @@ from django.utils import timezone
 from django.utils.text import slugify
 from django.utils.dateparse import parse_date
 from django.core.paginator import Paginator
-from django.db import models
+from django.db import models, transaction
 from django import forms
 from django.db.models import Count, Subquery, OuterRef, F
 from django.conf import settings
@@ -542,12 +542,12 @@ class BlogPage(Page):
 	base_form_class = BlogPageForm
 	
 	# 索引字段：body_text 会按需从 MongoDB 拼接纯文本供搜索后端使用。
+	# Wagtail 核心 Page 字段必须完整继承；移除本模型重复声明的标题自动补全字段。
 	search_fields = Page.search_fields + [
 		index.SearchField('title', boost=10, partial_match=False),
 		index.SearchField('intro', boost=5),
 		index.SearchField('body_text', boost=2),  # ← 改名，独立字段
 		# index.SearchField('subtitle', boost=8), # 👉 仅需在这里加一行
-		index.AutocompleteField('title'),
 		index.FilterField('date'),
 		index.FilterField('tags'),
 		index.FilterField('categories'),
@@ -792,6 +792,16 @@ class BlogPage(Page):
 			except Exception:
 				pass
 	
+	def publish(self, *args, **kwargs):
+		"""将 Wagtail 发布和搜索事件置于同一 MySQL 事务，避免提交窗口永久失步。"""
+		with transaction.atomic():
+			return super().publish(*args, **kwargs)
+
+	def unpublish(self, *args, **kwargs):
+		"""将取消发布和墓碑事件置于同一 MySQL 事务，事件只会在提交后被唤醒。"""
+		with transaction.atomic():
+			return super().unpublish(*args, **kwargs)
+
 	# =========================================================================
 	# 核心网关 4：物理删除与异构集群同步 (在后台点击“删除页面”时触发)
 	# =========================================================================
@@ -800,8 +810,12 @@ class BlogPage(Page):
 		page_id = self.pk
 		mongo_content_id = getattr(self, 'mongo_content_id', None)
 		
-		# 先删除页面及其关系数据；Mongo 清理放在后续独立步骤中，避免阻断 Wagtail 删除。
-		super().delete(*args, **kwargs)
+		# 墓碑 State 和 Outbox 必须在 Page 行删除前写入同一事务，避免迟到 upsert 复活已删除页面。
+		with transaction.atomic():
+			if settings.CONTENT_SEARCH_PRODUCER_ENABLED:
+				from search.services.outbox import ContentSearchOutboxService
+				ContentSearchOutboxService.record_delete(self)
+			deletion_result = super().delete(*args, **kwargs)
 		
 		# 再清理两个 Mongo 集合，保证正式内容和 Revision 快照都不残留。
 		try:
@@ -817,6 +831,7 @@ class BlogPage(Page):
 		
 		except Exception as e:
 			logger.error(f"级联清理 MongoDB 关联数据时遭遇异常: {e}", exc_info=True)
+		return deletion_result
 	
 	# =========================================================================
 	# 网关 4：前台数据读取网关 (用于博客详情页 serve 渲染时提取真实数据)
@@ -963,9 +978,10 @@ class BlogPage(Page):
 		"""ES 索引专用：从 MongoDB 拉取并拼接纯文本"""
 		return self.get_full_text_for_search()
 	
-	def get_full_text_for_search(self):
+	def get_full_text_for_search(self, content=None):
 		"""按块类型提取可搜索纯文本，不把 HTML 或 Markdown 标记送入索引。"""
-		content = self.get_content_from_mongodb()
+		if content is None:
+			content = self.get_content_from_mongodb()
 		if not content or 'body' not in content:
 			return ""
 		body = content['body']

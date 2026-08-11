@@ -22,7 +22,13 @@ def render_display_title(page):
 		return ""
 	title = getattr(page, "title", "") or ""
 	try:
-		rendered = InlineTitleRenderer.render(title)
+		if getattr(page, "search_title_highlight", "") and getattr(page, "search_title_query", ""):
+			rendered = InlineTitleRenderer.render_highlighted(
+				title,
+				page.search_title_query,
+			)
+		else:
+			rendered = InlineTitleRenderer.render(title)
 	except ValidationError:
 		logger.warning(
 			"invalid_markdown_title_fallback page_id=%s",

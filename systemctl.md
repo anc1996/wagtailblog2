@@ -23,8 +23,8 @@ uWSGI 的 6051 是仅供本机诊断的 HTTP 端口，不作为对外入口。
 | 服务 | 职责 | 是否开机启动 |
 | --- | --- | --- |
 | `wagtailblog3.service` | uWSGI / Django 网站 | 是 |
-| `wagtailblog3-celery-maintenance.service` | 日志索引同步和维护队列；可执行博客分析明细清理 | 是 |
-| `wagtailblog3-celery-beat.service` | 补偿日志索引 outbox，并每日调度博客分析明细清理检查 | 是 |
+| `wagtailblog3-celery-maintenance.service` | 日志索引同步和维护队列；可执行博客分析明细清理；内容搜索 Delivery 的租约消费与重试 | 是 |
+| `wagtailblog3-celery-beat.service` | 补偿日志索引 outbox、内容搜索 pending/过期租约 Delivery，并每日调度博客分析明细清理检查 | 是 |
 | `wagtailblog3-filebeat.service` | 采集项目日志并写入 Elasticsearch | 是 |
 
 ## 分支与环境配置
@@ -72,11 +72,81 @@ wagtailblog3/settings/.env.production
 - 两个文件即使同时存在，也只读取 `WAGTAILBLOG_ENV` 指定的一个；
 - 由于 `load_dotenv(..., override=False)`，进程或 systemd 已提供的变量优先于文件内容。
 
+### 搜索高亮回滚开关
+
+`SEARCH_HIGHLIGHTS_ENABLED` 默认 `true`。设为 `false` 后，前台搜索回退到 WP1 的 Wagtail
+`live().public()` 搜索和原有标题/简介摘要，不读取 ES 高亮片段，也不修改 MySQL、MongoDB 或
+Elasticsearch 索引。该开关仅用于已部署 WP2 代码后的紧急展示回滚；修改生产 `.env.production`
+前仍须执行生产配置变更确认，并仅重启 `wagtailblog3.service` 后验证首页、后台和搜索。恢复
+`true` 同样只需重启该服务，Worker、Beat、Filebeat 和 Elasticsearch 无需重启。
+
 生产 systemd unit 使用：
 
 ```ini
 EnvironmentFile=/home/source/Django/wagtail/wagtailblog3/wagtailblog3/settings/.env.production
 ```
+
+### WP5 游标分页与建议开关
+
+以下开关默认关闭，且不改变现有 systemd 服务、队列或端口。测试环境只有在完成
+游标签名、`search_after`、公开边界和浏览器验收后，才可单独启用对应测试进程配置：
+
+- `CONTENT_SEARCH_CURSOR_ENABLED`：仅对独立 `blog` 搜索启用签名游标；关闭后回到有窗口限制的 `page=` 分页。
+- `CONTENT_SEARCH_CURSOR_MAX_AGE_SECONDS`：游标最长有效期，默认 900 秒。
+- `CONTENT_SEARCH_PIT_ENABLED`：可选短生命周期 PIT 一致性；默认关闭，异常时不影响旧搜索。
+- `SEARCH_SUGGESTIONS_V2_ENABLED`：启用拆分后的建议协议；默认关闭时继续使用既有 Wagtail 历史词查询。
+- `SEARCH_POPULAR_SUGGESTIONS_ENABLED`：公开经过安全清理的热门历史词。
+- `SEARCH_TITLE_SUGGESTIONS_ENABLED`：从 `CONTENT_SEARCH_TITLE_SUGGESTIONS_READ_ALIAS` 读取公开标题候选，并执行 `live().public()` 二次校验。
+
+这些 flag 只属于应用配置，不新增 Worker、Beat、Filebeat 或 Nginx 依赖。生产修改 `.env.production`
+前仍须单独授权、记录回滚值，并按实际影响重启 `wagtailblog3.service`；标题索引创建、回填和 alias
+切换另行执行数据/索引变更门禁。
+
+### WP6 测试独立 Elasticsearch 集群
+
+WP6 测试集群运行在 WSL2 测试主机 `192.168.20.5`，不连接或替代 `192.168.20.2:9200` 的共享
+测试 Elasticsearch，更不属于生产集群。选择该主机是因为 `192.168.20.2` 核验时可用内存约
+3.1 GiB 且已有持续 swap，继续增加第二个 JVM 会影响共享 MySQL、MongoDB、Redis 和旧搜索。
+
+| 项目 | 测试值 |
+| --- | --- |
+| 容器 | `wagtailblog-test-search-wp6-es` |
+| 镜像 | `elasticsearch:8.17.0` |
+| 地址 | `https://192.168.20.5:9210` |
+| 集群 | `wagtailblog-test-content-secondary`，单节点 |
+| 资源 | 容器上限 1.5 GiB；JVM heap 768 MiB |
+| 重启策略 | `unless-stopped` |
+| 数据卷 | `wagtailblog-test-search-wp6-data` |
+| 证书卷 | `wagtailblog-test-search-wp6-certs-v2`；旧 `-certs` 卷仅作为测试回溯证据保留 |
+| 密钥卷 | `wagtailblog-test-search-wp6-secrets` |
+| 快照卷 | `wagtailblog-test-search-wp6-snapshots`，仓库名 `wagtailblog-test-wp6-repository` |
+| 网络 | `wagtailblog-test-search-wp6` |
+
+HTTP 和 transport 均启用 TLS；应用使用限制在 `wagtailblog-test-secondary-content-*` 的 API key。
+该 key 可执行内容索引所需的读写和 template 管理，但无 snapshot 管理权限；snapshot 创建和恢复
+使用独立管理员入口，避免应用凭据同时拥有备份删除能力。证书私钥、管理员凭据和 API key 仅放在
+Git ignored 的测试运行目录或 Docker volume，不得写入 `.env.test`、本文、Git 或命令输出。
+
+测试集群常用命令：
+
+```bash
+docker start wagtailblog-test-search-wp6-es
+docker stop wagtailblog-test-search-wp6-es
+docker restart wagtailblog-test-search-wp6-es
+docker logs --tail 100 wagtailblog-test-search-wp6-es
+
+cd /mnt/f/openclaw/workspace/wagtail/wagtailblog2
+output/wp6/django-secondary.sh search_cluster_preflight \
+  --connection content_secondary \
+  --index wagtailblog-test-secondary-content-v001 \
+  --strict
+```
+
+停止容器不会删除数据。不得把 `docker rm`、`docker volume rm`、索引删除、snapshot 删除或证书清理
+作为普通回滚；这些清理操作必须先核对复现证据和回滚窗口并单独确认。应用读取回滚只需恢复
+`CONTENT_SEARCH_CONNECTION_NAME=default` 并关闭新查询 flag，观察期继续保留旧、新目标双投递。
+生产创建独立集群、放行端口、安装证书、配置 snapshot、写入索引、切换连接或重启服务仍需独立方案、
+备份和再次授权，不能直接复制本节测试参数。
 
 旧版根目录 `observability.env` 已于 2026-08-08 从生产项目移出，其日志环境变量已统一
 由 `wagtailblog3/settings/.env.production` 提供。可恢复备份位于
@@ -102,7 +172,12 @@ EnvironmentFile=/home/source/Django/wagtail/wagtailblog3/wagtailblog3/settings/.
 
 当前日志系统改造涉及并必须启动的服务为：
 
-- `wagtailblog3-celery-maintenance.service`：消费 `maintenance` 队列，执行日志索引同步和维护任务；
+- `wagtailblog3-celery-maintenance.service`：消费 `maintenance` 队列，执行日志索引同步和维护任务；WP3B
+  新增内容搜索 Outbox 的提交后唤醒任务，但 `CONTENT_SEARCH_CONSUMER_ENABLED=false` 时只记录延后状态，
+  不领取 Outbox、不读取 Mongo 正文、不写入 Elasticsearch。启用后，WP3C 的 Delivery 消费使用短租约、
+  指数退避和外部版本写入；必须只写已登记的物理索引，不能指向 Wagtail 现有索引或别名；
+- `wagtailblog3-celery-beat.service`：每 30 秒调度内容搜索 Delivery 的 pending/过期租约补偿。
+  该任务在 consumer flag 关闭时直接返回，不创建 Delivery、不读取 Mongo 或 Elasticsearch；
 - `wagtailblog3-celery-beat.service`：调度定时任务和失败补偿；博客分析清理任务默认由
   `BLOG_ANALYTICS_CLEANUP_ENABLED=false` 禁用，只有完成备份、影响确认和独立授权后才可启用；
 - `wagtailblog3-filebeat.service`：采集项目日志并写入 Elasticsearch。
@@ -112,8 +187,8 @@ EnvironmentFile=/home/source/Django/wagtail/wagtailblog3/wagtailblog3/settings/.
 
 依赖服务也必须可用：`mysqld.service`、`redis.service`、
 `mongodb-home.service`、`minio.service`、`docker.service` 和 Nginx。
-Elasticsearch 与 Kibana 由 Docker 管理，Elasticsearch 容器设置为
-`restart=always`。
+生产 Elasticsearch 与 Kibana 由 Docker 管理，既有生产 Elasticsearch 容器设置为
+`restart=always`；WP6 测试容器按上一节使用 `unless-stopped`，两者不得混用。
 
 不要启动只消费 `email` 或 `default` 队列的 Celery Worker，除非已经检查
 Redis 中没有历史邮件任务，并明确需要处理这些任务。当前 Worker 只监听
@@ -304,6 +379,95 @@ Celery Beat 状态文件位于：
 如果宿主机异常断电后 Beat 无法启动，先停止 Beat，再将损坏的 schedule 文件
 改名留存，最后重新启动 Beat；不要直接删除日志或数据库数据。
 
+### 内容搜索同步运维
+
+内容搜索同步只允许向 `ContentSearchTarget` 中已登记且启用的物理索引写入。生产启用
+`CONTENT_SEARCH_CONSUMER_ENABLED=true` 前，必须已完成目标索引创建、对应 migration、备份和
+独立授权；默认关闭时 Beat 和 Worker 均不读取 Mongo 正文、不创建 Delivery、不写入 Elasticsearch。
+
+以下命令只读取聚合状态和有限 ID，不输出正文、草稿、Mongo 指针、凭据或完整 ES 错误：
+
+```bash
+cd /home/source/Django/wagtail/wagtailblog3
+set -a
+. ./wagtailblog3/settings/.env.production
+set +a
+
+/root/anaconda3/envs/wagtailblog/bin/python manage.py shell -c "from django.db.models import Count; from search.models import ContentSearchDelivery; print(list(ContentSearchDelivery.objects.values('target__target_id', 'status').annotate(total=Count('pk')).order_by('target__target_id', 'status')))"
+/root/anaconda3/envs/wagtailblog/bin/python manage.py shell -c "from search.models import ContentSearchDelivery, ContentSearchStatus; print(list(ContentSearchDelivery.objects.filter(status=ContentSearchStatus.DEAD).values_list('pk', 'event_id', 'target__target_id')[:20]))"
+```
+
+WP3D 提供更严格的精确目标命令。状态和一致性检查始终只读；一致性检查按 `page_id` 游标分批，不能使用
+通配符索引。初始化命令默认只预演，`--confirm` 才会在 MySQL 创建缺失的 `ContentSearchState`，不会创建
+Outbox/Delivery，也不会写 Mongo 或 Elasticsearch：
+
+```bash
+/root/anaconda3/envs/wagtailblog/bin/python manage.py search_sync_status --target TARGET_ID
+/root/anaconda3/envs/wagtailblog/bin/python manage.py search_consistency_check --target TARGET_ID --after-page-id 0 --limit 1000 --strict
+/root/anaconda3/envs/wagtailblog/bin/python manage.py search_bootstrap_state --target TARGET_ID --after-page-id 0 --limit 100
+```
+
+生产执行 `search_bootstrap_state --confirm` 前，必须先完成生产 MySQL 备份、影响范围说明、批次和 checkpoint
+确认，并单独授权；命令不会替代正式的索引创建、回填或前台切换流程。
+
+### WP4A 独立内容索引原型
+
+`search_create_content_index` 仅用于测试环境的版本化精简索引原型。默认只输出计划；提供
+`--confirm` 后才会创建精确的 ES composable template、物理索引、以及 `building + enabled=false` 的
+`ContentSearchTarget/SearchIndexBuild` 记录。它不创建或切换 read alias、不启用 producer/consumer、
+不投递 Delivery，也不修改 Mongo 正文：
+
+```bash
+cd /mnt/f/openclaw/workspace/wagtail/wagtailblog2
+source /root/anaconda3/bin/activate wagtailblog-test
+export WAGTAILBLOG_ENV=test
+
+python manage.py search_create_content_index --target content-v001
+python manage.py search_create_content_index --target content-v001 --confirm
+```
+
+命令拒绝非 `test` 环境、缺少 test 标识的内容索引前缀、通配符/别名式索引名和既有 target/index 覆盖。
+共享测试库首次执行前必须已获得 migration 授权并应用 `search.0001` 至 `search.0004`。生产索引、template、
+alias 或 target 的创建仍须完成 snapshot、磁盘双份空间、影响说明和单独授权，不能复用此测试命令。
+
+### WP4B 在线回填和增量双投递
+
+`search_rebuild_content_index` 默认只读预演。确认执行前，测试环境必须已经完成 WP4A 的 `search.0001`
+至当前迁移、精确目标索引创建、State bootstrap，并同时打开测试用的
+`CONTENT_SEARCH_PRODUCER_ENABLED` 与 `CONTENT_SEARCH_CONSUMER_ENABLED`。命令只接受当前环境前缀下的
+物理 `ContentSearchTarget`，不接受 read alias 或通配符：
+
+```bash
+cd /mnt/f/openclaw/workspace/wagtail/wagtailblog2
+source /root/anaconda3/bin/activate wagtailblog-test
+export WAGTAILBLOG_ENV=test
+
+python manage.py search_rebuild_content_index --target content-v001 --dry-run
+python manage.py search_rebuild_content_index --target content-v001 --batch-size 200 --max-batch-bytes 4194304 --confirm
+python manage.py search_rebuild_content_index --target content-v001 --check-catch-up --confirm
+```
+
+启动顺序由代码保证为：锁定并启用 `building` target、补齐目标注册后的事件 Delivery、再按公开页面
+游标回填。回填使用 Mongo `_id in` 批读和 ES Bulk external version；整批写入成功后才推进 checkpoint，
+失败停在原 checkpoint。回填完成只进入 `catching_up`；追平检查连续两次无 pending/processing/retry/dead、
+公开页面与 State/ES 版本一致后才进入 `ready`，不会创建或切换 read alias，也不会启用前台独立搜索。
+进程崩溃或批量失败使用 `--resume-build` 从 checkpoint 继续；失败目标的物理索引保留，不自动删除。
+
+WP4B 不新增 systemd unit，复用 `wagtailblog3-celery-maintenance.service` 和
+`wagtailblog3-celery-beat.service` 的现有 maintenance 队列与补偿任务；本地测试代码变更不要求重启生产
+服务。生产执行 migration、创建/写入生产索引、启用双投递、回填、服务重启或切换别名仍需备份、影响说明、
+回滚点和单独授权，不能直接复用上述测试命令。
+
+死信或重试必须先修正目标索引、mapping 或外部依赖，再经过生产数据操作确认后精确重放一个
+Delivery；不得批量重置 Outbox、Delivery 或 State：
+
+```bash
+/root/anaconda3/envs/wagtailblog/bin/python manage.py search_replay_delivery EVENT_UUID TARGET_ID --reason '已修正的原因' --confirm
+```
+
+该命令会打印环境、Delivery、事件、目标和物理索引，并拒绝缺少 `--confirm`、consumer 关闭、有效
+租约、已成功或已过期的 Delivery。它只重新排队指定行；实际 ES 写入仍由 maintenance Worker 按租约执行。
+
 ## 健康检查
 
 在项目目录执行：
@@ -316,6 +480,7 @@ set +a
 
 /root/anaconda3/envs/wagtailblog/bin/python manage.py check
 /root/anaconda3/envs/wagtailblog/bin/python -m celery -A wagtailblog3 inspect ping -d maintenance@ziliao --timeout=10
+/root/anaconda3/envs/wagtailblog/bin/python -m celery -A wagtailblog3 inspect registered -d maintenance@ziliao --timeout=10
 curl -fsS http://127.0.0.1:9200/_cluster/health
 curl -fsS http://127.0.0.1:9200/wagtailblog-logs-read/_count
 curl -I -H 'Host: wagtailblog.docs' http://127.0.0.1:6050/admin/login/

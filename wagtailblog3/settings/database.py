@@ -3,6 +3,7 @@
 
 import os
 import sys
+from urllib.parse import urlparse
 
 
 def _env_bool(name, default=False):
@@ -250,6 +251,9 @@ def get_celery_config(time_zone, redis_host, redis_port, redis_password):
 			
 			'base.tasks.cleanup_email_logs': {'queue': 'maintenance'},
 			'blog.tasks.cleanup_analytics_details': {'queue': 'maintenance'},
+			'search.tasks.wake_content_search_delivery': {'queue': 'maintenance'},
+			'search.tasks.consume_content_search_delivery': {'queue': 'maintenance'},
+			'search.tasks.dispatch_pending_content_search_deliveries': {'queue': 'maintenance'},
 			# 邮件日志清理任务 → maintenance 队列
 			# 维护类任务使用独立队列，避免影响业务任务
 		},
@@ -381,6 +385,11 @@ def get_celery_config(time_zone, redis_host, redis_port, redis_password):
 				'schedule': 30,
 				'options': {'queue': 'maintenance'},
 			},
+			'dispatch-pending-content-search-deliveries': {
+				'task': 'search.tasks.dispatch_pending_content_search_deliveries',
+				'schedule': 30,
+				'options': {'queue': 'maintenance'},
+			},
 			'cleanup-blog-analytics-details': {
 				'task': 'blog.tasks.cleanup_analytics_details',
 				'schedule': 60 * 60 * 24,
@@ -399,6 +408,110 @@ def get_celery_config(time_zone, redis_host, redis_port, redis_password):
 
 
 # 搜索
+# 高亮异常时可通过环境变量回退到 WP1 的公开 QuerySet 搜索，不修改索引或内容数据。
+SEARCH_HIGHLIGHTS_ENABLED = _env_bool("SEARCH_HIGHLIGHTS_ENABLED", True)
+
+# 内容搜索同步骨架默认关闭；WP3B 之前不得生产事件、投递任务或切换读取路径。
+CONTENT_SEARCH_PRODUCER_ENABLED = _env_bool("CONTENT_SEARCH_PRODUCER_ENABLED", False)
+CONTENT_SEARCH_CONSUMER_ENABLED = _env_bool("CONTENT_SEARCH_CONSUMER_ENABLED", False)
+CONTENT_SEARCH_SHADOW_READ_ENABLED = _env_bool("CONTENT_SEARCH_SHADOW_READ_ENABLED", False)
+CONTENT_SEARCH_QUERY_ENABLED = _env_bool("CONTENT_SEARCH_QUERY_ENABLED", False)
+CONTENT_SEARCH_CURSOR_ENABLED = _env_bool("CONTENT_SEARCH_CURSOR_ENABLED", False)
+CONTENT_SEARCH_CURSOR_MAX_AGE_SECONDS = max(
+	60,
+	min(3600, _env_int("CONTENT_SEARCH_CURSOR_MAX_AGE_SECONDS", 900)),
+)
+CONTENT_SEARCH_PIT_ENABLED = _env_bool("CONTENT_SEARCH_PIT_ENABLED", False)
+CONTENT_SEARCH_PIT_KEEP_ALIVE = os.environ.get("CONTENT_SEARCH_PIT_KEEP_ALIVE", "1m")
+SEARCH_SUGGESTIONS_V2_ENABLED = _env_bool("SEARCH_SUGGESTIONS_V2_ENABLED", False)
+SEARCH_POPULAR_SUGGESTIONS_ENABLED = _env_bool("SEARCH_POPULAR_SUGGESTIONS_ENABLED", False)
+SEARCH_TITLE_SUGGESTIONS_ENABLED = _env_bool("SEARCH_TITLE_SUGGESTIONS_ENABLED", False)
+CONTENT_SEARCH_RECONCILE_ENABLED = _env_bool("CONTENT_SEARCH_RECONCILE_ENABLED", False)
+CONTENT_SEARCH_DELIVERY_BATCH_SIZE = max(1, _env_int("CONTENT_SEARCH_DELIVERY_BATCH_SIZE", 100))
+CONTENT_SEARCH_LEASE_SECONDS = max(1, _env_int("CONTENT_SEARCH_LEASE_SECONDS", 120))
+CONTENT_SEARCH_MAX_ATTEMPTS = max(1, _env_int("CONTENT_SEARCH_MAX_ATTEMPTS", 10))
+CONTENT_SEARCH_RETRY_BASE_SECONDS = max(1, _env_int("CONTENT_SEARCH_RETRY_BASE_SECONDS", 5))
+CONTENT_SEARCH_RETRY_MAX_SECONDS = max(1, _env_int("CONTENT_SEARCH_RETRY_MAX_SECONDS", 3600))
+CONTENT_SEARCH_INDEX_PREFIX = os.environ.get(
+	"CONTENT_SEARCH_INDEX_PREFIX",
+	"wagtailblog-test-content",
+)
+CONTENT_SEARCH_TITLE_SUGGESTIONS_READ_ALIAS = os.environ.get(
+	"CONTENT_SEARCH_TITLE_SUGGESTIONS_READ_ALIAS",
+	f"{CONTENT_SEARCH_INDEX_PREFIX}-title-read",
+)
+CONTENT_SEARCH_CONNECTION_NAME = os.environ.get("CONTENT_SEARCH_CONNECTION_NAME", "default")
+CONTENT_SEARCH_SECONDARY_CONNECTION_ENABLED = _env_bool(
+	"CONTENT_SEARCH_SECONDARY_CONNECTION_ENABLED",
+	False,
+)
+CONTENT_SEARCH_SECONDARY_CONNECTION_NAME = os.environ.get(
+	"CONTENT_SEARCH_SECONDARY_CONNECTION_NAME",
+	"content_secondary",
+).strip()
+CONTENT_SEARCH_SECONDARY_URL = os.environ.get("CONTENT_SEARCH_SECONDARY_URL", "").strip()
+CONTENT_SEARCH_SECONDARY_INDEX_PREFIX = os.environ.get(
+	"CONTENT_SEARCH_SECONDARY_INDEX_PREFIX",
+	"wagtailblog-secondary",
+).strip()
+CONTENT_SEARCH_SECONDARY_VERIFY_CERTS = _env_bool(
+	"CONTENT_SEARCH_SECONDARY_VERIFY_CERTS",
+	True,
+)
+CONTENT_SEARCH_SECONDARY_CA_CERTS = os.environ.get(
+	"CONTENT_SEARCH_SECONDARY_CA_CERTS",
+	"",
+).strip()
+CONTENT_SEARCH_SECONDARY_AUTH_MODE = os.environ.get(
+	"CONTENT_SEARCH_SECONDARY_AUTH_MODE",
+	"",
+).strip().lower()
+CONTENT_SEARCH_SECONDARY_API_KEY = os.environ.get("CONTENT_SEARCH_SECONDARY_API_KEY", "")
+CONTENT_SEARCH_SECONDARY_USERNAME = os.environ.get("CONTENT_SEARCH_SECONDARY_USERNAME", "")
+CONTENT_SEARCH_SECONDARY_PASSWORD = os.environ.get("CONTENT_SEARCH_SECONDARY_PASSWORD", "")
+CONTENT_SEARCH_READ_ALIAS = os.environ.get(
+	"CONTENT_SEARCH_READ_ALIAS",
+	f"{CONTENT_SEARCH_INDEX_PREFIX}-read",
+)
+CONTENT_SEARCH_SHADOW_TARGET_ID = os.environ.get("CONTENT_SEARCH_SHADOW_TARGET_ID", "")
+CONTENT_SEARCH_SHADOW_SAMPLE_RATE = min(
+	1.0,
+	max(0.0, _env_float("CONTENT_SEARCH_SHADOW_SAMPLE_RATE", 0.0)),
+)
+CONTENT_SEARCH_SHADOW_TIMEOUT_SECONDS = min(
+	5.0,
+	max(0.05, _env_float("CONTENT_SEARCH_SHADOW_TIMEOUT_SECONDS", 0.25)),
+)
+CONTENT_SEARCH_SHADOW_MAX_WORKERS = max(1, min(8, _env_int("CONTENT_SEARCH_SHADOW_MAX_WORKERS", 1)))
+CONTENT_SEARCH_SHADOW_MAX_IN_FLIGHT = max(
+	1,
+	min(32, _env_int("CONTENT_SEARCH_SHADOW_MAX_IN_FLIGHT", 2)),
+)
+CONTENT_SEARCH_SHADOW_FAILURE_THRESHOLD = max(
+	1,
+	min(20, _env_int("CONTENT_SEARCH_SHADOW_FAILURE_THRESHOLD", 3)),
+)
+CONTENT_SEARCH_SHADOW_COOLDOWN_SECONDS = max(
+	1,
+	min(3600, _env_int("CONTENT_SEARCH_SHADOW_COOLDOWN_SECONDS", 30)),
+)
+# 独立内容索引原型默认单主分片、零副本，生产容量参数必须在单独发布门禁中重新确认。
+CONTENT_SEARCH_INDEX_SHARDS = max(1, _env_int("CONTENT_SEARCH_INDEX_SHARDS", 1))
+CONTENT_SEARCH_INDEX_REPLICAS = max(0, _env_int("CONTENT_SEARCH_INDEX_REPLICAS", 0))
+CONTENT_SEARCH_INDEX_REFRESH_INTERVAL = os.environ.get(
+	"CONTENT_SEARCH_INDEX_REFRESH_INTERVAL",
+	"30s",
+)
+# 在线回填默认从较小批次开始，生产容量参数必须依据实测重新确认。
+CONTENT_SEARCH_REBUILD_BATCH_SIZE = max(
+	1,
+	min(_env_int("CONTENT_SEARCH_REBUILD_BATCH_SIZE", 200), 1000),
+)
+CONTENT_SEARCH_REBUILD_MAX_BATCH_BYTES = max(
+	1024,
+	_env_int("CONTENT_SEARCH_REBUILD_MAX_BATCH_BYTES", 4 * 1024 * 1024),
+)
+
 WAGTAILSEARCH_BACKENDS = {
 	'default': {
 		# 1. 搜索引擎底层的通用适配器驱动
@@ -456,6 +569,49 @@ WAGTAILSEARCH_BACKENDS = {
 		}
 	}
 }
+
+if CONTENT_SEARCH_SECONDARY_CONNECTION_ENABLED:
+	if not CONTENT_SEARCH_SECONDARY_CONNECTION_NAME:
+		raise ValueError("独立 Elasticsearch 连接名不能为空")
+	secondary_url = urlparse(CONTENT_SEARCH_SECONDARY_URL)
+	if (
+		secondary_url.scheme != "https"
+		or not secondary_url.netloc
+		or secondary_url.username
+		or secondary_url.password
+	):
+		raise ValueError("独立 Elasticsearch 集群必须使用不含凭据的 HTTPS URL")
+	if not CONTENT_SEARCH_SECONDARY_VERIFY_CERTS:
+		raise ValueError("独立 Elasticsearch 集群必须校验证书")
+	if CONTENT_SEARCH_SECONDARY_AUTH_MODE not in {"api_key", "basic"}:
+		raise ValueError("独立 Elasticsearch 必须配置 api_key 或 basic 认证模式")
+	if CONTENT_SEARCH_SECONDARY_AUTH_MODE == "api_key" and not CONTENT_SEARCH_SECONDARY_API_KEY:
+		raise ValueError("独立 Elasticsearch API Key 未配置")
+	if CONTENT_SEARCH_SECONDARY_AUTH_MODE == "basic" and not (
+		CONTENT_SEARCH_SECONDARY_USERNAME and CONTENT_SEARCH_SECONDARY_PASSWORD
+	):
+		raise ValueError("独立 Elasticsearch basic 认证信息未配置")
+	if CONTENT_SEARCH_SECONDARY_CONNECTION_NAME in WAGTAILSEARCH_BACKENDS:
+		raise ValueError("独立 Elasticsearch 连接名不能覆盖已有连接")
+	secondary_options = {
+		"verify_certs": CONTENT_SEARCH_SECONDARY_VERIFY_CERTS,
+	}
+	if CONTENT_SEARCH_SECONDARY_CA_CERTS:
+		secondary_options["ca_certs"] = CONTENT_SEARCH_SECONDARY_CA_CERTS
+	if CONTENT_SEARCH_SECONDARY_AUTH_MODE == "api_key":
+		secondary_options["api_key"] = CONTENT_SEARCH_SECONDARY_API_KEY
+	else:
+		secondary_options["basic_auth"] = (
+			CONTENT_SEARCH_SECONDARY_USERNAME,
+			CONTENT_SEARCH_SECONDARY_PASSWORD,
+		)
+	WAGTAILSEARCH_BACKENDS[CONTENT_SEARCH_SECONDARY_CONNECTION_NAME] = {
+		"BACKEND": "wagtail.search.backends.elasticsearch8",
+		"URLS": [CONTENT_SEARCH_SECONDARY_URL],
+		"INDEX_PREFIX": CONTENT_SEARCH_SECONDARY_INDEX_PREFIX,
+		"TIMEOUT": _env_int("CONTENT_SEARCH_SECONDARY_TIMEOUT", 10),
+		"OPTIONS": secondary_options,
+	}
 
 # 日志检索使用独立的 Elasticsearch 命名空间，不与 Wagtail 内容索引混用。
 # 默认关闭，保持现有文件读取链路；配置索引和采集器后再通过环境变量启用。

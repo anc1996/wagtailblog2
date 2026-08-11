@@ -1,6 +1,7 @@
 # 博客正文与 Revision 的清理信号
 import json
 import logging
+from django.db import transaction
 from django.db.models.signals import pre_delete, post_save
 from django.dispatch import receiver
 from taggit.models import Tag
@@ -175,6 +176,15 @@ def invalidate_feed_on_related_content_changed(sender, instance, **kwargs):
 def invalidate_feed_on_restriction_changed(sender, instance, **kwargs):
 	"""访问限制会改变public()结果，无法安全精确反查时刷新全部范围。"""
 	BlogFeedInvalidationService.schedule_all()
+	# 缓存只能在权限变更提交后清理，避免回滚或并发读取重新写入旧公开结果。
+	def clear_public_search_cache():
+		try:
+			from search.cache import SearchCache
+			SearchCache.clear_search_cache()
+		except Exception as error:
+			logger.error(f"访问限制变更后的搜索缓存清理失败: {error}", exc_info=True)
+
+	transaction.on_commit(clear_public_search_cache)
 
 
 @receiver(

@@ -9,6 +9,9 @@ DEBUG = True
 FORM_DEBUG = True  # 启用表单调试模式
 WAGTAILFORMS_HELP_TEXT_ALLOW_HTML = True  # 允许在帮助文本中使用HTML
 
+# HTTP 测试地址不具备可信 origin，关闭仅影响开发环境的浏览器提示；生产继续使用默认安全策略。
+SECURE_CROSS_ORIGIN_OPENER_POLICY = None
+
 # 开发环境CSRF设置
 CSRF_COOKIE_SECURE = False
 CSRF_COOKIE_HTTPONLY = False  # 开发环境可设为False便于调试

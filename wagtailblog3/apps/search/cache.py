@@ -6,13 +6,14 @@ import json
 
 class SearchCache:
 	"""搜索缓存管理"""
+	SEARCH_IMPLEMENTATION_VERSION = "v3"
 	
 	@staticmethod
 	def get_cache_key(query, search_type='all', page=1, start_date=None, end_date=None, order_by=None):
 		"""生成包含时间范围的缓存键"""
 		# 将关键词、类型、页码和筛选条件全部纳入键，防止不同查询相互覆盖。
 		key_elements = [
-			f"search:{query}:{search_type}:{page}"
+			f"search:{SearchCache.SEARCH_IMPLEMENTATION_VERSION}:{query}:{search_type}:{page}"
 		]
 		
 		if start_date:
@@ -23,7 +24,8 @@ class SearchCache:
 			key_elements.append(f"order:{order_by}")
 		
 		key_string = ":".join(key_elements)
-		return hashlib.md5(key_string.encode()).hexdigest()
+		digest = hashlib.md5(key_string.encode()).hexdigest()
+		return f"search:{SearchCache.SEARCH_IMPLEMENTATION_VERSION}:{digest}"
 	
 	@staticmethod
 	def get_cached_results(query, search_type='all', page=1, start_date=None, end_date=None, order_by=None):
@@ -40,5 +42,5 @@ class SearchCache:
 	
 	@staticmethod
 	def clear_search_cache():
-		"""清除所有搜索缓存"""
-		cache.delete_pattern("search:*")
+		"""清除当前搜索实现版本的全部结果缓存。"""
+		cache.delete_pattern(f"search:{SearchCache.SEARCH_IMPLEMENTATION_VERSION}:*")

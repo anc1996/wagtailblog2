@@ -1,18 +1,30 @@
 # 搜索应用的页面视图
 from urllib.parse import urlencode
 
+from django.conf import settings
 from django.core.paginator import EmptyPage, PageNotAnInteger, Paginator
 from django.http import JsonResponse
 from django.template.loader import render_to_string
 from django.template.response import TemplateResponse
 from django.urls import reverse
+from django.utils.translation import get_language
 
 from .analytics import SearchAnalytics
-from .core import perform_search, get_search_suggestions
+from .core import MAX_RESULT_WINDOW, SearchUnavailableError, get_search_suggestions, perform_search
+from .services.content_query import ContentSearchQueryUnavailable, ContentSearchResults
+from .services.cursor import ContentSearchCursorError
 import logging
 
 logger = logging.getLogger(__name__)
 SEARCH_RESULTS_PER_PAGE = 20
+
+
+class SearchResultWindowError(ValueError):
+	"""请求超出 ES 公开分页窗口时返回的参数错误。"""
+
+
+class SearchCursorRequestError(ValueError):
+	"""公开游标不能验证或不能用于当前查询。"""
 
 
 def clean_search_param(value):
@@ -22,14 +34,30 @@ def clean_search_param(value):
 	return value.strip() if isinstance(value, str) else value
 
 
-def get_search_results_context(query_params):
+def get_search_results_context(query_params, locale=None):
 	"""Build the shared paginated search context for page and fragment responses."""
 	search_query = clean_search_param(query_params.get("query"))
 	search_type = query_params.get("type") or "all"
 	start_date = clean_search_param(query_params.get("start_date"))
 	end_date = clean_search_param(query_params.get("end_date"))
 	order_by = clean_search_param(query_params.get("order_by"))
+	cursor = clean_search_param(query_params.get("cursor"))
 	page = query_params.get("page", 1)
+	try:
+		page_number = max(int(page), 1)
+	except (TypeError, ValueError):
+		page_number = 1
+	cursor_requested = bool(cursor)
+	cursor_candidate = bool(
+		search_query
+		and search_type == "blog"
+		and getattr(settings, "CONTENT_SEARCH_QUERY_ENABLED", False)
+		and getattr(settings, "CONTENT_SEARCH_CURSOR_ENABLED", False)
+	)
+	if search_query and not cursor_candidate and (page_number - 1) * SEARCH_RESULTS_PER_PAGE >= MAX_RESULT_WINDOW:
+		raise SearchResultWindowError("搜索结果最多支持前 10000 条")
+	if cursor_requested and not cursor_candidate:
+		raise SearchCursorRequestError("游标不适用于当前搜索条件")
 
 	search_results = None
 	if search_query:
@@ -41,11 +69,22 @@ def get_search_results_context(query_params):
 			order_by=order_by,
 		)
 
+	cursor_mode = cursor_candidate and isinstance(search_results, ContentSearchResults)
+	if cursor_mode:
+		try:
+			paginated_results = search_results.cursor_page(
+				cursor,
+				SEARCH_RESULTS_PER_PAGE,
+				search_type=search_type,
+				locale=locale or get_language() or "",
+			)
+		except ContentSearchCursorError as error:
+			raise SearchCursorRequestError(error.code) from error
 	# Keep the paginator shape stable for the welcome state and lazy search results.
-	if search_results:
+	elif search_results:
 		paginator = Paginator(search_results, SEARCH_RESULTS_PER_PAGE)
 		try:
-			paginated_results = paginator.page(page)
+			paginated_results = paginator.page(page_number)
 		except PageNotAnInteger:
 			paginated_results = paginator.page(1)
 		except EmptyPage:
@@ -61,6 +100,8 @@ def get_search_results_context(query_params):
 		"start_date": start_date or "",
 		"end_date": end_date or "",
 		"order_by": order_by or "",
+		"cursor": cursor or "",
+		"cursor_mode": cursor_mode,
 	}
 
 
@@ -79,15 +120,57 @@ def get_search_canonical_url(context):
 		params["end_date"] = context["end_date"]
 	if context["order_by"]:
 		params["order_by"] = context["order_by"]
-	if context["search_results"].number > 1:
+	if context.get("cursor_mode"):
+		if context.get("cursor"):
+			params["cursor"] = context["cursor"]
+	elif context["search_results"].number > 1:
 		params["page"] = context["search_results"].number
 
 	return f'{reverse("search:search")}?{urlencode(params)}'
 
 
+def get_search_cursor_url(context, cursor):
+	"""构造与当前查询绑定的上一页或下一页地址。"""
+
+	params = {
+		"query": context["search_query"],
+		"type": context["search_type"],
+		"cursor": cursor,
+	}
+	for key in ("start_date", "end_date", "order_by"):
+		if context[key]:
+			params[key] = context[key]
+	return f'{reverse("search:search")}?{urlencode(params)}'
+
+
+def add_cursor_navigation(context):
+	if not context.get("cursor_mode"):
+		return context
+	context["previous_cursor_url"] = (
+		get_search_cursor_url(context, context["search_results"].previous_cursor)
+		if context["search_results"].previous_cursor
+		else ""
+	)
+	context["next_cursor_url"] = (
+		get_search_cursor_url(context, context["search_results"].next_cursor)
+		if context["search_results"].next_cursor
+		else ""
+	)
+	return context
+
+
 def search(request):
 	"""Render the full progressive-enhancement search page."""
-	context = get_search_results_context(request.GET)
+	try:
+		context = add_cursor_navigation(
+			get_search_results_context(request.GET, getattr(request, "LANGUAGE_CODE", None))
+		)
+	except SearchResultWindowError as error:
+		return _search_error_response(request, request.GET, str(error), 400)
+	except SearchCursorRequestError:
+		return _search_error_response(request, request.GET, "搜索游标无效或已过期，请重新搜索。", 400)
+	except (SearchUnavailableError, ContentSearchQueryUnavailable):
+		return _search_error_response(request, request.GET, "搜索服务暂时不可用，请稍后重试。", 503)
 
 	# Preserve the existing raw JSON contract for callers of the original endpoint.
 	if request.headers.get("X-Requested-With") == "XMLHttpRequest":
@@ -123,6 +206,27 @@ def search(request):
 	return TemplateResponse(request, "search/search.html", context)
 
 
+def _search_error_response(request, query_params, message, status):
+	"""让 HTML、传统 AJAX 和异步页面共享稳定的搜索错误语义。"""
+	query = clean_search_param(query_params.get("query"))
+	if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+		code = "result_window_exceeded" if status == 400 else "search_unavailable"
+		return JsonResponse({"error": {"code": code, "message": message}}, status=status)
+	context = {
+		"search_query": query or "",
+		"search_results": Paginator([], SEARCH_RESULTS_PER_PAGE).page(1),
+		"search_type": query_params.get("type") or "all",
+		"start_date": clean_search_param(query_params.get("start_date")) or "",
+		"end_date": clean_search_param(query_params.get("end_date")) or "",
+		"order_by": clean_search_param(query_params.get("order_by")) or "",
+		"cursor": "",
+		"cursor_mode": False,
+		"search_error": message,
+		"popular_search_terms": [],
+	}
+	return TemplateResponse(request, "search/search.html", context, status=status)
+
+
 def search_results_api(request):
 	"""Return the server-rendered search-results fragment as JSON."""
 	if request.method != "GET":
@@ -141,7 +245,29 @@ def search_results_api(request):
 		return response
 
 	try:
-		context = get_search_results_context(request.GET)
+		context = add_cursor_navigation(
+			get_search_results_context(request.GET, getattr(request, "LANGUAGE_CODE", None))
+		)
+		pagination = {
+			"page_size": SEARCH_RESULTS_PER_PAGE,
+			"has_previous": context["search_results"].has_previous(),
+			"has_next": context["search_results"].has_next(),
+		}
+		if context["cursor_mode"]:
+			pagination.update(
+				{
+					"mode": "cursor",
+					"previous_cursor": context["search_results"].previous_cursor,
+					"next_cursor": context["search_results"].next_cursor,
+				}
+			)
+		else:
+			pagination.update(
+				{
+					"page": context["search_results"].number,
+					"total_pages": context["search_results"].paginator.num_pages,
+				}
+			)
 		response = JsonResponse(
 			{
 				"ok": True,
@@ -159,16 +285,25 @@ def search_results_api(request):
 						context,
 						request=request,
 					),
-					"pagination": {
-						"page": context["search_results"].number,
-						"page_size": SEARCH_RESULTS_PER_PAGE,
-						"total_pages": context["search_results"].paginator.num_pages,
-						"has_previous": context["search_results"].has_previous(),
-						"has_next": context["search_results"].has_next(),
-					},
+					"pagination": pagination,
 					"canonical_url": get_search_canonical_url(context),
 				},
 			}
+		)
+	except SearchResultWindowError as error:
+		response = JsonResponse(
+			{"ok": False, "error": {"code": "result_window_exceeded", "message": str(error)}},
+			status=400,
+		)
+	except SearchCursorRequestError:
+		response = JsonResponse(
+			{"ok": False, "error": {"code": "invalid_cursor", "message": "搜索游标无效或已过期，请重新搜索。"}},
+			status=400,
+		)
+	except SearchUnavailableError:
+		response = JsonResponse(
+			{"ok": False, "error": {"code": "search_unavailable", "message": "搜索服务暂时不可用，请稍后重试。"}},
+			status=503,
 		)
 	except Exception as e:
 		logger.error(f"搜索结果片段响应错误: {e}", exc_info=True)
@@ -180,7 +315,7 @@ def search_results_api(request):
 					"message": "搜索结果暂时无法加载，请稍后重试。",
 				},
 			},
-			status=500,
+			status=503,
 		)
 
 	response["Cache-Control"] = "private, no-store"
@@ -200,27 +335,39 @@ def search_ajax(request, search_results, search_query, search_type=None, start_d
 		from .core import format_search_results_for_api
 		results_data = format_search_results_for_api(search_results.object_list)
 		
+		cursor_mode = bool(getattr(search_results, "cursor_mode", False))
 		response_data = {
 			'query': search_query or "",
 			'results': results_data,
 			'has_next': search_results.has_next(),
 			'has_previous': search_results.has_previous(),
 			'total_count': search_results.paginator.count,
-			'current_page': search_results.number,
-			'total_pages': search_results.paginator.num_pages,
+			'current_page': None if cursor_mode else search_results.number,
+			'total_pages': None if cursor_mode else search_results.paginator.num_pages,
 			'search_type': search_type,
 			'start_date': start_date or "",
 			'end_date': end_date or "",
 			'order_by': order_by or "",
 		}
+		if cursor_mode:
+			response_data.update(
+				{
+					'pagination_mode': 'cursor',
+					'previous_cursor': search_results.previous_cursor,
+					'next_cursor': search_results.next_cursor,
+				}
+			)
 		return JsonResponse(response_data)
 	except Exception as e:
 		logger.error(f"AJAX搜索响应错误: {e}", exc_info=True)
 		return JsonResponse({
-			'error': f"搜索处理错误: {str(e)}",
+			'error': {
+				'code': 'search_unavailable',
+				'message': '搜索服务暂时不可用，请稍后重试。',
+			},
 			'query': search_query or "",
 			'results': []
-		}, status=500)
+		}, status=503)
 
 
 def search_suggestions(request):

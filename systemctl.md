@@ -297,7 +297,8 @@ Redis 中没有历史邮件任务，并明确需要处理这些任务。当前 W
 
 ## 测试环境启动
 
-测试环境当前在 Windows 的 WSL 中运行，使用 Conda 环境 `wagtailblog-test`，只允许
+测试环境当前在 Windows 主机 `192.168.20.1` 的 WSL2 `Debian`（Hyper-V 第二代虚拟机
+`192.168.20.5`）中运行，使用 Conda 环境 `wagtailblog-test`，只允许
 保留 `wagtailblog3/settings/.env.test`。测试网站、Worker 和 Beat 当前不由仓库内的
 systemd unit 管理，需要在不同终端前台启动；关闭对应终端或按 `Ctrl+C` 即可停止。
 
@@ -532,6 +533,10 @@ python manage.py search_create_content_index --target content-v001 --confirm
 alias 或 target 的创建仍须完成 snapshot、磁盘双份空间、影响说明和单独授权，不能复用此测试命令。
 
 ### WP4B 在线回填和增量双投递
+
+### 生产前台切换门禁
+
+生产 `CONTENT_SEARCH_QUERY_ENABLED` 不得先于 read alias 启用。必须先保持该开关为 `false`，以已校验备份目录、精确生产 Target、`ready` Build、零未完成 Delivery 和生产切换开关为前提，使用 `search_switch_production_content_alias` 完成 ES alias 与 Target/Build serving 状态登记；随后才允许启用 query flag 并仅重启 `wagtailblog3.service`。若验收失败，先关闭 query flag 并重启该服务；不删除 alias、物理索引、Outbox、Delivery 或旧 Wagtail 索引。
 
 `search_rebuild_content_index` 默认只读预演。确认执行前，测试环境必须已经完成 WP4A 的 `search.0001`
 至当前迁移、精确目标索引创建、State bootstrap，并同时打开测试用的

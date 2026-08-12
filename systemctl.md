@@ -677,3 +677,16 @@ docker ps --format '{{.Names}} {{.Status}}'
 
 随后执行“健康检查”章节命令。ES 启动期间 Filebeat 可能先输出连接错误；当日志
 中出现 `Connection to backoff ... established` 后，采集会自动恢复。
+
+## 生产内容搜索最终运行基线（2026-08-12）
+
+- 生产代码 SHA：`c9054598417a2fb43f5a517a3d68bb135314fcb9`。
+- 前台搜索：`CONTENT_SEARCH_QUERY_ENABLED=true`，read alias `wagtailblog-prod-content-read` 唯一指向 `wagtailblog-prod-content-v002`。
+- 同步：producer/consumer 开启；v002 Target 为 enabled/serving；v001 Target 为 disabled/retired，历史 Delivery 保留。
+- 一次性门禁：影子读、生产索引创建、生产重建和生产查询切换均关闭；`.env.production` 不再保留 v001 shadow target。
+- Elasticsearch：继续使用唯一 `elasticsearch8.17.0` 容器，不停止、不删除数据卷；v002 为 1 primary/0 replica、green。
+- 已删除资源：v001、v001 template、误生成内容索引、陈旧空索引和无 alias 的测试命名页面索引。删除前 snapshot 均为 SUCCESS。
+- 必须保留：v002、v002 template、`wagtailblog-logs-000001` 及日志 alias、`wagtailblogwagtailcore_page_dz66xgy`、MySQL 搜索审计记录和 MongoDB 正文/草稿/revision。
+- 恢复点：`/home/source/Django/wagtail/backups/wagtailblog3-pre-search-20260812-181627/`；快照 `pre-retire-old-content-20260812-181627` 与 `pre-delete-test-residual-20260812-182144`。
+
+日常检查至少包含：四个项目服务 active/enabled、failed unit 为 0、生产搜索 HTTP 200、alias 只指向 v002、v002 green、Delivery 无 pending/processing/retry/dead。共享单节点因其他 Wagtail 索引副本未分配显示 yellow 时，不得通过删除未知索引处理。

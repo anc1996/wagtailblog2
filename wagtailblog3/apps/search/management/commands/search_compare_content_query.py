@@ -6,7 +6,6 @@ import hashlib
 import json
 import time
 
-from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
 from search.core import SearchUnavailableError, perform_search
@@ -53,13 +52,13 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         target = ContentSearchTarget.objects.filter(
             target_id=options["target"],
-            connection_name=settings.CONTENT_SEARCH_CONNECTION_NAME,
             enabled=True,
         ).first()
         if target is None:
             raise CommandError("content_target_not_found_or_disabled")
         try:
-            validate_content_index_name(target.index_name, settings.CONTENT_SEARCH_INDEX_PREFIX)
+            index_prefix = target.index_name.rsplit("-v", 1)[0]
+            validate_content_index_name(target.index_name, index_prefix)
         except ValueError as error:
             raise CommandError("content_target_index_invalid") from error
         size = min(max(options["size"], 1), 100)

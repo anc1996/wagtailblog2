@@ -112,8 +112,23 @@ class SearchSecondaryConnectionSettingsTests(SimpleTestCase):
         backend = settings_namespace["WAGTAILSEARCH_BACKENDS"]["content_secondary_test"]
         self.assertEqual(backend["URLS"], ["https://secondary.test.invalid"])
         self.assertTrue(backend["OPTIONS"]["verify_certs"])
+        self.assertFalse(backend["AUTO_UPDATE"])
         self.assertIn("api_key", backend["OPTIONS"])
         self.assertIn("default", settings_namespace["WAGTAILSEARCH_BACKENDS"])
+
+    def test_production_content_connection_disables_wagtail_auto_update(self):
+        settings_namespace = self._load_database_settings(
+            CONTENT_SEARCH_SECONDARY_CONNECTION_ENABLED="false",
+            CONTENT_SEARCH_PRODUCTION_EXISTING_CLUSTER_ENABLED="true",
+            CONTENT_SEARCH_PRODUCTION_CONNECTION_NAME="content_production_test",
+            CONTENT_SEARCH_PRODUCTION_EXISTING_CLUSTER_URL="http://production.test.invalid",
+            CONTENT_SEARCH_PRODUCTION_EXISTING_CLUSTER_AUTH_MODE="none",
+        )
+
+        backend = settings_namespace["WAGTAILSEARCH_BACKENDS"]["content_production_test"]
+        self.assertEqual(backend["URLS"], ["http://production.test.invalid"])
+        self.assertFalse(backend["AUTO_UPDATE"])
+        self.assertNotIn("AUTO_UPDATE", settings_namespace["WAGTAILSEARCH_BACKENDS"]["default"])
 
     def test_secondary_connection_rejects_http(self):
         with self.assertRaisesRegex(ValueError, "不含凭据的 HTTPS URL"):

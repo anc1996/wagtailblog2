@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from pathlib import Path
 
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
@@ -22,10 +23,20 @@ from search.services.rebuild import (
 
 
 _TARGET_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,79}\Z")
+_BACKUP_REFERENCE_PATTERN = re.compile(r"wagtailblog3-pre-search-\d{8}-\d{6}\Z")
+_PRODUCTION_READ_FLAGS = (
+    "CONTENT_SEARCH_SHADOW_READ_ENABLED",
+    "CONTENT_SEARCH_QUERY_ENABLED",
+    "CONTENT_SEARCH_CURSOR_ENABLED",
+    "CONTENT_SEARCH_PIT_ENABLED",
+    "SEARCH_SUGGESTIONS_V2_ENABLED",
+    "SEARCH_POPULAR_SUGGESTIONS_ENABLED",
+    "SEARCH_TITLE_SUGGESTIONS_ENABLED",
+)
 
 
 class Command(BaseCommand):
-    """确认执行只允许测试环境的精确物理目标，默认只输出计划。"""
+    """默认只读；生产回填必须通过备份、开关和二次确认门禁。"""
 
     help = "在线回填测试环境的独立内容索引，默认仅输出预演计划"
 
@@ -70,6 +81,15 @@ class Command(BaseCommand):
             action="store_true",
             help="只读取目标和构建状态，不修改 MySQL、Mongo 或 Elasticsearch。",
         )
+        parser.add_argument(
+            "--backup-reference",
+            help="生产已校验备份目录名；测试环境不需要提供。",
+        )
+        parser.add_argument(
+            "--confirm-production-rebuild",
+            action="store_true",
+            help="生产二次确认；必须与 --confirm 和 --backup-reference 同时提供。",
+        )
 
     def _load_target(self, target_id):
         if not _TARGET_ID_PATTERN.fullmatch(target_id):
@@ -100,6 +120,32 @@ class Command(BaseCommand):
             report["build"] = content_search_build_report(build)
         return report
 
+    def _production_refusals(self, options, target):
+        refusals = []
+        backup_reference = options.get("backup_reference") or ""
+        if not _BACKUP_REFERENCE_PATTERN.fullmatch(backup_reference):
+            refusals.append("recognized_backup_reference_required")
+        backup_root = getattr(settings, "CONTENT_SEARCH_PRODUCTION_BACKUP_ROOT", "")
+        if not backup_root:
+            refusals.append("production_backup_root_required")
+        elif not (Path(backup_root) / backup_reference / "checksums.sha256").is_file():
+            refusals.append("verified_backup_manifest_required")
+        if "prod" not in settings.CONTENT_SEARCH_INDEX_PREFIX.split("-"):
+            refusals.append("production_content_index_prefix_required")
+        if target.connection_name != getattr(
+            settings, "CONTENT_SEARCH_PRODUCTION_CONNECTION_NAME", ""
+        ):
+            refusals.append("production_target_connection_mismatch")
+        if not getattr(settings, "CONTENT_SEARCH_PRODUCTION_EXISTING_CLUSTER_ENABLED", False):
+            refusals.append("production_existing_cluster_mode_required")
+        if not getattr(settings, "CONTENT_SEARCH_PRODUCTION_REBUILD_ENABLED", False):
+            refusals.append("production_rebuild_flag_required")
+        if not options.get("confirm_production_rebuild"):
+            refusals.append("second_production_confirmation_required")
+        if any(getattr(settings, name, False) for name in _PRODUCTION_READ_FLAGS):
+            refusals.append("production_read_flags_must_remain_disabled")
+        return refusals
+
     def handle(self, *args, **options):
         target = self._load_target(options["target"])
         confirm = bool(options["confirm"])
@@ -111,14 +157,20 @@ class Command(BaseCommand):
             return
 
         environment = os.environ.get("WAGTAILBLOG_ENV", "unset")
-        if environment != "test":
-            report["refused"] = "test_environment_required"
+        if environment not in {"test", "production"}:
+            report["refused"] = "test_or_production_environment_required"
             self.stdout.write(json.dumps(report, ensure_ascii=False, sort_keys=True))
-            raise CommandError("WP4B 当前只允许在 WAGTAILBLOG_ENV=test 执行")
-        if "test" not in settings.CONTENT_SEARCH_INDEX_PREFIX.split("-"):
+            raise CommandError("WP4B 只允许在测试或生产环境执行")
+        if environment == "test" and "test" not in settings.CONTENT_SEARCH_INDEX_PREFIX.split("-"):
             report["refused"] = "test_index_prefix_required"
             self.stdout.write(json.dumps(report, ensure_ascii=False, sort_keys=True))
             raise CommandError("测试环境内容索引前缀必须包含独立 test 标识")
+        if environment == "production":
+            refusals = self._production_refusals(options, target)
+            if refusals:
+                report["refused"] = refusals
+                self.stdout.write(json.dumps(report, ensure_ascii=False, sort_keys=True))
+                raise CommandError("生产在线回填门禁未满足")
         if not settings.CONTENT_SEARCH_PRODUCER_ENABLED:
             report["refused"] = "content_producer_required"
             self.stdout.write(json.dumps(report, ensure_ascii=False, sort_keys=True))

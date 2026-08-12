@@ -4,6 +4,7 @@ from io import StringIO
 from unittest.mock import patch
 
 from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.test import TestCase, override_settings
 
 from search.models import (
@@ -203,3 +204,41 @@ class ContentSearchRebuildCommandTests(TestCase):
         target.refresh_from_db()
         self.assertTrue(report["dry_run"])
         self.assertFalse(target.enabled)
+
+    @override_settings(
+        CONTENT_SEARCH_INDEX_PREFIX="wagtailblog-prod-content",
+        CONTENT_SEARCH_PRODUCTION_CONNECTION_NAME="content_production",
+        CONTENT_SEARCH_PRODUCTION_BACKUP_ROOT="/backups",
+        CONTENT_SEARCH_PRODUCTION_EXISTING_CLUSTER_ENABLED=True,
+        CONTENT_SEARCH_PRODUCTION_REBUILD_ENABLED=True,
+    )
+    def test_production_confirm_requires_second_confirmation_before_rebuild(self):
+        target = ContentSearchTarget.objects.create(
+            target_id="prod-content-rebuild-command-test",
+            connection_name="content_production",
+            index_name="wagtailblog-prod-content-v001",
+            role=ContentSearchTargetRole.BUILDING,
+            required=False,
+            enabled=False,
+        )
+        SearchIndexBuild.objects.create(target=target, mapping_version="content-v001-balanced")
+        output = StringIO()
+
+        with patch.dict(os.environ, {"WAGTAILBLOG_ENV": "production"}), patch(
+            "search.management.commands.search_rebuild_content_index.Path"
+        ) as path, patch(
+            "search.management.commands.search_rebuild_content_index.start_content_search_build"
+        ) as start_build, self.assertRaises(CommandError):
+            path.return_value.__truediv__.return_value.__truediv__.return_value.is_file.return_value = True
+            call_command(
+                "search_rebuild_content_index",
+                "--target",
+                target.target_id,
+                "--confirm",
+                "--backup-reference",
+                "wagtailblog3-pre-search-20260811-221511",
+                stdout=output,
+            )
+
+        start_build.assert_not_called()
+        self.assertIn("second_production_confirmation_required", output.getvalue())

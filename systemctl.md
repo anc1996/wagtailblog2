@@ -179,49 +179,26 @@ docker compose -f docker-compose.yml -f docker-compose.snapshot-override.yml up 
 恢复后检查 `_cluster/health`、snapshot 状态、索引计数、Kibana、Filebeat、Django 首页和旧搜索。
 禁止使用 `docker compose down -v`、`docker volume rm` 或删除 snapshot 目录作为普通故障处理。
 
-### WP6 测试独立 Elasticsearch 集群
+### WP6 测试 Elasticsearch 资源状态
 
-WP6 测试集群运行在 WSL2 测试主机 `192.168.20.5`，不连接或替代 `192.168.20.2:9200` 的共享
-测试 Elasticsearch，更不属于生产集群。选择该主机是因为 `192.168.20.2` 核验时可用内存约
-3.1 GiB 且已有持续 swap，继续增加第二个 JVM 会影响共享 MySQL、MongoDB、Redis 和旧搜索。
+原先在 WSL2 测试主机 `192.168.20.5:9210` 创建的独立 Elasticsearch 8.17.0 原型已经退役并
+删除。容器 `wagtailblog-test-search-wp6-es`、专用 Docker 网络、数据卷、证书卷、密钥卷和快照卷
+均已按精确清单清理；删除前的 inspect、索引清单、内存占用和删除证据保存在 Git ignored 的
+`output/search-test-cutover/` 下。该清理只影响测试主机，不影响生产。
 
-| 项目 | 测试值 |
+当前测试环境复用生产主机上的现有单节点 Elasticsearch：
+
+| 项目 | 当前值 |
 | --- | --- |
-| 容器 | `wagtailblog-test-search-wp6-es` |
-| 镜像 | `elasticsearch:8.17.0` |
-| 地址 | `https://192.168.20.5:9210` |
-| 集群 | `wagtailblog-test-content-secondary`，单节点 |
-| 资源 | 容器上限 1.5 GiB；JVM heap 768 MiB |
-| 重启策略 | `unless-stopped` |
-| 数据卷 | `wagtailblog-test-search-wp6-data` |
-| 证书卷 | `wagtailblog-test-search-wp6-certs-v2`；旧 `-certs` 卷仅作为测试回溯证据保留 |
-| 密钥卷 | `wagtailblog-test-search-wp6-secrets` |
-| 快照卷 | `wagtailblog-test-search-wp6-snapshots`，仓库名 `wagtailblog-test-wp6-repository` |
-| 网络 | `wagtailblog-test-search-wp6` |
+| ES 地址 | `http://192.168.20.2:9200` |
+| 测试物理索引 | `wagtailblog-test-content-v003` |
+| 测试 read alias | `wagtailblog-test-content-read` |
+| 测试命名空间 | `wagtailblog-test-*` |
+| 生产命名空间 | `wagtailblog-prod-*` |
 
-HTTP 和 transport 均启用 TLS；应用使用限制在 `wagtailblog-test-secondary-content-*` 的 API key。
-该 key 可执行内容索引所需的读写和 template 管理，但无 snapshot 管理权限；snapshot 创建和恢复
-使用独立管理员入口，避免应用凭据同时拥有备份删除能力。证书私钥、管理员凭据和 API key 仅放在
-Git ignored 的测试运行目录或 Docker volume，不得写入 `.env.test`、本文、Git 或命令输出。
-
-测试集群常用命令：
-
-```bash
-docker start wagtailblog-test-search-wp6-es
-docker stop wagtailblog-test-search-wp6-es
-docker restart wagtailblog-test-search-wp6-es
-docker logs --tail 100 wagtailblog-test-search-wp6-es
-
-cd /mnt/f/openclaw/workspace/wagtail/wagtailblog2
-output/wp6/django-secondary.sh search_cluster_preflight \
-  --connection content_secondary \
-  --index wagtailblog-test-secondary-content-v001 \
-  --strict
-```
-
-停止容器不会删除数据。不得把 `docker rm`、`docker volume rm`、索引删除、snapshot 删除或证书清理
-作为普通回滚；这些清理操作必须先核对复现证据和回滚窗口并单独确认。应用读取回滚只需恢复
-`CONTENT_SEARCH_CONNECTION_NAME=default` 并关闭新查询 flag，观察期继续保留旧、新目标双投递。
+测试和生产共用主机与 ES 服务，但通过独立索引前缀、alias、MySQL、MongoDB 和 Redis DB 隔离。
+任何测试索引清理都必须先逐项核对 alias、Target、Build 和备份，不得使用通配符删除。
+`192.168.20.5:9210` 当前应连接失败，这是独立测试 ES 已删除的预期结果。
 生产内容搜索复用现有 `elasticsearch8.17.0` 单节点，不新增第二个 Elasticsearch 容器或 JVM。
 旧 Wagtail 搜索继续使用 `default` 连接；新内容索引必须使用非 `default` 的逻辑连接名和
 `wagtailblog-prod-content-*` 前缀，避免写入旧页面索引、日志索引或 Kibana 索引。
@@ -289,7 +266,7 @@ CONTENT_SEARCH_PRODUCTION_INDEX_CREATE_ENABLED=false
 依赖服务也必须可用：`mysqld.service`、`redis.service`、
 `mongodb-home.service`、`minio.service`、`docker.service` 和 Nginx。
 生产 Elasticsearch 与 Kibana 由 Docker 管理，既有生产 Elasticsearch 容器设置为
-`restart=always`；WP6 测试容器按上一节使用 `unless-stopped`，两者不得混用。
+`restart=always`；测试不再运行第二个 Elasticsearch 容器。
 
 不要启动只消费 `email` 或 `default` 队列的 Celery Worker，除非已经检查
 Redis 中没有历史邮件任务，并明确需要处理这些任务。当前 Worker 只监听
@@ -299,8 +276,10 @@ Redis 中没有历史邮件任务，并明确需要处理这些任务。当前 W
 
 测试环境当前在 Windows 主机 `192.168.20.1` 的 WSL2 `Debian`（Hyper-V 第二代虚拟机
 `192.168.20.5`）中运行，使用 Conda 环境 `wagtailblog-test`，只允许
-保留 `wagtailblog3/settings/.env.test`。测试网站、Worker 和 Beat 当前不由仓库内的
-systemd unit 管理，需要在不同终端前台启动；关闭对应终端或按 `Ctrl+C` 即可停止。
+保留 `wagtailblog3/settings/.env.test`。当前调试会话使用 transient systemd unit
+`wagtailblog-test-web-8080.service`、`wagtailblog-test-search-worker.service` 和
+`wagtailblog-test-search-beat-v2.service`，网站监听 `0.0.0.0:8080`。这些临时 unit 不是仓库部署资产，
+Windows 或 WSL 重启后必须重新核对，不得假定自动恢复。需要手工启动时仍可按下列前台命令运行。
 
 每个终端先执行公共准备步骤：
 
@@ -358,6 +337,45 @@ sudo systemctl is-enabled wagtailblog-test.service
 测试环境停止顺序为 Beat、Worker、网站；前台进程均使用 `Ctrl+C` 优雅停止。
 
 ## 生产环境启动
+
+### 生产关机重启与新搜索前置条件
+
+四个项目服务设置为 `enabled` 和 `Restart=always`，只能保证 systemd 会尝试启动进程，不能保证
+MySQL、MongoDB、Redis、MinIO 或 Docker 内的 Elasticsearch 已经完成初始化。新内容搜索运行时的
+实际依赖如下：
+
+| 服务 | 启动前必须可用 | 原因 |
+| --- | --- | --- |
+| `wagtailblog3.service` | MySQL、MongoDB、Redis、MinIO、Elasticsearch | 页面、会话、正文读取、媒体和前台内容搜索都在请求路径上 |
+| `wagtailblog3-celery-maintenance.service` | MySQL、MongoDB、Redis、Elasticsearch | Worker 从 MySQL 领取 Delivery、从 MongoDB 读取正式正文并写入 ES |
+| `wagtailblog3-celery-beat.service` | MySQL、Redis；内容搜索恢复时还应确认 MongoDB 与 ES | Beat 调度 pending/过期租约补偿，任务最终由 Worker 访问 MongoDB 与 ES |
+| `wagtailblog3-filebeat.service` | Elasticsearch | 日志写入 ES；短暂未就绪时 Filebeat 会退避重连 |
+
+生产 Elasticsearch 容器 `elasticsearch8.17.0` 使用 Docker `restart=always`。正确恢复顺序是：
+
+```text
+Hyper-V 启动生产虚拟机
+  → MySQL / MongoDB / Redis / MinIO / Docker
+  → Elasticsearch 9200 返回 yellow 或 green
+  → wagtailblog-prod-content-read 唯一指向 serving 索引
+  → Django/uWSGI
+  → maintenance Worker
+  → Beat
+  → Filebeat
+  → 必要时 Nginx
+```
+
+单节点共享集群可以为 `yellow`，不能把全局 `green` 作为启动条件；必须单独检查当前内容索引
+健康、read alias 和目标索引。`type=blog` 使用精简内容索引，`type=all/pages` 仍需要当前 Wagtail
+Page 索引，因此不得把 Page 索引作为旧内容索引删除。
+
+截至 2026-08-12，生产四个项目 unit 和基础设施 unit 均为 active/enabled，ES 容器也配置了
+`restart=always`；但现有项目 unit 主要表达 `After=` 启动顺序，没有以有限超时的 `ExecStartPre`
+等待依赖真正健康。服务器启动早期仍可能出现短暂搜索 503、Worker 重试或 Filebeat 连接错误。
+建议后续在单独授权的 systemd 变更窗口增加不输出凭据的 readiness 脚本：总超时 120 至 180 秒，
+依次检查数据库、缓存、对象存储、ES health、生产 read alias 和 serving 索引；失败退出非零，交由
+现有 `Restart=always` 重试。该改造需要先备份 `/etc/systemd/system/wagtailblog3*.service`，再执行
+`systemctl daemon-reload`、按依赖顺序重启和完整验收。
 
 生产环境只允许保留 `wagtailblog3/settings/.env.production`，并必须由 systemd 在进程
 启动前提供 `WAGTAILBLOG_ENV=production` 和对应的 `EnvironmentFile`。不得在生产环境
@@ -680,7 +698,7 @@ docker ps --format '{{.Names}} {{.Status}}'
 
 ## 生产内容搜索最终运行基线（2026-08-12）
 
-- 生产代码 SHA：`c9054598417a2fb43f5a517a3d68bb135314fcb9`。
+- 生产代码 SHA：`0f2a55ad329329ce19289c2b668ce27c3aa5a8b5`。
 - 前台搜索：`CONTENT_SEARCH_QUERY_ENABLED=true`，read alias `wagtailblog-prod-content-read` 唯一指向 `wagtailblog-prod-content-v002`。
 - 同步：producer/consumer 开启；v002 Target 为 enabled/serving；v001 Target 为 disabled/retired，历史 Delivery 保留。
 - 一次性门禁：影子读、生产索引创建、生产重建和生产查询切换均关闭；`.env.production` 不再保留 v001 shadow target。
@@ -690,3 +708,7 @@ docker ps --format '{{.Names}} {{.Status}}'
 - 恢复点：`/home/source/Django/wagtail/backups/wagtailblog3-pre-search-20260812-181627/`；快照 `pre-retire-old-content-20260812-181627` 与 `pre-delete-test-residual-20260812-182144`。
 
 日常检查至少包含：四个项目服务 active/enabled、failed unit 为 0、生产搜索 HTTP 200、alias 只指向 v002、v002 green、Delivery 无 pending/processing/retry/dead。共享单节点因其他 Wagtail 索引副本未分配显示 yellow 时，不得通过删除未知索引处理。
+
+Hyper-V 虚拟机本身是否随 Windows 主机自动启动，不由 Linux systemd 决定。当前普通 Windows
+PowerShell 无权读取 `Get-VM`，因此尚未核实生产虚拟机 `ziliao` 的 `AutomaticStartAction`；需要在
+Windows 管理员 PowerShell 中单独确认。

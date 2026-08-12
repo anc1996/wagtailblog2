@@ -260,6 +260,12 @@ service unit 发生变化后必须执行 `systemctl daemon-reload`，并核对 e
 顺序为：基础设施 → Django/uWSGI → Worker → Beat → Filebeat → 必要时 Nginx。Elasticsearch
 恢复期间 Filebeat 的短暂连接失败应观察退避恢复，不得连续重启。
 
+生产开机恢复不能只以 unit 为 `enabled` 或进程为 `active` 作为完成证据。启用独立内容搜索时，
+必须先确认 MySQL、MongoDB、Redis、MinIO、Docker 和 Elasticsearch 已实际可用，并确认生产
+read alias 存在且只指向当前 serving 内容索引，再允许 Django、maintenance Worker 和 Beat
+进入正常工作。若 unit 尚未实现有限超时的 readiness `ExecStartPre`，必须把该缺口作为残余风险
+记录，不能宣称生产虚拟机重启后搜索链路必然无错误自动恢复。
+
 生产部署或重启后，按变更范围执行：失败 unit 检查、四个服务 active/enabled、socket/端口、
 首页和后台、Django check、静态文件、Redis/Worker 队列、Beat 调度、Filebeat/Elasticsearch、
 日志与 outbox 检查。服务器重启后必须重新进行完整验收。

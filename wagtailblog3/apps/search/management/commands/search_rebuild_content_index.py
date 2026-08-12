@@ -97,8 +97,14 @@ class Command(BaseCommand):
         target = ContentSearchTarget.objects.filter(target_id=target_id).first()
         if target is None:
             raise CommandError("未找到指定的内容搜索目标")
+        environment = os.environ.get("WAGTAILBLOG_ENV", "unset")
+        index_prefix = (
+            getattr(settings, "CONTENT_SEARCH_PRODUCTION_INDEX_PREFIX", "")
+            if environment == "production"
+            else settings.CONTENT_SEARCH_INDEX_PREFIX
+        )
         try:
-            validate_content_index_name(target.index_name, settings.CONTENT_SEARCH_INDEX_PREFIX)
+            validate_content_index_name(target.index_name, index_prefix)
         except ValueError as error:
             raise CommandError("目标不是当前环境下的精确物理索引") from error
         return target

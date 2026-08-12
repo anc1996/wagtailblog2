@@ -208,6 +208,7 @@ class ContentSearchRebuildCommandTests(TestCase):
     @override_settings(
         CONTENT_SEARCH_INDEX_PREFIX="wagtailblog-prod-content",
         CONTENT_SEARCH_PRODUCTION_CONNECTION_NAME="content_production",
+        CONTENT_SEARCH_PRODUCTION_INDEX_PREFIX="wagtailblog-prod-content",
         CONTENT_SEARCH_PRODUCTION_BACKUP_ROOT="/backups",
         CONTENT_SEARCH_PRODUCTION_EXISTING_CLUSTER_ENABLED=True,
         CONTENT_SEARCH_PRODUCTION_REBUILD_ENABLED=True,

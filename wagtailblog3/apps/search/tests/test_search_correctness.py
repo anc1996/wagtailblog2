@@ -69,13 +69,23 @@ class SearchPaginationAndCacheTests(SimpleTestCase):
 
     def test_cache_key_contains_the_implementation_version(self):
         key = SearchCache.get_cache_key("关键词")
-        self.assertIn("search:v3:", key)
+        self.assertIn("search:v4:", key)
+
+    def test_blog_cache_key_isolated_between_legacy_and_content_query(self):
+        with override_settings(CONTENT_SEARCH_QUERY_ENABLED=False):
+            legacy_key = SearchCache.get_cache_key("关键词", search_type="blog")
+        with override_settings(CONTENT_SEARCH_QUERY_ENABLED=True):
+            content_key = SearchCache.get_cache_key("关键词", search_type="blog")
+
+        self.assertNotEqual(legacy_key, content_key)
+        self.assertIn("search:v4:", legacy_key)
+        self.assertIn("search:v4:", content_key)
 
     def test_cache_clear_deletes_only_the_current_search_namespace(self):
         with patch("search.cache.cache.delete_pattern") as delete_pattern:
             SearchCache.clear_search_cache()
 
-        delete_pattern.assert_called_once_with("search:v3:*")
+        delete_pattern.assert_called_once_with("search:v4:*")
 
     def test_restriction_change_schedules_search_cache_invalidation_after_commit(self):
         from blog.signals import invalidate_feed_on_restriction_changed

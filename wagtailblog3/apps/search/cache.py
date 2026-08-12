@@ -1,4 +1,5 @@
 # 搜索结果缓存工具
+from django.conf import settings
 from django.core.cache import cache
 import hashlib
 import json
@@ -6,14 +7,22 @@ import json
 
 class SearchCache:
 	"""搜索缓存管理"""
-	SEARCH_IMPLEMENTATION_VERSION = "v3"
-	
+	SEARCH_IMPLEMENTATION_VERSION = "v4"
+
+	@staticmethod
+	def get_implementation_namespace(search_type='all'):
+		"""区分旧搜索与内容索引，避免切换或回退时复用另一实现的结果。"""
+		if search_type == 'blog' and getattr(settings, 'CONTENT_SEARCH_QUERY_ENABLED', False):
+			return 'content'
+		return 'legacy'
+
 	@staticmethod
 	def get_cache_key(query, search_type='all', page=1, start_date=None, end_date=None, order_by=None):
-		"""生成包含时间范围的缓存键"""
-		# 将关键词、类型、页码和筛选条件全部纳入键，防止不同查询相互覆盖。
+		"""生成包含实现、时间范围和排序条件的缓存键。"""
+		# 切换或回退前台查询实现时，绝不能让旧结果以相同查询条件命中新实现缓存。
+		implementation = SearchCache.get_implementation_namespace(search_type)
 		key_elements = [
-			f"search:{SearchCache.SEARCH_IMPLEMENTATION_VERSION}:{query}:{search_type}:{page}"
+			f"search:{SearchCache.SEARCH_IMPLEMENTATION_VERSION}:{implementation}:{query}:{search_type}:{page}"
 		]
 		
 		if start_date:

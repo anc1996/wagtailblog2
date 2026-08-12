@@ -136,7 +136,9 @@ class Command(BaseCommand):
             refusals.append("production_backup_root_required")
         elif not (Path(backup_root) / backup_reference / "checksums.sha256").is_file():
             refusals.append("verified_backup_manifest_required")
-        if "prod" not in settings.CONTENT_SEARCH_INDEX_PREFIX.split("-"):
+        if "prod" not in getattr(
+            settings, "CONTENT_SEARCH_PRODUCTION_INDEX_PREFIX", ""
+        ).split("-"):
             refusals.append("production_content_index_prefix_required")
         if target.connection_name != getattr(
             settings, "CONTENT_SEARCH_PRODUCTION_CONNECTION_NAME", ""

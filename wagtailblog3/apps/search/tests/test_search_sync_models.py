@@ -12,6 +12,9 @@ from search.models import (
     ContentSearchTarget,
     SearchIndexBuild,
 )
+from wagtailblog3.settings.search_runtime import (
+    validate_production_content_search_runtime_namespace,
+)
 
 
 class ContentSearchFlagTests(SimpleTestCase):
@@ -29,6 +32,54 @@ class ContentSearchFlagTests(SimpleTestCase):
         self.assertTrue(all(getattr(settings, name) is False for name in flag_names))
         self.assertEqual(settings.CONTENT_SEARCH_CONNECTION_NAME, "default")
         self.assertEqual(settings.CONTENT_SEARCH_INDEX_PREFIX, "wagtailblog-test-content")
+
+
+class ProductionContentSearchRuntimeNamespaceTests(SimpleTestCase):
+    def test_disabled_production_features_do_not_require_runtime_namespace(self):
+        validate_production_content_search_runtime_namespace(
+            environment="production",
+            feature_flags=(False,),
+            runtime_connection_name="default",
+            runtime_index_prefix="wagtailblog-test-content",
+            runtime_read_alias="wagtailblog-test-content-read",
+            production_connection_name="content_production",
+            production_index_prefix="wagtailblog-prod-content",
+        )
+
+    def test_enabled_production_feature_rejects_test_runtime_namespace(self):
+        with self.assertRaisesMessage(ValueError, "运行时连接名"):
+            validate_production_content_search_runtime_namespace(
+                environment="production",
+                feature_flags=(True,),
+                runtime_connection_name="default",
+                runtime_index_prefix="wagtailblog-test-content",
+                runtime_read_alias="wagtailblog-test-content-read",
+                production_connection_name="content_production",
+                production_index_prefix="wagtailblog-prod-content",
+            )
+
+    def test_enabled_production_feature_accepts_matching_runtime_namespace(self):
+        validate_production_content_search_runtime_namespace(
+            environment="production",
+            feature_flags=(True,),
+            runtime_connection_name="content_production",
+            runtime_index_prefix="wagtailblog-prod-content",
+            runtime_read_alias="wagtailblog-prod-content-read",
+            production_connection_name="content_production",
+            production_index_prefix="wagtailblog-prod-content",
+        )
+
+    def test_enabled_production_feature_requires_explicit_production_prefix(self):
+        with self.assertRaisesMessage(ValueError, "生产索引前缀"):
+            validate_production_content_search_runtime_namespace(
+                environment="production",
+                feature_flags=(True,),
+                runtime_connection_name="content_production",
+                runtime_index_prefix="",
+                runtime_read_alias="-read",
+                production_connection_name="content_production",
+                production_index_prefix="",
+            )
 
 
 class ContentSearchModelConstraintTests(TestCase):

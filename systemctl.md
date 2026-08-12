@@ -538,6 +538,32 @@ alias 或 target 的创建仍须完成 snapshot、磁盘双份空间、影响说
 
 生产 `CONTENT_SEARCH_QUERY_ENABLED` 不得先于 read alias 启用。必须先保持该开关为 `false`，以已校验备份目录、精确生产 Target、`ready` Build、零未完成 Delivery 和生产切换开关为前提，使用 `search_switch_production_content_alias` 完成 ES alias 与 Target/Build serving 状态登记；随后才允许启用 query flag 并仅重启 `wagtailblog3.service`。若验收失败，先关闭 query flag 并重启该服务；不删除 alias、物理索引、Outbox、Delivery 或旧 Wagtail 索引。
 
+生产 unit 的唯一环境文件为
+`/home/source/Django/wagtail/wagtailblog3/wagtailblog3/settings/.env.production`。独立内容搜索运行时
+不得只设置 `CONTENT_SEARCH_PRODUCTION_*`：实际查询、影子读取和同步使用通用
+`CONTENT_SEARCH_CONNECTION_NAME`、`CONTENT_SEARCH_INDEX_PREFIX` 和
+`CONTENT_SEARCH_READ_ALIAS`。当 Producer、Consumer、shadow、query、cursor、PIT、标题建议或
+reconcile 任一开关开启时，这三项必须分别等于生产连接名、生产索引前缀和
+`<生产索引前缀>-read`；应用会拒绝不一致配置，防止回退到测试默认值。
+
+每次变更前后仅核对如下白名单，不输出凭据：
+
+```bash
+systemctl cat wagtailblog3.service
+systemctl show wagtailblog3.service -p EnvironmentFiles
+pid=$(systemctl show wagtailblog3.service -p MainPID --value)
+tr '\0' '\n' < "/proc/$pid/environ" | grep -E \
+  '^(WAGTAILBLOG_ENV|CONTENT_SEARCH_(CONNECTION_NAME|INDEX_PREFIX|READ_ALIAS|QUERY_ENABLED|PRODUCTION_CONNECTION_NAME|PRODUCTION_INDEX_PREFIX|PRODUCTION_QUERY_SWITCH_ENABLED))='
+grep -nE '^(CONTENT_SEARCH_(CONNECTION_NAME|INDEX_PREFIX|READ_ALIAS|QUERY_ENABLED|PRODUCTION_CONNECTION_NAME|PRODUCTION_INDEX_PREFIX|PRODUCTION_QUERY_SWITCH_ENABLED))=' \
+  wagtailblog3/settings/.env.production
+```
+
+`load_dotenv(..., override=False)` 会保留 systemd 或 SSH shell 已有变量；生产管理命令必须使用
+`env -i` 提供最小 `PATH`、`HOME`、locale 和 `WAGTAILBLOG_ENV=production`，不能依赖交互 shell
+export。切换命令的 dry-run 和 confirm 都必须显示生产 read alias；若返回测试 alias 或任一
+`runtime_*_must_match_production_*` 拒绝项，停止，不写 ES alias 或 MySQL Target/Build。该命令不执行
+系统重启；服务重启只发生在 alias 成功后开启 query flag 的独立步骤。
+
 `search_rebuild_content_index` 默认只读预演。确认执行前，测试环境必须已经完成 WP4A 的 `search.0001`
 至当前迁移、精确目标索引创建、State bootstrap，并同时打开测试用的
 `CONTENT_SEARCH_PRODUCER_ENABLED` 与 `CONTENT_SEARCH_CONSUMER_ENABLED`。命令只接受当前环境前缀下的

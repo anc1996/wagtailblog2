@@ -162,6 +162,42 @@ class ContentSearchAliasTests(SimpleTestCase):
             get_content_search_read_alias_indices(target)
         self.assertEqual(raised.exception.code, "content_alias_points_outside_prefix")
 
+    @override_settings(
+        CONTENT_SEARCH_INDEX_PREFIX="wagtailblog-test-content",
+        CONTENT_SEARCH_READ_ALIAS="wagtailblog-test-content-read",
+    )
+    def test_alias_switch_can_explicitly_use_production_namespace(self):
+        target = SimpleNamespace(connection_name="content_production")
+        indices = Mock()
+        indices.get_alias.return_value = {"wagtailblog-prod-content-v000": {"aliases": {}}}
+        client = SimpleNamespace(indices=indices)
+        with patch("search.services.alias.get_content_search_client", return_value=client):
+            result = switch_content_search_read_alias(
+                target,
+                "wagtailblog-prod-content-v001",
+                alias="wagtailblog-prod-content-read",
+                expected_indices=("wagtailblog-prod-content-v000",),
+                index_prefix="wagtailblog-prod-content",
+            )
+
+        self.assertEqual(result.alias, "wagtailblog-prod-content-read")
+        indices.update_aliases.assert_called_once_with(
+            actions=[
+                {
+                    "remove": {
+                        "index": "wagtailblog-prod-content-v000",
+                        "alias": "wagtailblog-prod-content-read",
+                    }
+                },
+                {
+                    "add": {
+                        "index": "wagtailblog-prod-content-v001",
+                        "alias": "wagtailblog-prod-content-read",
+                    }
+                },
+            ]
+        )
+
     @override_settings(CONTENT_SEARCH_INDEX_PREFIX="wagtailblog-test-content")
     def test_alias_clear_is_one_atomic_update(self):
         target = SimpleNamespace(connection_name="default")

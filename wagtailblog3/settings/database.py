@@ -5,6 +5,12 @@ import os
 import sys
 from urllib.parse import urlparse
 
+try:
+	from .search_runtime import validate_production_content_search_runtime_namespace
+except ImportError:
+	# WP6 配置测试会以独立脚本载入本文件，此时保留同一校验而不改变运行时行为。
+	from wagtailblog3.settings.search_runtime import validate_production_content_search_runtime_namespace
+
 
 def _env_bool(name, default=False):
 	"""Parse a boolean environment value without failing Django startup."""
@@ -516,6 +522,28 @@ CONTENT_SEARCH_READ_ALIAS = os.environ.get(
 	"CONTENT_SEARCH_READ_ALIAS",
 	f"{CONTENT_SEARCH_INDEX_PREFIX}-read",
 )
+
+# 生产独立搜索一旦参与读写，运行时命名空间必须明确绑定生产配置，禁止静默回退到测试默认值。
+validate_production_content_search_runtime_namespace(
+	environment=os.environ.get("WAGTAILBLOG_ENV", "test").strip().lower(),
+	feature_flags=(
+		CONTENT_SEARCH_PRODUCER_ENABLED,
+		CONTENT_SEARCH_CONSUMER_ENABLED,
+		CONTENT_SEARCH_SHADOW_READ_ENABLED,
+		CONTENT_SEARCH_QUERY_ENABLED,
+		CONTENT_SEARCH_CURSOR_ENABLED,
+		CONTENT_SEARCH_PIT_ENABLED,
+		SEARCH_SUGGESTIONS_V2_ENABLED,
+		SEARCH_TITLE_SUGGESTIONS_ENABLED,
+		CONTENT_SEARCH_RECONCILE_ENABLED,
+	),
+	runtime_connection_name=CONTENT_SEARCH_CONNECTION_NAME,
+	runtime_index_prefix=CONTENT_SEARCH_INDEX_PREFIX,
+	runtime_read_alias=CONTENT_SEARCH_READ_ALIAS,
+	production_connection_name=CONTENT_SEARCH_PRODUCTION_CONNECTION_NAME,
+	production_index_prefix=CONTENT_SEARCH_PRODUCTION_INDEX_PREFIX,
+)
+
 CONTENT_SEARCH_SHADOW_TARGET_ID = os.environ.get("CONTENT_SEARCH_SHADOW_TARGET_ID", "")
 CONTENT_SEARCH_SHADOW_SAMPLE_RATE = min(
 	1.0,

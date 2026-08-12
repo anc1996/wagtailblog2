@@ -44,6 +44,18 @@ PRODUCTION_INDEX_SETTINGS = {
     "WAGTAILSEARCH_BACKENDS": {"content_production": {"BACKEND": "test"}},
 }
 
+PRODUCTION_ALIAS_SWITCH_SETTINGS = {
+    "CONTENT_SEARCH_PRODUCTION_CONNECTION_NAME": "content_production",
+    "CONTENT_SEARCH_PRODUCTION_INDEX_PREFIX": "wagtailblog-prod-content",
+    "CONTENT_SEARCH_PRODUCTION_BACKUP_ROOT": "/backups",
+    "CONTENT_SEARCH_PRODUCTION_EXISTING_CLUSTER_ENABLED": True,
+    "CONTENT_SEARCH_PRODUCTION_QUERY_SWITCH_ENABLED": True,
+    "CONTENT_SEARCH_CONNECTION_NAME": "content_production",
+    "CONTENT_SEARCH_INDEX_PREFIX": "wagtailblog-prod-content",
+    "CONTENT_SEARCH_READ_ALIAS": "wagtailblog-prod-content-read",
+    "CONTENT_SEARCH_QUERY_ENABLED": False,
+}
+
 
 class _Relation:
     def __init__(self, values):
@@ -399,3 +411,160 @@ class ProductionContentIndexCreateCommandTests(TestCase):
 
         create_index.assert_not_called()
         self.assertIn("search_feature_flags_must_remain_disabled", output.getvalue())
+
+
+class ProductionContentAliasSwitchCommandTests(TestCase):
+    """生产读切换必须在同一个生产命名空间内完成预检和实际写入。"""
+
+    def setUp(self):
+        self.target = ContentSearchTarget.objects.create(
+            target_id="prod-content-v001",
+            connection_name="content_production",
+            index_name="wagtailblog-prod-content-v001",
+            role=ContentSearchTargetRole.BUILDING,
+            enabled=True,
+        )
+        self.build = SearchIndexBuild.objects.create(
+            target=self.target,
+            mapping_version="content-v001-balanced",
+            status=SearchIndexBuildStatus.READY,
+        )
+
+    def _call(self, *args, **kwargs):
+        return call_command(
+            "search_switch_production_content_alias",
+            "--target",
+            self.target.target_id,
+            "--backup-reference",
+            "wagtailblog3-pre-search-20260811-221511",
+            *args,
+            **kwargs,
+        )
+
+    @override_settings(**PRODUCTION_ALIAS_SWITCH_SETTINGS)
+    def test_dry_run_uses_production_alias_and_prefix(self):
+        output = StringIO()
+        with (
+            patch.dict(os.environ, {"WAGTAILBLOG_ENV": "production"}),
+            patch("search.management.commands.search_switch_production_content_alias.Path") as path,
+            patch(
+                "search.management.commands.search_switch_production_content_alias.get_content_search_read_alias_indices",
+                return_value=(),
+            ) as get_alias_indices,
+            patch("search.management.commands.search_switch_production_content_alias.switch_content_search_read_alias") as switch,
+        ):
+            path.return_value.__truediv__.return_value.__truediv__.return_value.is_file.return_value = True
+            self._call(stdout=output)
+
+        report = json.loads(output.getvalue())
+        self.assertTrue(report["ready_for_confirm"])
+        self.assertEqual(report["alias"], "wagtailblog-prod-content-read")
+        self.assertEqual(report["current_indices"], [])
+        get_alias_indices.assert_called_once_with(
+            self.target,
+            "wagtailblog-prod-content-read",
+            index_prefix="wagtailblog-prod-content",
+        )
+        switch.assert_not_called()
+
+    @override_settings(
+        **{
+            **PRODUCTION_ALIAS_SWITCH_SETTINGS,
+            "CONTENT_SEARCH_CONNECTION_NAME": "default",
+            "CONTENT_SEARCH_INDEX_PREFIX": "wagtailblog-test-content",
+            "CONTENT_SEARCH_READ_ALIAS": "wagtailblog-test-content-read",
+        }
+    )
+    def test_dry_run_refuses_test_runtime_namespace_before_alias_write(self):
+        output = StringIO()
+        with (
+            patch.dict(os.environ, {"WAGTAILBLOG_ENV": "production"}),
+            patch("search.management.commands.search_switch_production_content_alias.Path") as path,
+            patch(
+                "search.management.commands.search_switch_production_content_alias.get_content_search_read_alias_indices",
+                return_value=(),
+            ),
+            patch("search.management.commands.search_switch_production_content_alias.switch_content_search_read_alias") as switch,
+        ):
+            path.return_value.__truediv__.return_value.__truediv__.return_value.is_file.return_value = True
+            self._call(stdout=output)
+
+        report = json.loads(output.getvalue())
+        self.assertFalse(report["ready_for_confirm"])
+        self.assertIn("runtime_connection_must_match_production_connection", report["refused"])
+        self.assertIn("runtime_index_prefix_must_match_production_prefix", report["refused"])
+        self.assertIn("runtime_read_alias_must_match_production_prefix", report["refused"])
+        self.assertEqual(report["alias"], "wagtailblog-prod-content-read")
+        switch.assert_not_called()
+
+    @override_settings(
+        **{
+            **PRODUCTION_ALIAS_SWITCH_SETTINGS,
+            "CONTENT_SEARCH_CONNECTION_NAME": "default",
+            "CONTENT_SEARCH_INDEX_PREFIX": "wagtailblog-test-content",
+            "CONTENT_SEARCH_READ_ALIAS": "wagtailblog-test-content-read",
+        }
+    )
+    def test_confirm_refuses_test_runtime_namespace_before_alias_write(self):
+        output = StringIO()
+        with (
+            patch.dict(os.environ, {"WAGTAILBLOG_ENV": "production"}),
+            patch("search.management.commands.search_switch_production_content_alias.Path") as path,
+            patch(
+                "search.management.commands.search_switch_production_content_alias.get_content_search_read_alias_indices",
+                return_value=(),
+            ),
+            patch("search.management.commands.search_switch_production_content_alias.switch_content_search_read_alias") as switch,
+            self.assertRaises(CommandError),
+        ):
+            path.return_value.__truediv__.return_value.__truediv__.return_value.is_file.return_value = True
+            self._call(
+                "--confirm",
+                "--confirm-production-query-switch",
+                stdout=output,
+            )
+
+        self.assertIn("runtime_index_prefix_must_match_production_prefix", output.getvalue())
+        switch.assert_not_called()
+        self.target.refresh_from_db()
+        self.build.refresh_from_db()
+        self.assertEqual(self.target.role, ContentSearchTargetRole.BUILDING)
+        self.assertEqual(self.build.status, SearchIndexBuildStatus.READY)
+
+    @override_settings(**PRODUCTION_ALIAS_SWITCH_SETTINGS)
+    def test_confirm_switches_only_production_alias_and_marks_serving(self):
+        output = StringIO()
+        switched = SimpleNamespace(new_index=self.target.index_name)
+        with (
+            patch.dict(os.environ, {"WAGTAILBLOG_ENV": "production"}),
+            patch("search.management.commands.search_switch_production_content_alias.Path") as path,
+            patch(
+                "search.management.commands.search_switch_production_content_alias.get_content_search_read_alias_indices",
+                return_value=(),
+            ),
+            patch("search.management.commands.search_switch_production_content_alias.verify_content_search_index"),
+            patch(
+                "search.management.commands.search_switch_production_content_alias.switch_content_search_read_alias",
+                return_value=switched,
+            ) as switch,
+        ):
+            path.return_value.__truediv__.return_value.__truediv__.return_value.is_file.return_value = True
+            self._call(
+                "--confirm",
+                "--confirm-production-query-switch",
+                stdout=output,
+            )
+
+        report = json.loads(output.getvalue())
+        self.assertTrue(report["alias_changed"])
+        switch.assert_called_once_with(
+            self.target,
+            "wagtailblog-prod-content-v001",
+            alias="wagtailblog-prod-content-read",
+            expected_indices=(),
+            index_prefix="wagtailblog-prod-content",
+        )
+        self.target.refresh_from_db()
+        self.build.refresh_from_db()
+        self.assertEqual(self.target.role, ContentSearchTargetRole.SERVING)
+        self.assertEqual(self.build.status, SearchIndexBuildStatus.SERVING)

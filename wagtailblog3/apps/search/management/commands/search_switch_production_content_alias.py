@@ -58,6 +58,9 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         environment = os.environ.get("WAGTAILBLOG_ENV", "unset")
+        production_prefix = getattr(settings, "CONTENT_SEARCH_PRODUCTION_INDEX_PREFIX", "")
+        production_connection = getattr(settings, "CONTENT_SEARCH_PRODUCTION_CONNECTION_NAME", "")
+        production_alias = f"{production_prefix}-read" if production_prefix else ""
         target = ContentSearchTarget.objects.filter(target_id=options["target"]).first()
         report = {
             "environment": environment,
@@ -77,16 +80,26 @@ class Command(BaseCommand):
             refusals.append("production_query_switch_flag_required")
         if getattr(settings, "CONTENT_SEARCH_QUERY_ENABLED", False):
             refusals.append("frontend_query_must_remain_disabled_until_alias_ready")
+        if not production_prefix or "prod" not in production_prefix.split("-"):
+            refusals.append("explicit_production_index_prefix_required")
+        if settings.CONTENT_SEARCH_INDEX_PREFIX != production_prefix:
+            refusals.append("runtime_index_prefix_must_match_production_prefix")
+        if settings.CONTENT_SEARCH_READ_ALIAS != production_alias:
+            refusals.append("runtime_read_alias_must_match_production_prefix")
+        if settings.CONTENT_SEARCH_CONNECTION_NAME != production_connection:
+            refusals.append("runtime_connection_must_match_production_connection")
+        if not getattr(settings, "CONTENT_SEARCH_PRODUCTION_EXISTING_CLUSTER_ENABLED", False):
+            refusals.append("production_existing_cluster_mode_required")
         if target is None:
             refusals.append("content_target_not_found")
         else:
             report.update({"index_name": target.index_name, "target_enabled": target.enabled, "target_role": target.role})
-            if target.connection_name != getattr(settings, "CONTENT_SEARCH_PRODUCTION_CONNECTION_NAME", ""):
+            if target.connection_name != production_connection:
                 refusals.append("production_connection_target_mismatch")
             if not target.enabled or target.role not in (ContentSearchTargetRole.BUILDING, ContentSearchTargetRole.SERVING):
                 refusals.append("content_target_not_switchable")
             try:
-                validate_content_index_name(target.index_name, settings.CONTENT_SEARCH_PRODUCTION_INDEX_PREFIX)
+                validate_content_index_name(target.index_name, production_prefix)
             except ValueError:
                 refusals.append("content_target_index_invalid")
             build = SearchIndexBuild.objects.filter(target=target).order_by("-pk").first()
@@ -98,10 +111,16 @@ class Command(BaseCommand):
             if unfinished:
                 refusals.append("content_deliveries_not_caught_up")
         try:
-            alias = validate_content_search_alias()
+            alias = validate_content_search_alias(production_alias, index_prefix=production_prefix)
             report["alias"] = alias
             if target is not None:
-                report["current_indices"] = list(get_content_search_read_alias_indices(target, alias))
+                report["current_indices"] = list(
+                    get_content_search_read_alias_indices(
+                        target,
+                        alias,
+                        index_prefix=production_prefix,
+                    )
+                )
         except ContentSearchElasticsearchError as error:
             refusals.append(error.code)
 
@@ -121,7 +140,11 @@ class Command(BaseCommand):
         try:
             verify_content_search_index(target)
             result = switch_content_search_read_alias(
-                target, target.index_name, alias=report["alias"], expected_indices=tuple(report["current_indices"])
+                target,
+                target.index_name,
+                alias=report["alias"],
+                expected_indices=tuple(report["current_indices"]),
+                index_prefix=production_prefix,
             )
         except ContentSearchElasticsearchError as error:
             report["error"] = {"code": error.code, "retryable": error.retryable}

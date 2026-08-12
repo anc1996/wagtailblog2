@@ -222,6 +222,30 @@ output/wp6/django-secondary.sh search_cluster_preflight \
 停止容器不会删除数据。不得把 `docker rm`、`docker volume rm`、索引删除、snapshot 删除或证书清理
 作为普通回滚；这些清理操作必须先核对复现证据和回滚窗口并单独确认。应用读取回滚只需恢复
 `CONTENT_SEARCH_CONNECTION_NAME=default` 并关闭新查询 flag，观察期继续保留旧、新目标双投递。
+生产内容搜索复用现有 `elasticsearch8.17.0` 单节点，不新增第二个 Elasticsearch 容器或 JVM。
+旧 Wagtail 搜索继续使用 `default` 连接；新内容索引必须使用非 `default` 的逻辑连接名和
+`wagtailblog-prod-content-*` 前缀，避免写入旧页面索引、日志索引或 Kibana 索引。
+
+生产 `.env.production` 仅在获得本次索引写入授权后配置：
+
+```ini
+CONTENT_SEARCH_PRODUCTION_EXISTING_CLUSTER_ENABLED=true
+CONTENT_SEARCH_PRODUCTION_CONNECTION_NAME=content_production
+CONTENT_SEARCH_PRODUCTION_INDEX_PREFIX=wagtailblog-prod-content
+CONTENT_SEARCH_PRODUCTION_EXISTING_CLUSTER_URL=http://127.0.0.1:9200
+CONTENT_SEARCH_PRODUCTION_EXISTING_CLUSTER_AUTH_MODE=none
+CONTENT_SEARCH_PRODUCTION_INDEX_CREATE_ENABLED=false
+```
+
+其中 `CONTENT_SEARCH_PRODUCTION_INDEX_CREATE_ENABLED` 只在一次性空索引创建命令执行窗口内临时为
+`true`，命令完成后必须恢复为 `false`。该配置只注册逻辑连接，不启用 Producer、Consumer、影子读、
+前台查询、回填或 alias 切换；这些动作仍按搜索实施计划分别授权。生产单节点不能配置副本，
+`CONTENT_SEARCH_INDEX_REPLICAS=0`，集群保持单节点可接受的 `yellow` 状态。
+
+旧 Wagtail 页面索引、日志索引、图片/文档索引和 Kibana 索引不得按“旧索引”一并删除。只有完成
+新索引回填、增量追平、影子观察、读切换和回滚观察期后，才可针对明确列出的旧业务索引单独备份、
+审计引用并授权删除。
+
 生产创建独立集群、放行端口、安装证书、配置 snapshot、写入索引、切换连接或重启服务仍需独立方案、
 备份和再次授权，不能直接复制本节测试参数。
 

@@ -104,9 +104,14 @@ class Command(BaseCommand):
         if not index_prefix or "prod" not in index_prefix.split("-"):
             refusals.append("explicit_production_index_prefix_required")
         if connection_name in {"", "default"}:
-            refusals.append("independent_production_connection_required")
+            refusals.append("non_default_production_connection_required")
         elif connection_name not in settings.WAGTAILSEARCH_BACKENDS:
             refusals.append("configured_production_connection_required")
+        elif not (
+            getattr(settings, "CONTENT_SEARCH_PRODUCTION_EXISTING_CLUSTER_ENABLED", False)
+            or getattr(settings, "CONTENT_SEARCH_SECONDARY_CONNECTION_ENABLED", False)
+        ):
+            refusals.append("explicit_production_cluster_mode_required")
         try:
             validate_content_index_name(options["index_name"], index_prefix)
         except ValueError:

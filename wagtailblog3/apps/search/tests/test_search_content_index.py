@@ -35,6 +35,7 @@ from search.services.mongo import read_formal_contents_by_id
 PRODUCTION_INDEX_SETTINGS = {
     "CONTENT_SEARCH_PRODUCTION_CONNECTION_NAME": "content_production",
     "CONTENT_SEARCH_PRODUCTION_INDEX_PREFIX": "wagtailblog-prod-content",
+    "CONTENT_SEARCH_PRODUCTION_EXISTING_CLUSTER_ENABLED": True,
     "CONTENT_SEARCH_PRODUCTION_BACKUP_ROOT": "/backups",
     "CONTENT_SEARCH_PRODUCTION_INDEX_CREATE_ENABLED": True,
     "CONTENT_SEARCH_INDEX_SHARDS": 1,
@@ -337,6 +338,25 @@ class ProductionContentIndexCreateCommandTests(TestCase):
 
         create_index.assert_not_called()
         self.assertIn("second_production_confirmation_required", output.getvalue())
+
+    def test_dry_run_refuses_without_explicit_cluster_mode(self):
+        output = StringIO()
+        production_settings = {
+            **PRODUCTION_INDEX_SETTINGS,
+            "CONTENT_SEARCH_PRODUCTION_EXISTING_CLUSTER_ENABLED": False,
+            "CONTENT_SEARCH_SECONDARY_CONNECTION_ENABLED": False,
+        }
+        with self.settings(**production_settings), patch.dict(
+            os.environ, {"WAGTAILBLOG_ENV": "production"}
+        ), patch(
+            "search.management.commands.search_create_production_content_index.Path"
+        ) as path:
+            path.return_value.__truediv__.return_value.__truediv__.return_value.is_file.return_value = True
+            self._call(stdout=output)
+
+        report = json.loads(output.getvalue())
+        self.assertFalse(report["ready_for_confirm"])
+        self.assertIn("explicit_production_cluster_mode_required", report["refused"])
 
     @override_settings(**PRODUCTION_INDEX_SETTINGS)
     def test_confirm_creates_only_disabled_building_target(self):

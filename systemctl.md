@@ -552,7 +552,7 @@ alias 或 target 的创建仍须完成 snapshot、磁盘双份空间、影响说
 
 ### WP4B 在线回填和增量双投递
 
-### 生产前台切换门禁
+### 生产前台切换门禁（历史流程，WP8 发布后不可执行）
 
 生产 `CONTENT_SEARCH_QUERY_ENABLED` 不得先于 read alias 启用。必须先保持该开关为 `false`，以已校验备份目录、精确生产 Target、`ready` Build、零未完成 Delivery 和生产切换开关为前提，使用 `search_switch_production_content_alias` 完成 ES alias 与 Target/Build serving 状态登记；随后才允许启用 query flag 并仅重启 `wagtailblog3.service`。若验收失败，先关闭 query flag 并重启该服务；不删除 alias、物理索引、Outbox、Delivery 或旧 Wagtail 索引。
 
@@ -696,7 +696,7 @@ docker ps --format '{{.Names}} {{.Status}}'
 随后执行“健康检查”章节命令。ES 启动期间 Filebeat 可能先输出连接错误；当日志
 中出现 `Connection to backoff ... established` 后，采集会自动恢复。
 
-## 生产内容搜索最终运行基线（2026-08-12）
+## 生产内容搜索历史运行基线（2026-08-12）
 
 - 生产代码 SHA：`0f2a55ad329329ce19289c2b668ce27c3aa5a8b5`。
 - 前台搜索：`CONTENT_SEARCH_QUERY_ENABLED=true`，read alias `wagtailblog-prod-content-read` 唯一指向 `wagtailblog-prod-content-v002`。
@@ -712,3 +712,11 @@ docker ps --format '{{.Names}} {{.Status}}'
 Hyper-V 虚拟机本身是否随 Windows 主机自动启动，不由 Linux systemd 决定。当前普通 Windows
 PowerShell 无权读取 `Get-VM`，因此尚未核实生产虚拟机 `ziliao` 的 `AutomaticStartAction`；需要在
 Windows 管理员 PowerShell 中单独确认。
+
+## WP8 code-only 发布服务规则（待执行）
+
+WP8 只删除应用内影子与旧 DSL 代码，不新增服务、不改 unit、不改端口、不改 Elasticsearch、数据库或 Filebeat 配置。生产发布前仍需核对 MySQL、MongoDB、Redis、MinIO、Docker 和 Elasticsearch 已可用，以及生产内容 read alias 只指向当前 serving 索引。
+
+本批仅依次重启 `wagtailblog3.service`、`wagtailblog3-celery-maintenance.service`、`wagtailblog3-celery-beat.service`。不重启 `wagtailblog3-filebeat.service`、Nginx、Elasticsearch、MySQL、MongoDB、Redis 或 MinIO；若任一已重启服务未恢复 active，停止后续操作并按发布前代码 SHA 回滚。
+
+`CONTENT_SEARCH_QUERY_ENABLED`、`CONTENT_SEARCH_FEDERATED_ALL_ENABLED` 与 `CONTENT_SEARCH_SHADOW_*` 是 WP8 前的历史开关。WP8 部署后 Django 不再读取它们；不得将其写入 unit、drop-in 或开机恢复脚本。producer/consumer、内容 alias、maintenance Worker 和 Beat 的既有启动依赖保持不变。

@@ -30,9 +30,7 @@ def search_api(request):
 	cursor_mode = bool(
 		query_for_mode
 		and search_type in {'blog', 'all'}
-		and getattr(settings, 'CONTENT_SEARCH_QUERY_ENABLED', False)
 		and getattr(settings, 'CONTENT_SEARCH_CURSOR_ENABLED', False)
-		and (search_type == 'blog' or getattr(settings, 'CONTENT_SEARCH_FEDERATED_ALL_ENABLED', False))
 	)
 	try:
 		page = int(request.GET.get('page', 1))

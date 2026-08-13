@@ -38,7 +38,6 @@ def _build_pages_search_results(query_string, start_date=None, end_date=None, or
         start_date=start_date,
         end_date=end_date,
         order_by=order_by,
-        include_blog_fields=False,
     )
 
 

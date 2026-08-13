@@ -126,32 +126,6 @@ def get_content_search_serving_target():
     return target
 
 
-def get_content_search_shadow_target():
-    target_id = getattr(settings, "CONTENT_SEARCH_SHADOW_TARGET_ID", "")
-    try:
-        if target_id:
-            # 显式影子目标允许跨集群，避免迁移期间将新集群错误排除在对比之外。
-            target = ContentSearchTarget.objects.filter(
-                target_id=target_id,
-                enabled=True,
-            ).first()
-        else:
-            target = (
-                ContentSearchTarget.objects.filter(
-                    connection_name=settings.CONTENT_SEARCH_CONNECTION_NAME,
-                    enabled=True,
-                    role=ContentSearchTargetRole.BUILDING,
-                )
-                .order_by("-updated_at", "-pk")
-                .first()
-            )
-    except Exception as error:
-        raise ContentSearchQueryUnavailable("content_shadow_target_unavailable") from error
-    if target is None:
-        raise ContentSearchQueryUnavailable("content_shadow_target_missing")
-    return target
-
-
 def _minimum_should_match(query_string):
     tokens = [token for token in query_string.split() if token]
     if len(tokens) <= 2:

@@ -52,9 +52,7 @@ def get_search_results_context(query_params, locale=None):
 	cursor_candidate = bool(
 		search_query
 		and search_type in {"blog", "all"}
-		and getattr(settings, "CONTENT_SEARCH_QUERY_ENABLED", False)
 		and getattr(settings, "CONTENT_SEARCH_CURSOR_ENABLED", False)
-		and (search_type == "blog" or getattr(settings, "CONTENT_SEARCH_FEDERATED_ALL_ENABLED", False))
 	)
 	if search_query and not cursor_candidate and (page_number - 1) * SEARCH_RESULTS_PER_PAGE >= MAX_RESULT_WINDOW:
 		raise SearchResultWindowError("搜索结果最多支持前 10000 条")

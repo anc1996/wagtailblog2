@@ -11,9 +11,9 @@ from django.db.models.signals import pre_delete
 from django.test import TestCase, TransactionTestCase
 from wagtail.models import Locale, Page, PageViewRestriction
 from wagtail.signals import page_published, page_unpublished
+from modelsearch.index import get_indexed_models
 
 from blog.models import BlogIndexPage, BlogPage
-from search.core import ESLazyResults
 
 
 class _LiveCollection:
@@ -234,22 +234,12 @@ class BlogLifecycleBaselineTests(BlogLifecycleFixtureMixin, TestCase):
         self.assertTrue(BlogPage.objects.live().filter(pk=restricted_page.pk).exists())
         self.assertFalse(BlogPage.objects.live().public().filter(pk=restricted_page.pk).exists())
 
-    def test_raw_es_result_adapter_currently_fetches_pages_without_public_queryset_guard(self):
-        class FakeElasticsearch:
-            def search(self, **kwargs):
-                return {"hits": {"hits": [{"_id": "wagtailcore_page:123"}]}}
+    def test_default_page_rebuild_queryset_includes_blog_pages(self):
+        page = self._publish(self._create_draft_page("默认 Page 索引生命周期"))
 
-        results = ESLazyResults(
-            FakeElasticsearch(), "test-index", {"match_all": {}}, []
-        )
-
-        with patch("search.core.Page.objects.live") as live_pages:
-            public_pages = live_pages.return_value.public.return_value
-            public_pages.filter.return_value.specific.return_value.order_by.return_value = []
-            self.assertEqual(results._fetch_slice(0, 1), [])
-
-        live_pages.assert_called_once_with()
-        public_pages.filter.assert_called_once_with(pk__in=[123])
+        self.assertIn(Page, get_indexed_models())
+        self.assertIn(BlogPage, get_indexed_models())
+        self.assertTrue(BlogPage.get_indexed_objects().filter(pk=page.pk).exists())
 
 
 class BlogLifecycleSignalBaselineTests(BlogLifecycleFixtureMixin, TransactionTestCase):

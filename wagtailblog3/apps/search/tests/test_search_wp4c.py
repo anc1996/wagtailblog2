@@ -25,18 +25,11 @@ from search.services.content_query import (
     query_content_search_page,
 )
 from search.services.elasticsearch import ContentSearchElasticsearchError
-from search.services.shadow import (
-    ContentSearchShadowObserver,
-    ShadowSearchRequest,
-    ShadowObservedResults,
-    classify_shadow_difference,
-)
 from search.core import perform_search
 
 
 class ContentSearchQueryTests(SimpleTestCase):
-    @override_settings(CONTENT_SEARCH_QUERY_ENABLED=True)
-    def test_query_flag_routes_only_blog_type_to_independent_results(self):
+    def test_blog_search_always_routes_to_independent_results(self):
         independent_results = object()
         with (
             patch("search.core.build_content_search_results", return_value=independent_results) as build_results,
@@ -50,18 +43,16 @@ class ContentSearchQueryTests(SimpleTestCase):
         get_query.return_value.add_hit.assert_called_once_with()
         build_base_qs.assert_not_called()
 
-    @override_settings(CONTENT_SEARCH_QUERY_ENABLED=True, SEARCH_HIGHLIGHTS_ENABLED=False)
-    def test_query_flag_does_not_change_all_type_semantics(self):
-        query_set = Mock()
-        query_set.search.return_value = ["old-result"]
+    def test_all_search_always_routes_to_the_federated_builder(self):
+        federated_results = object()
         with (
-            patch("search.core._build_base_qs", return_value=query_set),
+            patch("search.core.build_federated_search_results", return_value=federated_results) as builder,
             patch("search.core.Query.get"),
         ):
             result = perform_search("Django", "all")
 
-        self.assertEqual(result, ["old-result"])
-        query_set.search.assert_called_once_with("Django", operator="or", order_by_relevance=True)
+        self.assertIs(result, federated_results)
+        builder.assert_called_once_with("Django", start_date=None, end_date=None, order_by=None)
 
     @override_settings(
         CONTENT_SEARCH_INDEX_PREFIX="wagtailblog-test-content",
@@ -221,80 +212,6 @@ class ContentSearchAliasTests(SimpleTestCase):
                 }
             ]
         )
-
-
-class ContentSearchShadowTests(SimpleTestCase):
-    def _request(self, expected=(101, 102)):
-        return ShadowSearchRequest(
-            query_string="不应出现在日志中的查询",
-            search_type="blog",
-            start_date=None,
-            end_date=None,
-            order_by=None,
-            start=0,
-            size=20,
-            expected_page_ids=expected,
-            target=SimpleNamespace(index_name="wagtailblog-test-content-v001"),
-        )
-
-    def test_query_hash_does_not_equal_or_log_original_query(self):
-        observer = ContentSearchShadowObserver()
-        request = self._request()
-        self.assertNotIn(request.query_string, observer.query_hash(request))
-
-        with (
-            patch(
-                "search.services.shadow.query_content_search_page",
-                return_value=ContentSearchQueryPage((101, 102), 2, 3),
-            ),
-            patch("search.services.shadow.logger.info") as log_info,
-        ):
-            observer._run(request, observer.query_hash(request))
-
-        logged = " ".join(str(value) for call in log_info.call_args_list for value in call.args)
-        self.assertNotIn(request.query_string, logged)
-        self.assertIn("same", logged)
-
-    @override_settings(
-        CONTENT_SEARCH_SHADOW_SAMPLE_RATE=1.0,
-        CONTENT_SEARCH_SHADOW_FAILURE_THRESHOLD=2,
-        CONTENT_SEARCH_SHADOW_COOLDOWN_SECONDS=30,
-    )
-    def test_failures_open_breaker_and_sampling_can_submit(self):
-        observer = ContentSearchShadowObserver()
-        request = self._request()
-        observer._executor = Mock()
-        observer._semaphore = Mock()
-        observer._semaphore.acquire.return_value = True
-        future = Mock()
-        observer._executor.submit.return_value = future
-        self.assertTrue(observer.submit(request))
-        observer._executor.submit.assert_called_once()
-        observer._record_failure()
-        observer._record_failure()
-        self.assertTrue(observer._breaker_open())
-        observer.reset_for_tests()
-        self.assertFalse(observer._breaker_open())
-
-    def test_observed_results_submit_once_per_slice_with_public_ids(self):
-        wrapped = Mock()
-        wrapped.__getitem__ = Mock(return_value=[SimpleNamespace(pk=101), SimpleNamespace(pk=102)])
-        submit = Mock()
-        with patch("search.services.shadow.shadow_observer.submit", submit):
-            observed = ShadowObservedResults(
-                wrapped,
-                lambda start, size, expected: self._request(expected),
-            )
-            self.assertEqual(observed[0:2][0].pk, 101)
-            observed[0:2]
-
-        submit.assert_called_once()
-        self.assertEqual(submit.call_args.args[0].expected_page_ids, (101, 102))
-
-    def test_difference_classification_is_stable(self):
-        self.assertEqual(classify_shadow_difference((1, 2), (1, 2)), "same")
-        self.assertEqual(classify_shadow_difference((1, 2), (2, 1)), "order_changed")
-        self.assertEqual(classify_shadow_difference((1, 2), (1, 3)), "missing_and_extra")
 
 
 class ContentSearchAliasCommandTests(TestCase):

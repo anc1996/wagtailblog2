@@ -38,6 +38,14 @@ PRODUCTION_INDEX_SETTINGS = {
     "CONTENT_SEARCH_PRODUCTION_EXISTING_CLUSTER_ENABLED": True,
     "CONTENT_SEARCH_PRODUCTION_BACKUP_ROOT": "/backups",
     "CONTENT_SEARCH_PRODUCTION_INDEX_CREATE_ENABLED": True,
+    "CONTENT_SEARCH_PRODUCER_ENABLED": False,
+    "CONTENT_SEARCH_CONSUMER_ENABLED": False,
+    "CONTENT_SEARCH_CURSOR_ENABLED": False,
+    "CONTENT_SEARCH_PIT_ENABLED": False,
+    "SEARCH_SUGGESTIONS_V2_ENABLED": False,
+    "SEARCH_POPULAR_SUGGESTIONS_ENABLED": False,
+    "SEARCH_TITLE_SUGGESTIONS_ENABLED": False,
+    "CONTENT_SEARCH_RECONCILE_ENABLED": False,
     "CONTENT_SEARCH_INDEX_SHARDS": 1,
     "CONTENT_SEARCH_INDEX_REPLICAS": 0,
     "CONTENT_SEARCH_INDEX_REFRESH_INTERVAL": "30s",
@@ -53,7 +61,6 @@ PRODUCTION_ALIAS_SWITCH_SETTINGS = {
     "CONTENT_SEARCH_CONNECTION_NAME": "content_production",
     "CONTENT_SEARCH_INDEX_PREFIX": "wagtailblog-prod-content",
     "CONTENT_SEARCH_READ_ALIAS": "wagtailblog-prod-content-read",
-    "CONTENT_SEARCH_QUERY_ENABLED": False,
 }
 
 
@@ -317,6 +324,8 @@ class ProductionContentIndexCreateCommandTests(TestCase):
             "prod-content-v001",
             "--index-name",
             "wagtailblog-prod-content-v001",
+            "--mapping-version",
+            "v001",
             "--backup-reference",
             "wagtailblog3-pre-search-20260811-221511",
             *args,
@@ -398,13 +407,13 @@ class ProductionContentIndexCreateCommandTests(TestCase):
         create_index.assert_called_once()
 
     @override_settings(**PRODUCTION_INDEX_SETTINGS)
-    def test_confirm_refuses_when_a_search_feature_is_enabled(self):
+    def test_confirm_refuses_when_a_mutating_search_feature_is_enabled(self):
         output = StringIO()
         with patch.dict(os.environ, {"WAGTAILBLOG_ENV": "production"}), patch(
             "search.management.commands.search_create_production_content_index.Path"
         ) as path, patch(
             "search.management.commands.search_create_production_content_index.create_content_search_index"
-        ) as create_index, self.settings(CONTENT_SEARCH_QUERY_ENABLED=True), self.assertRaises(CommandError):
+        ) as create_index, self.settings(CONTENT_SEARCH_PRODUCER_ENABLED=True), self.assertRaises(CommandError):
             path.return_value.__truediv__.return_value.__truediv__.return_value.is_file.return_value = True
             self._call(
                 "--confirm",

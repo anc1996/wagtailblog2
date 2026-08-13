@@ -40,7 +40,7 @@ _UNFINISHED_STATUSES = (
 class Command(BaseCommand):
     """仅允许把已追平的生产目标提升为 serving，不能覆盖任意索引。"""
 
-    help = "受控切换生产内容搜索 read alias；默认 dry-run，不启用前台 query flag"
+    help = "受控切换生产内容搜索 read alias；默认 dry-run，不改变同步开关"
 
     def add_arguments(self, parser):
         parser.add_argument("--target", required=True, help="精确 ContentSearchTarget.target_id")
@@ -78,8 +78,6 @@ class Command(BaseCommand):
             refusals.append("verified_backup_manifest_required")
         if not getattr(settings, "CONTENT_SEARCH_PRODUCTION_QUERY_SWITCH_ENABLED", False):
             refusals.append("production_query_switch_flag_required")
-        if getattr(settings, "CONTENT_SEARCH_QUERY_ENABLED", False):
-            refusals.append("frontend_query_must_remain_disabled_until_alias_ready")
         if not production_prefix or "prod" not in production_prefix.split("-"):
             refusals.append("explicit_production_index_prefix_required")
         if settings.CONTENT_SEARCH_INDEX_PREFIX != production_prefix:

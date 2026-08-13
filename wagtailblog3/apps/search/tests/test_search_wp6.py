@@ -10,7 +10,6 @@ from django.core.management import call_command
 from django.test import SimpleTestCase, TestCase, override_settings
 
 from search.models import ContentSearchTarget, ContentSearchTargetRole
-from search.services.content_query import get_content_search_shadow_target
 from search.services.content_query import (
     ContentSearchHitHighlight,
     ContentSearchQueryPage,
@@ -158,27 +157,6 @@ class SearchSecondaryConnectionSettingsTests(SimpleTestCase):
                 CONTENT_SEARCH_SECONDARY_AUTH_MODE="",
                 CONTENT_SEARCH_SECONDARY_VERIFY_CERTS="true",
             )
-
-
-class CrossClusterShadowTargetTests(TestCase):
-    def setUp(self):
-        self.target = ContentSearchTarget.objects.create(
-            target_id="wp6-secondary-shadow",
-            connection_name="content_secondary",
-            index_name="wagtailblog-test-secondary-content-v001",
-            role=ContentSearchTargetRole.BUILDING,
-            enabled=True,
-        )
-
-    @override_settings(
-        CONTENT_SEARCH_CONNECTION_NAME="default",
-        CONTENT_SEARCH_SHADOW_TARGET_ID="wp6-secondary-shadow",
-    )
-    def test_explicit_shadow_target_can_use_secondary_connection(self):
-        target = get_content_search_shadow_target()
-
-        self.assertEqual(target.pk, self.target.pk)
-        self.assertEqual(target.connection_name, "content_secondary")
 
 
 class IndependentSearchHighlightTests(SimpleTestCase):

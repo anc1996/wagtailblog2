@@ -20,16 +20,13 @@ from wagtailblog3.settings.search_runtime import (
 class ContentSearchFlagTests(SimpleTestCase):
     """WP3A 只安装数据骨架，不改变现有发布和搜索行为。"""
 
-    def test_content_search_flags_are_disabled_in_test_environment(self):
-        flag_names = (
+    def test_content_search_runtime_is_enabled_in_test_environment(self):
+        enabled_flag_names = (
             "CONTENT_SEARCH_PRODUCER_ENABLED",
             "CONTENT_SEARCH_CONSUMER_ENABLED",
-            "CONTENT_SEARCH_SHADOW_READ_ENABLED",
-            "CONTENT_SEARCH_QUERY_ENABLED",
-            "CONTENT_SEARCH_RECONCILE_ENABLED",
         )
 
-        self.assertTrue(all(getattr(settings, name) is False for name in flag_names))
+        self.assertTrue(all(getattr(settings, name) is True for name in enabled_flag_names))
         self.assertEqual(settings.CONTENT_SEARCH_CONNECTION_NAME, "default")
         self.assertEqual(settings.CONTENT_SEARCH_INDEX_PREFIX, "wagtailblog-test-content")
 

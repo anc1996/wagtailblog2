@@ -78,33 +78,20 @@ class SharedPagesQueryTests(SimpleTestCase):
 		)
 
 
-class FederatedFlagTests(SimpleTestCase):
-	@override_settings(CONTENT_SEARCH_FEDERATED_ALL_ENABLED=False)
-	def test_flag_off_keeps_legacy_all_path(self):
-		legacy_results = [SimpleNamespace(pk=1)]
-		queryset = MagicMock()
-		queryset.search.return_value = legacy_results
-
-		with patch("search.core._build_base_qs", return_value=queryset):
-			result = perform_search("django", "all")
-
-		self.assertIs(result, legacy_results)
-
-	@override_settings(CONTENT_SEARCH_FEDERATED_ALL_ENABLED=True)
-	def test_flag_on_uses_federated_builder(self):
+class FederatedRoutingTests(SimpleTestCase):
+	def test_all_uses_federated_builder(self):
 		federated_results = object()
-		with patch("search.core.build_federated_search_results", return_value=federated_results) as builder:
+		with (
+			patch("search.core.build_federated_search_results", return_value=federated_results) as builder,
+			patch("search.core.Query.get"),
+		):
 			result = perform_search("django", "all", start_date="2026-01-01")
 
 		self.assertIs(result, federated_results)
 		builder.assert_called_once()
 
-	@override_settings(CONTENT_SEARCH_FEDERATED_ALL_ENABLED=True)
-	def test_federated_cache_namespace_is_isolated(self):
-		federated_key = SearchCache.get_cache_key("django", "all")
-		with override_settings(CONTENT_SEARCH_FEDERATED_ALL_ENABLED=False):
-			legacy_key = SearchCache.get_cache_key("django", "all")
-		self.assertNotEqual(federated_key, legacy_key)
+	def test_federated_cache_namespace_is_stable(self):
+		self.assertEqual(SearchCache.get_implementation_namespace("all"), "federated-all")
 
 
 class FederatedBuilderTests(SimpleTestCase):

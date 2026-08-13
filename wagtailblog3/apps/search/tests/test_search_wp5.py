@@ -123,10 +123,7 @@ class ContentSearchCursorViewTests(SimpleTestCase):
     def setUp(self):
         self.factory = RequestFactory()
 
-    @override_settings(
-        CONTENT_SEARCH_QUERY_ENABLED=True,
-        CONTENT_SEARCH_CURSOR_ENABLED=True,
-    )
+    @override_settings(CONTENT_SEARCH_CURSOR_ENABLED=True)
     def test_context_uses_cursor_page_for_independent_blog_search(self):
         results = ContentSearchResults(SimpleNamespace(), "Django")
         cursor_page = ContentSearchCursorPage([1, 2], 10001, "prev-token", "next-token")
@@ -148,10 +145,7 @@ class ContentSearchCursorViewTests(SimpleTestCase):
         self.assertTrue(context["cursor_mode"])
         self.assertEqual(context["search_results"].paginator.count, 10001)
 
-    @override_settings(
-        CONTENT_SEARCH_QUERY_ENABLED=True,
-        CONTENT_SEARCH_CURSOR_ENABLED=True,
-    )
+    @override_settings(CONTENT_SEARCH_CURSOR_ENABLED=True)
     def test_fragment_api_returns_cursor_metadata(self):
         results = ContentSearchResults(SimpleNamespace(), "Django")
         cursor_page = ContentSearchCursorPage([1], 10001, None, "next-token")

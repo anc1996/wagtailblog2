@@ -1,20 +1,16 @@
 # 搜索应用的核心检索引擎
 """
-搜索核心引擎（v4 终极版 - 动态映射 + 停用词拦截）
+搜索核心引擎。
 
-设计目标：
-1. 架构级解耦：利用反射动态提取 models 中的 search_fields，未来加字段零代码修改。
-2. 字段权重 × 短语精确命中权重 双层加权，全部下推 ES，Python 侧零计算。
-3. 停用词拦截：从应用侧直接阻断单字/常见助词引发的全表扫描。
-4. 严格的长尾兜底：分词 multi_match 强制要求 minimum_should_match="75%"。
-5. Paginator 直接消费惰性代理，from/size 走 ES 游标。
+Blog 查询固定走独立内容索引，普通 Pages 查询继续使用 Wagtail 默认 Page 索引；
+全站查询由两条正式路径联邦合并。
 """
 import re
 import logging
 from datetime import datetime
 
 from django.conf import settings
-from django.db.models import Count, Case, When
+from django.db.models import Count
 from django.utils.html import strip_tags
 from django.utils.text import Truncator
 from wagtail.models import Page
@@ -26,10 +22,8 @@ from blog.models import BlogPage
 from .services.content_query import (
 	ContentSearchQueryUnavailable,
 	build_content_search_results,
-	get_content_search_shadow_target,
 )
 from .services.federated_query import build_federated_search_results
-from .services.shadow import ShadowSearchRequest, wrap_search_results
 from .services.pages_query import build_public_pages_queryset
 from .services.highlights import (
 	BODY_HIGHLIGHT_MAX_ANALYZER_OFFSET,
@@ -61,30 +55,6 @@ def _is_meaningless_query(clean_query):
 	return False
 
 
-# =============================================================================
-# 字段权重配置（反射动态生成，极致解耦）
-# =============================================================================
-def _generate_dynamic_field_weights():
-	"""自动读取 BlogPage 中定义的 search_fields，生成 ES 物理字段名与权重映射"""
-	weights = {}
-
-	for field in BlogPage.get_search_fields():
-		if isinstance(field, SearchField):
-			boost = field.boost if field.boost is not None else 1.0
-			if field.field_name == 'title':
-				es_name = 'title'
-			else:
-				app_label = BlogPage._meta.app_label
-				model_name = BlogPage._meta.model_name
-				es_name = f"{app_label}_{model_name}__{field.field_name}"
-
-			weights[es_name] = boost
-
-	return weights
-
-
-# 动态生成字段权重字典，代替硬编码
-FIELD_WEIGHTS = _generate_dynamic_field_weights()
 PHRASE_BOOST = 10
 MAX_RESULT_WINDOW = 10000
 
@@ -103,23 +73,10 @@ def _minimum_should_match(query_string):
 	return "60%"
 
 
-def _get_search_field_specs(query_compiler, include_blog_fields=False):
+def _get_search_field_specs(query_compiler):
 	"""从实际 QuerySet 编译器取得字段名、权重和展示字段，避免硬编码索引前缀。"""
 	specs = []
 	fields = list(query_compiler.get_searchable_fields())
-	if include_blog_fields and query_compiler.queryset.model is Page:
-		mapping_class = query_compiler.mapping_class
-		blog_mapping = mapping_class(BlogPage)
-		fields = list(BlogPage.get_searchable_search_fields())
-		return [
-			(
-				blog_mapping.get_field_column_name(field),
-				float(field.boost if field.boost is not None else 1.0),
-				field.field_name,
-			)
-			for field in fields
-			if isinstance(field, SearchField)
-		]
 	for field in fields:
 		if not isinstance(field, SearchField):
 			continue
@@ -314,105 +271,10 @@ def _clean_query(query_string):
 
 
 # =============================================================================
-# 惰性搜索结果代理：总数走计数接口，分页走 from/size。
-# =============================================================================
-class ESLazyResults:
-	def __init__(self, es_client, index_name, dsl_query, dsl_filter):
-		self.es = es_client
-		self.index = index_name
-		self.query = dsl_query
-		self.filter = dsl_filter
-		self._count_cache = None
-
-	def _build_body(self, frm=0, size=20, source=False):
-		# 统一构造查询体，确保计数和分页使用完全相同的过滤条件。
-		bool_body = {"must": [self.query]}
-		if self.filter:
-			bool_body["filter"] = self.filter
-		return {
-			"query": {"bool": bool_body},
-			"from": frm,
-			"size": size,
-			"_source": source,
-			"track_total_hits": False,
-		}
-
-	def count(self):
-		# 计数结果只请求一次，避免分页流程重复访问搜索引擎。
-		if self._count_cache is None:
-			body = {"query": self._build_body()["query"]}
-			try:
-				self._count_cache = self.es.count(
-					index=self.index, body=body
-				)["count"]
-			except Exception as e:
-				logger.error(f"ES _count 失败: {e}", exc_info=True)
-				self._count_cache = 0
-		return self._count_cache
-
-	def __len__(self):
-		return min(self.count(), MAX_RESULT_WINDOW)
-
-	def __getitem__(self, k):
-		# 将 Django 分页器的切片转换为搜索引擎的 from/size 参数。
-		if isinstance(k, slice):
-			start = k.start or 0
-			stop = k.stop if k.stop is not None else (start + 20)
-			size = max(stop - start, 0)
-			return self._fetch_slice(start, size)
-		objs = self._fetch_slice(k, 1)
-		return objs[0] if objs else None
-
-	def _fetch_slice(self, start, size):
-		# 搜索引擎返回 ID 后，再按原顺序从 Wagtail 查询具体页面对象。
-		if size <= 0:
-			return []
-		if start >= MAX_RESULT_WINDOW:
-			return []
-		size = min(size, MAX_RESULT_WINDOW - start)
-
-		body = self._build_body(frm=start, size=size, source=False)
-
-		try:
-			hits = self.es.search(index=self.index, body=body)["hits"]["hits"]
-		except Exception as e:
-			logger.error(f"ES search 失败: {e}", exc_info=True)
-			return []
-
-		page_ids = []
-		for h in hits:
-			raw_id = str(h.get("_id", ""))
-			digits = re.findall(r'\d+', raw_id)
-			if digits:
-				try:
-					page_ids.append(int(digits[-1]))
-				except ValueError:
-					continue
-
-		if not page_ids:
-			return []
-
-		preserved = Case(*[When(pk=pk, then=pos) for pos, pk in enumerate(page_ids)])
-		# ES 索引不承载完整访问限制，回查必须再次执行 Wagtail 公开范围校验。
-		return list(
-			Page.objects.live().public().filter(pk__in=page_ids).specific().order_by(preserved)
-		)
-
-
-# =============================================================================
 # 基础 QuerySet 构造
 # =============================================================================
 def _build_base_qs(search_type, parsed_start, parsed_end, order_by):
-	if search_type == 'blog':
-		qs = BlogPage.objects.live().public()
-		if parsed_start:
-			qs = qs.filter(date__gte=parsed_start)
-		if parsed_end:
-			qs = qs.filter(date__lte=parsed_end)
-		if order_by in ('date', '-date'):
-			qs = qs.order_by(order_by)
-
-	elif search_type == 'pages':
+	if search_type == 'pages':
 		qs = build_public_pages_queryset(parsed_start, parsed_end, order_by)
 
 	else:
@@ -428,122 +290,9 @@ def _build_base_qs(search_type, parsed_start, parsed_end, order_by):
 
 	return qs
 
-
-# =============================================================================
-# ES 客户端 / 索引名获取（使用 Wagtail 原生 API 保证 100% 准确）
-# =============================================================================
-def _get_es_client_and_index():
-	backend = get_search_backend('default')
-	es = getattr(backend, 'es', None) or getattr(backend, 'client', None)
-
-	# 直接调用原生 API，避免一切拼接错误（例如前缀丢失、多加下划线等问题）
-	index_name = backend.get_index_for_model(Page).name
-	return es, index_name
-
-
-# =============================================================================
-# 核心查询构造：字段加权、短语命中与分词兜底。
-# =============================================================================
-def _build_search_dsl(clean_query, search_type, parsed_start, parsed_end):
-	should_clauses = []
-
-	# A. 字段级短语匹配：连续命中时叠加字段权重和短语加成。
-	for field, weight in FIELD_WEIGHTS.items():
-		should_clauses.append({
-			"match_phrase": {
-				field: {
-					"query": clean_query,
-					"boost": weight * PHRASE_BOOST,
-					"slop": 0,
-				}
-			}
-		})
-
-	# B. 分词兜底：要求至少命中 75% 的词，阻止低质量的满屏结果。
-	should_clauses.append({
-		"multi_match": {
-			"query": clean_query,
-			"fields": [f"{f}^{w}" for f, w in FIELD_WEIGHTS.items()],
-			"type": "best_fields",
-			"operator": "or",
-			"minimum_should_match": "75%",  # 例如四个词至少命中三个。
-			"boost": 1.0,
-		}
-	})
-
-	dsl_query = {
-		"bool": {
-			"should": should_clauses,
-			"minimum_should_match": 1,
-		}
-	}
-
-	# C. 按内容类型过滤，保证“博客”和“普通页面”互斥。
-	dsl_filter = [
-		{"term": {"live_filter": True}},
-	]
-
-	if search_type == 'blog':
-		dsl_filter.append({"term": {"_django_content_type": "blog.BlogPage"}})
-	elif search_type == 'pages':
-		dsl_filter.append({
-			"bool": {"must_not": [{"term": {"_django_content_type": "blog.BlogPage"}}]}
-		})
-
-	# D. 日期区间过滤；博客使用自定义日期字段，其他页面使用发布时间字段。
-	if parsed_start or parsed_end:
-		range_q = {}
-		if parsed_start:
-			range_q["gte"] = parsed_start.isoformat()
-		if parsed_end:
-			range_q["lte"] = parsed_end.isoformat()
-		date_field = (
-			"blog_blogpage__date_filter"
-			if search_type == 'blog'
-			else "first_published_at_filter"
-		)
-		dsl_filter.append({"range": {date_field: range_q}})
-
-	return dsl_query, dsl_filter
-
-
 # =============================================================================
 # 对外主接口
 # =============================================================================
-def _wrap_with_content_search_shadow(
-	results,
-	clean_query,
-	search_type,
-	parsed_start,
-	parsed_end,
-	order_by,
-):
-	if not getattr(settings, "CONTENT_SEARCH_SHADOW_READ_ENABLED", False):
-		return results
-	if search_type != "blog":
-		return results
-	try:
-		target = get_content_search_shadow_target()
-	except ContentSearchQueryUnavailable as error:
-		logger.warning("content_search_shadow_disabled code=%s", error.code)
-		return results
-
-	def request_factory(start, size, expected_page_ids):
-		return ShadowSearchRequest(
-			query_string=clean_query,
-			search_type=search_type,
-			start=start,
-			size=size,
-			start_date=parsed_start,
-			end_date=parsed_end,
-			order_by=order_by,
-			expected_page_ids=expected_page_ids,
-			target=target,
-		)
-
-	return wrap_search_results(results, request_factory)
-
-
 def _build_search_results_for_queryset(
 	qs,
 	clean_query,
@@ -551,7 +300,6 @@ def _build_search_results_for_queryset(
 	start_date=None,
 	end_date=None,
 	order_by=None,
-	include_blog_fields=False,
 ):
 	"""执行 Wagtail Page 搜索，供 pages 和联邦 all 共享。"""
 	try:
@@ -566,29 +314,12 @@ def _build_search_results_for_queryset(
 		except Exception as error:
 			logger.warning(f"记录搜索词命中次数失败: {error}")
 		if not getattr(settings, "SEARCH_HIGHLIGHTS_ENABLED", True):
-			return _wrap_with_content_search_shadow(
-				compiled_results,
-				clean_query,
-				search_type,
-				start_date,
-				end_date,
-				order_by,
-			)
+			return compiled_results
 		query_compiler = getattr(compiled_results, "query_compiler", None)
 		if query_compiler is None:
-			return _wrap_with_content_search_shadow(
-				compiled_results,
-				clean_query,
-				search_type,
-				start_date,
-				end_date,
-				order_by,
-			)
+			return compiled_results
 
-		field_specs = _get_search_field_specs(
-			query_compiler,
-			include_blog_fields=include_blog_fields,
-		)
+		field_specs = _get_search_field_specs(query_compiler)
 		if not field_specs:
 			return qs.none()
 		quality_query = _build_quality_query(clean_query, field_specs)
@@ -601,21 +332,14 @@ def _build_search_results_for_queryset(
 
 		backend = get_search_backend('default')
 		index_name = backend.get_index_for_model(qs.model).name
-		return _wrap_with_content_search_shadow(
-			HighlightedSearchResults(
-				queryset=qs,
-				backend=backend,
-				index_name=index_name,
-				query=query,
-				sort=query_compiler.get_sort(),
-				field_specs=field_specs,
-				query_string=clean_query,
-			),
-			clean_query,
-			search_type,
-			start_date,
-			end_date,
-			order_by,
+		return HighlightedSearchResults(
+			queryset=qs,
+			backend=backend,
+			index_name=index_name,
+			query=query,
+			sort=query_compiler.get_sort(),
+			field_specs=field_specs,
+			query_string=clean_query,
 		)
 	except Exception as error:
 		logger.error(f"公开搜索后端不可用: {error}", exc_info=True)
@@ -635,7 +359,7 @@ def perform_search(query_string, search_type='all', start_date=None, end_date=No
 	if not clean_query or _is_meaningless_query(clean_query):
 		return _build_base_qs(search_type, parsed_start, parsed_end, order_by).none()
 
-	if getattr(settings, "CONTENT_SEARCH_QUERY_ENABLED", False) and search_type == "blog":
+	if search_type == "blog":
 		try:
 			content_results = build_content_search_results(
 				clean_query,
@@ -652,10 +376,7 @@ def perform_search(query_string, search_type='all', start_date=None, end_date=No
 			logger.warning(f"记录搜索词命中次失败: {error}")
 		return content_results
 
-	if (
-		getattr(settings, "CONTENT_SEARCH_FEDERATED_ALL_ENABLED", False)
-		and search_type == "all"
-	):
+	if search_type == "all":
 		try:
 			return build_federated_search_results(
 				clean_query,
@@ -675,7 +396,6 @@ def perform_search(query_string, search_type='all', start_date=None, end_date=No
 		start_date=parsed_start,
 		end_date=parsed_end,
 		order_by=order_by,
-		include_blog_fields=search_type == "all",
 	)
 
 

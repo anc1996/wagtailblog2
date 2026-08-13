@@ -25,8 +25,6 @@ from search.services.rebuild import (
 _TARGET_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,79}\Z")
 _BACKUP_REFERENCE_PATTERN = re.compile(r"wagtailblog3-pre-search-\d{8}-\d{6}\Z")
 _PRODUCTION_READ_FLAGS = (
-    "CONTENT_SEARCH_SHADOW_READ_ENABLED",
-    "CONTENT_SEARCH_QUERY_ENABLED",
     "CONTENT_SEARCH_CURSOR_ENABLED",
     "CONTENT_SEARCH_PIT_ENABLED",
     "SEARCH_SUGGESTIONS_V2_ENABLED",

@@ -7,11 +7,13 @@ import json
 
 class SearchCache:
 	"""搜索缓存管理"""
-	SEARCH_IMPLEMENTATION_VERSION = "v4"
+	SEARCH_IMPLEMENTATION_VERSION = "v5"
 
 	@staticmethod
 	def get_implementation_namespace(search_type='all'):
 		"""区分旧搜索与内容索引，避免切换或回退时复用另一实现的结果。"""
+		if search_type == 'all' and getattr(settings, 'CONTENT_SEARCH_FEDERATED_ALL_ENABLED', False):
+			return 'federated-all'
 		if search_type == 'blog' and getattr(settings, 'CONTENT_SEARCH_QUERY_ENABLED', False):
 			return 'content'
 		return 'legacy'

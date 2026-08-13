@@ -49,11 +49,13 @@ def _build_formal_payload(page, formal_content=_FORMAL_CONTENT_UNSET):
     body_text = page.get_full_text_for_search(content=formal_content)
 
     published_date = getattr(page, "date", None)
+    first_published_at = getattr(page, "first_published_at", None)
     return {
         "title": str(getattr(page, "title", "") or ""),
         "intro": strip_tags(str(getattr(page, "intro", "") or "")),
         "body_text": body_text,
         "date": published_date.isoformat() if published_date else None,
+        "first_published_at": first_published_at.isoformat() if first_published_at else None,
         "locale_id": getattr(page, "locale_id", None),
         "tag_ids": _related_ids(page, "tags"),
         "category_ids": _related_ids(page, "categories"),
@@ -62,7 +64,10 @@ def _build_formal_payload(page, formal_content=_FORMAL_CONTENT_UNSET):
 
 
 def _content_hash(payload):
-    serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    # 首次发布时间只服务于普通页面排序，不属于 Mongo 正文；否则新增索引字段会误判正文版本变化。
+    hash_payload = dict(payload)
+    hash_payload.pop("first_published_at", None)
+    serialized = json.dumps(hash_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
@@ -99,6 +104,7 @@ def build_formal_content_document(
         "intro": payload["intro"],
         "body_text": payload["body_text"],
         "date": payload["date"],
+        "first_published_at": payload["first_published_at"],
         "locale_id": payload["locale_id"],
         "tag_ids": payload["tag_ids"],
         "category_ids": payload["category_ids"],

@@ -14,7 +14,7 @@ import logging
 from datetime import datetime
 
 from django.conf import settings
-from django.db.models import Count, Case, When, Subquery
+from django.db.models import Count, Case, When
 from django.utils.html import strip_tags
 from django.utils.text import Truncator
 from wagtail.models import Page
@@ -28,7 +28,9 @@ from .services.content_query import (
 	build_content_search_results,
 	get_content_search_shadow_target,
 )
+from .services.federated_query import build_federated_search_results
 from .services.shadow import ShadowSearchRequest, wrap_search_results
+from .services.pages_query import build_public_pages_queryset
 from .services.highlights import (
 	BODY_HIGHLIGHT_MAX_ANALYZER_OFFSET,
 	HIGHLIGHT_END_TAG,
@@ -411,16 +413,7 @@ def _build_base_qs(search_type, parsed_start, parsed_end, order_by):
 			qs = qs.order_by(order_by)
 
 	elif search_type == 'pages':
-		blog_ids_subq = Subquery(BlogPage.objects.values('id'))
-		qs = Page.objects.live().public().exclude(id__in=blog_ids_subq)
-		if parsed_start:
-			qs = qs.filter(last_published_at__gte=parsed_start)
-		if parsed_end:
-			qs = qs.filter(last_published_at__lte=parsed_end)
-		if order_by == 'date':
-			qs = qs.order_by('last_published_at')
-		elif order_by == '-date':
-			qs = qs.order_by('-last_published_at')
+		qs = build_public_pages_queryset(parsed_start, parsed_end, order_by)
 
 	else:
 		qs = Page.objects.live().public()
@@ -551,6 +544,84 @@ def _wrap_with_content_search_shadow(
 	return wrap_search_results(results, request_factory)
 
 
+def _build_search_results_for_queryset(
+	qs,
+	clean_query,
+	search_type,
+	start_date=None,
+	end_date=None,
+	order_by=None,
+	include_blog_fields=False,
+):
+	"""执行 Wagtail Page 搜索，供 pages 和联邦 all 共享。"""
+	try:
+		# 先让 Wagtail 编译公开 QuerySet，再复用其 content type、权限和日期过滤条件。
+		compiled_results = qs.search(
+			clean_query,
+			operator='or',
+			order_by_relevance=order_by not in ('date', '-date'),
+		)
+		try:
+			Query.get(clean_query).add_hit()
+		except Exception as error:
+			logger.warning(f"记录搜索词命中次数失败: {error}")
+		if not getattr(settings, "SEARCH_HIGHLIGHTS_ENABLED", True):
+			return _wrap_with_content_search_shadow(
+				compiled_results,
+				clean_query,
+				search_type,
+				start_date,
+				end_date,
+				order_by,
+			)
+		query_compiler = getattr(compiled_results, "query_compiler", None)
+		if query_compiler is None:
+			return _wrap_with_content_search_shadow(
+				compiled_results,
+				clean_query,
+				search_type,
+				start_date,
+				end_date,
+				order_by,
+			)
+
+		field_specs = _get_search_field_specs(
+			query_compiler,
+			include_blog_fields=include_blog_fields,
+		)
+		if not field_specs:
+			return qs.none()
+		quality_query = _build_quality_query(clean_query, field_specs)
+		filters = [item for item in query_compiler.get_filters() if item]
+		query = {"bool": {"must": quality_query}}
+		if len(filters) == 1:
+			query["bool"]["filter"] = filters[0]
+		elif filters:
+			query["bool"]["filter"] = filters
+
+		backend = get_search_backend('default')
+		index_name = backend.get_index_for_model(qs.model).name
+		return _wrap_with_content_search_shadow(
+			HighlightedSearchResults(
+				queryset=qs,
+				backend=backend,
+				index_name=index_name,
+				query=query,
+				sort=query_compiler.get_sort(),
+				field_specs=field_specs,
+				query_string=clean_query,
+			),
+			clean_query,
+			search_type,
+			start_date,
+			end_date,
+			order_by,
+		)
+	except Exception as error:
+		logger.error(f"公开搜索后端不可用: {error}", exc_info=True)
+		raise SearchUnavailableError("搜索后端暂时不可用") from error
+
+
 def perform_search(query_string, search_type='all', start_date=None, end_date=None, order_by=None):
 	parsed_start = _parse_date(start_date)
 	parsed_end = _parse_date(end_date)
@@ -581,73 +652,31 @@ def perform_search(query_string, search_type='all', start_date=None, end_date=No
 			logger.warning(f"记录搜索词命中次失败: {error}")
 		return content_results
 
-	qs = _build_base_qs(search_type, parsed_start, parsed_end, order_by)
-	try:
-		# 先让 Wagtail 编译公开 QuerySet，再复用其 content type、权限和日期过滤条件。
-		compiled_results = qs.search(
-			clean_query,
-			operator='or',
-			order_by_relevance=order_by not in ('date', '-date'),
-		)
+	if (
+		getattr(settings, "CONTENT_SEARCH_FEDERATED_ALL_ENABLED", False)
+		and search_type == "all"
+	):
 		try:
-			Query.get(query_string).add_hit()
-		except Exception as error:
-			logger.warning(f"记录搜索词命中次数失败: {error}")
-		if not getattr(settings, "SEARCH_HIGHLIGHTS_ENABLED", True):
-			return _wrap_with_content_search_shadow(
-				compiled_results,
+			return build_federated_search_results(
 				clean_query,
-				search_type,
-				parsed_start,
-				parsed_end,
-				order_by,
+				start_date=parsed_start,
+				end_date=parsed_end,
+				order_by=order_by,
 			)
-		query_compiler = getattr(compiled_results, "query_compiler", None)
-		if query_compiler is None:
-			return _wrap_with_content_search_shadow(
-				compiled_results,
-				clean_query,
-				search_type,
-				parsed_start,
-				parsed_end,
-				order_by,
-			)
+		except ContentSearchQueryUnavailable as error:
+			logger.error("federated_search_unavailable code=%s", error.code)
+			raise SearchUnavailableError("全站搜索服务暂时不可用") from error
 
-		field_specs = _get_search_field_specs(
-			query_compiler,
-			include_blog_fields=search_type == "all",
-		)
-		if not field_specs:
-			return qs.none()
-		quality_query = _build_quality_query(clean_query, field_specs)
-		filters = [item for item in query_compiler.get_filters() if item]
-		query = {"bool": {"must": quality_query}}
-		if len(filters) == 1:
-			query["bool"]["filter"] = filters[0]
-		elif filters:
-			query["bool"]["filter"] = filters
-
-		backend = get_search_backend('default')
-		index_name = backend.get_index_for_model(qs.model).name
-		return _wrap_with_content_search_shadow(
-			HighlightedSearchResults(
-				queryset=qs,
-				backend=backend,
-				index_name=index_name,
-				query=query,
-				sort=query_compiler.get_sort(),
-				field_specs=field_specs,
-				query_string=clean_query,
-			),
-			clean_query,
-			search_type,
-			parsed_start,
-			parsed_end,
-			order_by,
-		)
-	except Exception as error:
-		logger.error(f"公开搜索后端不可用: {error}", exc_info=True)
-		raise SearchUnavailableError("搜索后端暂时不可用") from error
+	qs = _build_base_qs(search_type, parsed_start, parsed_end, order_by)
+	return _build_search_results_for_queryset(
+		qs,
+		clean_query,
+		search_type=search_type,
+		start_date=parsed_start,
+		end_date=parsed_end,
+		order_by=order_by,
+		include_blog_fields=search_type == "all",
+	)
 
 
 # =============================================================================

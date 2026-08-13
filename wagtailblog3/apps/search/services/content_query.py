@@ -161,7 +161,7 @@ def _minimum_should_match(query_string):
     return "60%"
 
 
-def build_content_search_query(query_string, start_date=None, end_date=None):
+def build_content_search_query(query_string, start_date=None, end_date=None, date_field="date"):
     must = [
         {
             "multi_match": {
@@ -180,15 +180,19 @@ def build_content_search_query(query_string, start_date=None, end_date=None):
             date_range["gte"] = start_date.isoformat()
         if end_date:
             date_range["lte"] = end_date.isoformat()
-        filters.append({"range": {"date": date_range}})
+        if date_field not in {"date", "first_published_at"}:
+            raise ValueError("不允许的内容日期字段")
+        filters.append({"range": {date_field: date_range}})
     return {"bool": {"must": must, "filter": filters}}
 
 
-def build_content_search_sort(order_by=None):
+def build_content_search_sort(order_by=None, date_field="date"):
+    if date_field not in {"date", "first_published_at"}:
+        raise ValueError("不允许的内容日期字段")
     if order_by == "date":
-        return [{"date": {"order": "asc", "missing": "_last"}}, {"page_id": "asc"}]
+        return [{date_field: {"order": "asc", "missing": "_last"}}, {"page_id": "asc"}]
     if order_by == "-date":
-        return [{"date": {"order": "desc", "missing": "_last"}}, {"page_id": "asc"}]
+        return [{date_field: {"order": "desc", "missing": "_last"}}, {"page_id": "asc"}]
     return [{"_score": "desc"}, {"page_id": "asc"}]
 
 
@@ -261,6 +265,7 @@ def query_content_search_page(
     search_after=None,
     reverse=False,
     pit_id=None,
+    date_field="date",
 ):
     """查询精简索引后只返回经过 live/public guard 的页面 ID。"""
 
@@ -269,9 +274,9 @@ def query_content_search_page(
         size = min(max(int(size), 0), CONTENT_SEARCH_QUERY_MAX_PAGE_SIZE)
     except (TypeError, ValueError, OverflowError) as error:
         raise ContentSearchQueryUnavailable("content_search_paging_invalid") from error
-    sort = build_content_search_sort(order_by)
+    sort = build_content_search_sort(order_by, date_field)
     body = {
-        "query": build_content_search_query(query_string, start_date, end_date),
+        "query": build_content_search_query(query_string, start_date, end_date, date_field),
         "sort": reverse_content_search_sort(sort) if reverse else sort,
         "size": size,
         "track_total_hits": True,
@@ -348,12 +353,13 @@ def query_content_search_page(
 class ContentSearchResults:
     """把独立索引的 ID 结果转换成 Wagtail 页面列表。"""
 
-    def __init__(self, target, query_string, start_date=None, end_date=None, order_by=None):
+    def __init__(self, target, query_string, start_date=None, end_date=None, order_by=None, date_field="date"):
         self.target = target
         self.query_string = query_string
         self.start_date = start_date
         self.end_date = end_date
         self.order_by = order_by
+        self.date_field = date_field
         self._count_cache = None
 
     def count(self):
@@ -366,6 +372,7 @@ class ContentSearchResults:
                     start_date=self.start_date,
                     end_date=self.end_date,
                     order_by=self.order_by,
+                    date_field=self.date_field,
                 )
             except ContentSearchElasticsearchError as error:
                 raise ContentSearchQueryUnavailable(error.code) from error
@@ -399,6 +406,7 @@ class ContentSearchResults:
                 start_date=self.start_date,
                 end_date=self.end_date,
                 order_by=self.order_by,
+                date_field=self.date_field,
             )
         except ContentSearchElasticsearchError as error:
             raise ContentSearchQueryUnavailable(error.code) from error
@@ -449,6 +457,7 @@ class ContentSearchResults:
                 search_after=cursor.sort if cursor else None,
                 reverse=direction == "previous",
                 pit_id=pit_id,
+                date_field=self.date_field,
             )
         except ContentSearchElasticsearchError as error:
             raise ContentSearchQueryUnavailable(error.code) from error
@@ -503,3 +512,11 @@ class ContentSearchResults:
 def build_content_search_results(query_string, start_date=None, end_date=None, order_by=None):
     target = get_content_search_serving_target()
     return ContentSearchResults(target, query_string, start_date, end_date, order_by)
+
+
+def build_content_search_results_for_date_field(
+    query_string, start_date=None, end_date=None, order_by=None, date_field="date"
+):
+    """为联邦查询显式绑定日期字段，避免把 BlogPage.date 误用于普通页面。"""
+    target = get_content_search_serving_target()
+    return ContentSearchResults(target, query_string, start_date, end_date, order_by, date_field)

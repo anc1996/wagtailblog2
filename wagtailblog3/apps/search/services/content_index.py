@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 
 
-CONTENT_INDEX_MAPPING_VERSION = "v001"
+CONTENT_INDEX_MAPPING_VERSION = "v003"
 CONTENT_INDEX_ANALYZER_PROFILES = {
     "legacy_standard": {
         "title": None,
@@ -38,6 +38,7 @@ CONTENT_INDEX_REQUIRED_FIELDS = frozenset(
         "intro",
         "body_text",
         "date",
+        "first_published_at",
         "locale_id",
         "tag_ids",
         "category_ids",
@@ -127,6 +128,7 @@ def build_content_index_template(
         "operation": {"type": "keyword"},
         **text_fields,
         "date": {"type": "date"},
+        "first_published_at": {"type": "date"},
         "locale_id": {"type": "long"},
         "tag_ids": {"type": "long"},
         "category_ids": {"type": "long"},

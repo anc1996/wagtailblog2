@@ -1,6 +1,6 @@
 import json
 import os
-from datetime import date
+from datetime import date as date_type
 from io import StringIO
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -75,7 +75,8 @@ class _FormalContentPage:
     mongo_content_id = "64e7b6ef1d86d3f4b6e4e001"
     title = "独立内容索引"
     intro = "<p>精简索引简介</p>"
-    date = date(2026, 8, 10)
+    date = date_type(2026, 8, 10)
+    first_published_at = date_type(2026, 8, 11)
     locale_id = 3
     tags = _Relation([11, 12])
     categories = _Relation([21])
@@ -153,6 +154,8 @@ class ContentIndexDefinitionTests(SimpleTestCase):
         self.assertEqual(document.document["locale_id"], 3)
         self.assertEqual(document.document["tag_ids"], [11, 12])
         self.assertEqual(document.document["category_ids"], [21])
+        self.assertEqual(document.document["date"], "2026-08-10")
+        self.assertEqual(document.document["first_published_at"], "2026-08-11")
         self.assertNotIn("mongo_content_id", document.document)
 
     def test_batch_projection_never_falls_back_to_per_page_mongo_reads(self):

@@ -5,6 +5,7 @@ from django.conf import settings
 from .core import MAX_RESULT_WINDOW, SearchUnavailableError, format_search_results_for_api, get_search_suggestions, perform_search
 from .cache import SearchCache
 from .services.content_query import ContentSearchResults
+from .services.federated_query import FederatedSearchResults
 from .services.cursor import ContentSearchCursorError
 import logging
 
@@ -28,9 +29,10 @@ def search_api(request):
 	query_for_mode = clean_search_param(query)
 	cursor_mode = bool(
 		query_for_mode
-		and search_type == 'blog'
+		and search_type in {'blog', 'all'}
 		and getattr(settings, 'CONTENT_SEARCH_QUERY_ENABLED', False)
 		and getattr(settings, 'CONTENT_SEARCH_CURSOR_ENABLED', False)
+		and (search_type == 'blog' or getattr(settings, 'CONTENT_SEARCH_FEDERATED_ALL_ENABLED', False))
 	)
 	try:
 		page = int(request.GET.get('page', 1))
@@ -72,7 +74,7 @@ def search_api(request):
 			order_by=order_by
 		)
 		
-		if cursor_mode and isinstance(search_results, ContentSearchResults):
+		if cursor_mode and isinstance(search_results, (ContentSearchResults, FederatedSearchResults)):
 			paginated_results = search_results.cursor_page(
 				cursor, per_page, search_type=search_type,
 				locale=getattr(request, 'LANGUAGE_CODE', ''),

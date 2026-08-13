@@ -12,6 +12,7 @@ from django.utils.translation import get_language
 from .analytics import SearchAnalytics
 from .core import MAX_RESULT_WINDOW, SearchUnavailableError, get_search_suggestions, perform_search
 from .services.content_query import ContentSearchQueryUnavailable, ContentSearchResults
+from .services.federated_query import FederatedSearchResults
 from .services.cursor import ContentSearchCursorError
 import logging
 
@@ -50,9 +51,10 @@ def get_search_results_context(query_params, locale=None):
 	cursor_requested = bool(cursor)
 	cursor_candidate = bool(
 		search_query
-		and search_type == "blog"
+		and search_type in {"blog", "all"}
 		and getattr(settings, "CONTENT_SEARCH_QUERY_ENABLED", False)
 		and getattr(settings, "CONTENT_SEARCH_CURSOR_ENABLED", False)
+		and (search_type == "blog" or getattr(settings, "CONTENT_SEARCH_FEDERATED_ALL_ENABLED", False))
 	)
 	if search_query and not cursor_candidate and (page_number - 1) * SEARCH_RESULTS_PER_PAGE >= MAX_RESULT_WINDOW:
 		raise SearchResultWindowError("搜索结果最多支持前 10000 条")
@@ -69,7 +71,7 @@ def get_search_results_context(query_params, locale=None):
 			order_by=order_by,
 		)
 
-	cursor_mode = cursor_candidate and isinstance(search_results, ContentSearchResults)
+	cursor_mode = cursor_candidate and isinstance(search_results, (ContentSearchResults, FederatedSearchResults))
 	if cursor_mode:
 		try:
 			paginated_results = search_results.cursor_page(

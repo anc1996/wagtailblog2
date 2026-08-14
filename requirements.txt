@@ -119,11 +119,11 @@ uuid==1.30
 uWSGI==2.0.30
 vine==5.1.0
 wagtail==7.4.2
-wagtail-ai==3.1.0
+wagtail-ai==3.1.1
 wagtail-modeladmin==2.3.0
 wagtail-video==1.0.1
 wagtailcodeblock==1.30.0.0
-wagtailmedia==0.17.2
+wagtailmedia==0.18.1
 wcwidth==0.2.13
 webencodings==0.5.1
 wheel==0.45.1

@@ -157,3 +157,14 @@ python manage.py test wagtailblog3.apps.blog
 - 发布门禁：生产仓库已有未提交的 `requirements.txt` 与本方案文档改动，先使用 Git stash 保留原始改动，再只允许 fast-forward 到已验证 commit；不覆盖或删除脏改动。
 - 环境边界：生产使用实际核实的 Conda 环境与 `.env.production`，不复制测试凭据或数据库内容；“一致”仅指代码 commit、锁定依赖版本和迁移状态一致。
 - 数据保护：不复制或修改生产 BlogPage 正文、MongoDB 正文、草稿、revision、媒体对象或页面发布状态；仅在迁移门禁确认后执行必要迁移。
+
+### 2026-08-14 生产实施完成
+
+- 状态：已完成生产同步、依赖升级、迁移核验、应用服务重启与健康检查。
+- 实际修改文件：`requirements.txt`、本方案文档；生产代码已 fast-forward 到 `a8cb1691fd1116155559c9560e0c7c4f8ca1f37b`，生产工作区干净。
+- 依赖结果：生产 `/root/anaconda3/envs/wagtailblog` 中 `wagtail-ai==3.1.1`、`wagtailmedia==0.18.1`，与测试环境锁定版本一致；`pip check` 通过。
+- 迁移结果：生产 `blog.0024_alter_blogpage_body` 已应用，`migrate --plan` 无待执行操作；未重复写入迁移或修改受保护内容。
+- 服务结果：`wagtailblog3.service`、maintenance Worker、Beat、Filebeat 均为 `active/enabled`；未修改 unit，因此未执行 `daemon-reload`。
+- HTTP 验收：生产首页返回 `200`，Nginx 监听 `0.0.0.0:80`，重启后相关 unit 日志无 error。直接访问 `/admin/` 返回 `404`，需按当前站点语言路由继续人工确认后台入口。
+- 回滚点：代码回滚到发布前已验证的 `2924dd4`；依赖回滚到 `wagtail-ai==3.1.0`、`wagtailmedia==0.17.2` 后重启相关服务；不回滚数据库内容或 MongoDB 受保护数据。
+- 残余风险：后台 URL 的语言前缀验收尚未完成；生产保留既有 `WorkflowState` 条件唯一约束警告。

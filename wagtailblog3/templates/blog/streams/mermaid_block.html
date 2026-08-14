@@ -1,8 +1,15 @@
-<section class="mermaid-diagram-wrapper" data-mermaid-block data-mermaid-state="idle" aria-label="Mermaid 图表">
+<section class="mermaid-diagram-wrapper {% if value.renderer == 'modern-v11.12' %}mermaid-diagram-wrapper--modern{% else %}mermaid-diagram-wrapper--legacy{% endif %}"
+         data-mermaid-block
+         data-mermaid-state="idle"
+         data-mermaid-renderer="{{ value.renderer|default:'legacy-v11-current' }}"
+         aria-label="{% if value.renderer == 'modern-v11.12' %}Modern Mermaid 11.12 图表{% else %}旧版 Mermaid 图表{% endif %}">
     <header class="mermaid-header">
         <div class="mermaid-heading">
             <i class="fa fa-sitemap" aria-hidden="true"></i>
             <span>Mermaid 图表</span>
+            <span class="mermaid-renderer-badge" data-mermaid-renderer-badge>
+                {% if value.renderer == 'modern-v11.12' %}Modern Mermaid 11.12{% else %}旧版兼容{% endif %}
+            </span>
         </div>
         <button class="mermaid-icon-button mermaid-collapse-button"
                 type="button"
@@ -63,11 +70,11 @@
             <textarea class="mermaid-raw-source" hidden>{{ value.code }}</textarea>
             <div class="mermaid-status" data-mermaid-status role="status" aria-live="polite">
                 <i class="fa fa-circle-o-notch fa-spin" aria-hidden="true"></i>
-                <span>正在渲染图表</span>
+                <span data-mermaid-status-text>正在渲染图表</span>
             </div>
             <div class="mermaid-error" data-mermaid-error role="alert" hidden>
                 <i class="fa fa-exclamation-circle" aria-hidden="true"></i>
-                <span>图表暂时无法显示，请检查 Mermaid 语法。</span>
+                <span data-mermaid-error-text>图表暂时无法显示，请检查 Mermaid 语法。</span>
             </div>
             <div class="mermaid-inner" data-mermaid-inner></div>
         </div>

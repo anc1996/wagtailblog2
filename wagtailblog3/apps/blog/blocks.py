@@ -43,6 +43,11 @@ class PureCodeBlock(CodeBlock):
         label = '代码块(纯净版)'
 
 
+
+MERMAID_RENDERER_LEGACY = "legacy-v11-current"
+MERMAID_RENDERER_MODERN = "modern-v11.12"
+
+
 class MermaidBlock(blocks.StructBlock):
 	"""
 	一个专门用于 Mermaid 图表代码的 StreamField Block。
@@ -52,6 +57,25 @@ class MermaidBlock(blocks.StructBlock):
 		required=True,
 		help_text="在此处粘贴您的 Mermaid.js 语法代码 (例如: graph TD; A-->B;)"
 	)
+	# 渲染器标识属于内容契约；旧 Mongo 数据缺少该字段时由 to_python 归入兼容渲染器。
+	renderer = blocks.ChoiceBlock(
+		label="渲染器",
+		required=False,
+		default=MERMAID_RENDERER_MODERN,
+		choices=(
+			("", "未标记（按旧版兼容）"),
+			(MERMAID_RENDERER_LEGACY, "旧版 Mermaid（兼容历史内容）"),
+			(MERMAID_RENDERER_MODERN, "Modern Mermaid 11.12"),
+		),
+		help_text="新图表使用 Modern Mermaid；历史图表保持旧版，确认后再升级。",
+	)
+
+	def to_python(self, value):
+		# 只在读取已有正文时补充内存中的兼容标识，不对 MongoDB 做批量迁移或写回。
+		if isinstance(value, dict) and "code" in value and "renderer" not in value:
+			value = dict(value)
+			value["renderer"] = MERMAID_RENDERER_LEGACY
+		return super().to_python(value)
 
 	class Meta:
 		icon = 'code'  # 在编辑器中显示一个代码图标

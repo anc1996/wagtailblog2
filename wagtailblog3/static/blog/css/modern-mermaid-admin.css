@@ -1,0 +1,246 @@
+.mermaid-admin-editor {
+    box-sizing: border-box;
+    width: 100%;
+    margin: 0 0 16px;
+    padding: 14px;
+    border: 1px solid #d9e1e8;
+    background: #f8fafc;
+}
+
+.mermaid-admin-editor *,
+.mermaid-admin-editor *::before,
+.mermaid-admin-editor *::after {
+    box-sizing: border-box;
+}
+
+.mermaid-admin-editor__header,
+.mermaid-admin-editor__header > div {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.mermaid-admin-editor__header {
+    justify-content: space-between;
+    margin-bottom: 10px;
+    flex-wrap: wrap;
+}
+
+.mermaid-admin-editor__status {
+    color: #64748b;
+    font-size: 12px;
+}
+
+.mermaid-admin-editor__renderer {
+    max-width: 420px;
+    margin-bottom: 12px;
+}
+
+.mermaid-admin-editor__renderer .w-field__help,
+.mermaid-admin-editor__renderer .w-field__errors {
+    display: none;
+}
+
+.mermaid-admin-editor__view-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.mermaid-admin-editor__view-controls .button[aria-pressed="true"] {
+    border-color: var(--w-color-primary-200, #007d7e);
+    color: var(--w-color-primary-200, #007d7e);
+    background: var(--w-color-primary-50, #eefafa);
+}
+
+.mermaid-admin-editor__workspace {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    height: min(720px, calc(100vh - 250px));
+    min-height: 560px;
+    border: 1px solid #cbd5e1;
+    background: #fff;
+    overflow: hidden;
+}
+
+.mermaid-admin-editor__mode {
+    min-width: 0;
+    min-height: 0;
+    height: 100%;
+}
+
+.mermaid-admin-editor__mode--modern {
+    display: grid;
+    grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.mermaid-admin-editor__frame-host {
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.mermaid-admin-editor__mode--legacy {
+    display: grid;
+    grid-template-columns: minmax(280px, 38%) minmax(0, 1fr);
+    overflow: hidden;
+}
+
+.mermaid-admin-editor__legacy-source,
+.mermaid-admin-editor__legacy-preview {
+    min-width: 0;
+    min-height: 0;
+    padding: 14px;
+    overflow: auto;
+}
+
+.mermaid-admin-editor__legacy-source {
+    border-right: 1px solid #d9e1e8;
+    background: #f8fafc;
+}
+
+.mermaid-admin-editor__legacy-preview {
+    display: flex;
+    flex-direction: column;
+    background: #fff;
+}
+
+.mermaid-admin-editor__source-heading {
+    margin-bottom: 8px;
+    color: #334155;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.mermaid-admin-editor__hint {
+    margin: 8px 0 0;
+    color: #64748b;
+    font-size: 12px;
+}
+
+.mermaid-admin-editor__legacy-canvas {
+    position: relative;
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    align-items: center;
+    justify-content: center;
+    overflow: auto;
+    padding: 16px;
+    border: 1px dashed #cbd5e1;
+    background: #fff;
+}
+
+.mermaid-admin-editor__legacy-output svg {
+    display: block;
+    max-width: none;
+}
+
+.mermaid-admin-editor__legacy-placeholder {
+    color: #94a3b8;
+}
+
+.mermaid-admin-editor__legacy-error {
+    color: #b42318;
+    white-space: pre-wrap;
+}
+
+.mermaid-admin-editor__iframe {
+    display: block;
+    min-width: 0;
+    width: 100%;
+    height: 100%;
+    border: 0;
+}
+
+.mermaid-admin-editor__fallback {
+    padding: 16px;
+    color: #9a3412;
+    background: #fff7ed;
+}
+
+/* 仅扩展到 Wagtail 主工作区，保留后台侧栏与顶部操作栏。 */
+body.mermaid-admin-fullscreen-active {
+    overflow: hidden !important;
+}
+
+.mermaid-admin-editor.mermaid-admin-editor--modern-fullscreen {
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    top: var(--mermaid-admin-fullscreen-top, 0px);
+    left: var(--mermaid-admin-fullscreen-left, 0px);
+    z-index: 98;
+    width: var(--mermaid-admin-fullscreen-width, 100vw);
+    height: var(--mermaid-admin-fullscreen-height, 100vh);
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: #fff;
+}
+
+.mermaid-admin-editor--modern-fullscreen > .mermaid-admin-editor__header,
+.mermaid-admin-editor--modern-fullscreen > .mermaid-admin-editor__renderer {
+    display: none;
+}
+
+.mermaid-admin-editor--modern-fullscreen > .mermaid-admin-editor__view-controls {
+    flex: 0 0 auto;
+    margin: 0;
+    padding: 8px 12px;
+    border-bottom: 1px solid #d9e1e8;
+    background: #f8fafc;
+}
+
+.mermaid-admin-editor--modern-fullscreen .mermaid-admin-editor__workspace,
+.mermaid-admin-editor--modern-fullscreen .mermaid-admin-editor__mode--modern,
+.mermaid-admin-editor--modern-fullscreen .mermaid-admin-editor__frame-host {
+    height: 100%;
+    min-height: 0;
+}
+
+.mermaid-admin-editor--modern-fullscreen .mermaid-admin-editor__workspace {
+    flex: 1 1 auto;
+    height: auto;
+    border: 0;
+}
+
+@media (max-width: 980px) {
+    .mermaid-admin-editor__workspace {
+        height: min(680px, 78vh);
+        min-height: 500px;
+    }
+
+    .mermaid-admin-editor__mode--legacy {
+        grid-template-columns: 1fr;
+        grid-template-rows: minmax(220px, 42%) minmax(300px, 1fr);
+        overflow: auto;
+    }
+
+    .mermaid-admin-editor__legacy-source {
+        border-right: 0;
+        border-bottom: 1px solid #d9e1e8;
+    }
+}
+
+@media (max-width: 560px) {
+    .mermaid-admin-editor {
+        padding: 8px;
+    }
+
+    .mermaid-admin-editor__header {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .mermaid-admin-editor__workspace {
+        height: 560px;
+        min-height: 0;
+    }
+
+    .mermaid-admin-editor__mode--legacy {
+        grid-template-rows: 260px minmax(300px, 1fr);
+    }
+}

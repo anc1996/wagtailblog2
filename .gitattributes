@@ -1,2 +1,6 @@
 # Preserve upstream Vditor distribution files without whitespace normalization checks.
 wagtailblog3/static/vendor/vditor/** -whitespace
+
+# 保留 Mermaid 上游构建文件，避免对压缩产物执行空白字符规范化检查。
+wagtailblog3/static/vendor/mermaid-modern-v11.12/** -whitespace
+wagtailblog3/static/vendor/modern-mermaid/** -whitespace

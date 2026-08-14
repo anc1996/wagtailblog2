@@ -33,6 +33,16 @@
     --mm-danger: #ee8c82;
 }
 
+.mermaid-diagram-wrapper--legacy {
+    --mm-renderer-accent: #d59a63;
+    --mm-renderer-badge-surface: rgba(213, 154, 99, 0.17);
+}
+
+.mermaid-diagram-wrapper--modern {
+    --mm-renderer-accent: #7bb8ad;
+    --mm-renderer-badge-surface: rgba(123, 184, 173, 0.18);
+}
+
 .mermaid-diagram-wrapper {
     width: 100%;
     margin: 2rem 0;
@@ -69,6 +79,22 @@
 .mermaid-heading i,
 .mermaid-dialog-header > span i {
     color: #e1a778;
+}
+
+.mermaid-renderer-badge {
+    display: inline-flex;
+    min-height: 22px;
+    align-items: center;
+    padding: 2px 8px;
+    color: var(--mm-renderer-accent);
+    background: var(--mm-renderer-badge-surface);
+    border: 1px solid color-mix(in srgb, var(--mm-renderer-accent) 55%, transparent);
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0;
+    line-height: 1.2;
+    white-space: nowrap;
 }
 
 .mermaid-content {
@@ -468,6 +494,16 @@
         flex-direction: column;
         gap: 6px;
         padding: 8px;
+    }
+
+    .mermaid-heading {
+        flex-wrap: wrap;
+    }
+
+    .mermaid-renderer-badge {
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
 
     .mermaid-toolbar-group {

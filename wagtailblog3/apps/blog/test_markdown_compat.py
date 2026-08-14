@@ -1,6 +1,7 @@
 """验证 Markdown、Mongo 存储和 Vditor 控件之间的兼容契约。"""
 
 import hashlib
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -8,7 +9,12 @@ from django.conf import settings
 from django.urls import reverse
 from django.test import SimpleTestCase
 
-from blog.blocks import VditorMarkdownBlock
+from blog.blocks import (
+    MERMAID_RENDERER_LEGACY,
+    MERMAID_RENDERER_MODERN,
+    MermaidBlock,
+    VditorMarkdownBlock,
+)
 from blog.models import BlogPage
 from blog.widgets import VditorMarkdownWidget
 from blog.markdown_renderer import MarkdownRenderer
@@ -56,6 +62,104 @@ $$E = mc^2$$
         after = hashlib.sha256(stored.encode("utf-8")).hexdigest()
 
         self.assertEqual(before, after)
+
+
+class MermaidRendererCompatibilityTests(SimpleTestCase):
+    """验证 Mermaid 渲染器标识兼容旧 Mongo 正文且不触发批量迁移。"""
+
+    def test_missing_renderer_is_legacy_only_in_memory(self):
+        source = {"code": "graph TD\n  A --> B"}
+        value = MermaidBlock().to_python(source)
+
+        self.assertEqual(value["code"], source["code"])
+        self.assertEqual(value["renderer"], MERMAID_RENDERER_LEGACY)
+        self.assertNotIn("renderer", source)
+
+    def test_modern_renderer_is_preserved(self):
+        value = MermaidBlock().to_python(
+            {"code": "flowchart TD\n  A --> B", "renderer": MERMAID_RENDERER_MODERN}
+        )
+
+        self.assertEqual(value["renderer"], MERMAID_RENDERER_MODERN)
+
+    def test_new_renderer_choice_defaults_to_modern(self):
+        renderer = MermaidBlock().child_blocks["renderer"]
+
+        self.assertEqual(renderer.get_default(), MERMAID_RENDERER_MODERN)
+
+    def test_mongo_round_trip_keeps_renderer_and_code(self):
+        source = {
+            "code": "flowchart TD\n  A --> B",
+            "renderer": MERMAID_RENDERER_MODERN,
+        }
+        block = SimpleNamespace(block_type="mermaid_chart", value=source)
+
+        stored = MongoDBStreamFieldAdapter._process_block_value(block)
+
+        self.assertEqual(stored, source)
+        self.assertEqual(source["code"], "flowchart TD\n  A --> B")
+
+    def test_renderer_assets_are_local_and_distinct(self):
+        static_root = Path(settings.PROJECT_DIR) / "static"
+        modern_editor = static_root / "vendor" / "modern-mermaid" / "index.html"
+        modern_runtime = static_root / "vendor" / "mermaid-modern-v11.12" / "mermaid.esm.min.mjs"
+        legacy_runtime = static_root / "vendor" / "mermaid" / "mermaid.esm.min.mjs"
+
+        self.assertTrue(modern_editor.is_file())
+        self.assertTrue(modern_runtime.is_file())
+        self.assertTrue(legacy_runtime.is_file())
+        self.assertNotEqual(modern_runtime.read_bytes(), legacy_runtime.read_bytes())
+
+    def test_modern_editor_uses_relative_bundled_assets(self):
+        editor_html = (
+            Path(settings.PROJECT_DIR) / "static" / "vendor" / "modern-mermaid" / "index.html"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('src="./assets/', editor_html)
+        self.assertIn('href="./assets/', editor_html)
+        self.assertNotIn("https://", editor_html)
+
+    def test_admin_editor_keeps_separate_modern_and_legacy_modes(self):
+        static_root = Path(settings.PROJECT_DIR) / "static"
+        form_template = (
+            Path(settings.PROJECT_DIR) / "templates" / "blog" / "admin" / "mermaid_block_form.html"
+        ).read_text(encoding="utf-8")
+        bridge = (static_root / "blog" / "js" / "modern-mermaid-wagtail-bridge.js").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn('data-mermaid-mode="modern"', form_template)
+        self.assertIn('data-mermaid-mode="legacy"', form_template)
+        self.assertIn('data-mermaid-editor-frame-host', form_template)
+        self.assertIn('data-contentpath="code"', form_template)
+        self.assertIn("LEGACY_MERMAID_PATH", bridge)
+        self.assertIn("renderLegacy", bridge)
+
+        embed_css = static_root / "vendor" / "modern-mermaid" / "wagtail-embed.css"
+        self.assertTrue(embed_css.is_file())
+        self.assertIn("data-wagtail-preview-toolbar", embed_css.read_text(encoding="utf-8"))
+        self.assertIn("@container (max-width: 620px)", embed_css.read_text(encoding="utf-8"))
+
+    def test_frontend_renderer_identity_is_explicit_and_isolated(self):
+        static_root = Path(settings.PROJECT_DIR) / "static"
+        template = (
+            Path(settings.PROJECT_DIR) / "templates" / "blog" / "streams" / "mermaid_block.html"
+        ).read_text(encoding="utf-8")
+        script = (static_root / "content" / "js" / "mermaid-block.js").read_text(encoding="utf-8")
+        stylesheet = (static_root / "content" / "css" / "mermaid-block.css").read_text(encoding="utf-8")
+
+        self.assertIn("data-mermaid-renderer", template)
+        self.assertIn("mermaid-diagram-wrapper--modern", template)
+        self.assertIn("mermaid-diagram-wrapper--legacy", template)
+        self.assertIn("data-mermaid-renderer-badge", template)
+        self.assertIn("data-mermaid-error-text", template)
+        self.assertIn("const RENDERERS", script)
+        self.assertIn("/static/vendor/mermaid/mermaid.esm.min.mjs", script)
+        self.assertIn("/static/vendor/mermaid-modern-v11.12/mermaid.esm.min.mjs", script)
+        self.assertIn("mermaidPromises.delete(renderer)", script)
+        self.assertIn("未切换其他渲染器", script)
+        self.assertIn("mermaid-diagram-wrapper--modern", stylesheet)
+        self.assertIn("mermaid-diagram-wrapper--legacy", stylesheet)
 
 
 class VditorWidgetCompatibilityTests(SimpleTestCase):

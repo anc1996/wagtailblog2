@@ -12,9 +12,26 @@
     const DIALOG_RESIZE_EDGES = ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw'];
 
     const states = new WeakMap();
-    let mermaidPromise = null;
+    const mermaidPromises = new Map();
     let renderQueue = Promise.resolve();
     let renderSequence = 0;
+
+    const RENDERERS = Object.freeze({
+        legacy: Object.freeze({
+            id: 'legacy-v11-current',
+            kind: 'legacy',
+            label: '旧版 Mermaid',
+            badge: '旧版兼容',
+            runtime: '/static/vendor/mermaid/mermaid.esm.min.mjs'
+        }),
+        modern: Object.freeze({
+            id: 'modern-v11.12',
+            kind: 'modern',
+            label: 'Modern Mermaid 11.12',
+            badge: 'Modern Mermaid 11.12',
+            runtime: '/static/vendor/mermaid-modern-v11.12/mermaid.esm.min.mjs'
+        })
+    });
 
     const palettes = {
         light: {
@@ -97,7 +114,7 @@
         return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
     }
 
-    function mermaidConfig(theme) {
+    function mermaidConfig(theme, rendererId) {
         return {
             startOnLoad: false,
             securityLevel: 'strict',
@@ -106,19 +123,49 @@
             themeVariables: palettes[theme],
             maxTextSize: 50000,
             deterministicIds: true,
-            deterministicIDSeed: `wagtailblog-${theme}`,
+            deterministicIDSeed: `wagtailblog-${rendererId}-${theme}`,
             flowchart: { htmlLabels: false, useMaxWidth: false },
             sequence: { useMaxWidth: false },
             gantt: { useMaxWidth: false }
         };
     }
 
-    function getMermaid() {
-        if (!mermaidPromise) {
-            mermaidPromise = import('/static/vendor/mermaid/mermaid.esm.min.mjs')
-                .then((module) => module.default);
+    function rendererMetaFor(block) {
+        const renderer = block.dataset.mermaidRenderer === RENDERERS.modern.id
+            ? RENDERERS.modern
+            : RENDERERS.legacy;
+
+        // 未知或缺失标识必须归入旧版兼容路径，且只在当前 DOM 中规范化，不写回正文数据。
+        block.dataset.mermaidRenderer = renderer.id;
+        block.dataset.mermaidRendererKind = renderer.kind;
+        block.dataset.mermaidRuntime = renderer.runtime;
+        block.classList.toggle('mermaid-diagram-wrapper--legacy', renderer.kind === 'legacy');
+        block.classList.toggle('mermaid-diagram-wrapper--modern', renderer.kind === 'modern');
+        return renderer;
+    }
+
+    function updateRendererUi(block) {
+        const renderer = rendererMetaFor(block);
+        const label = `${renderer.label} 图表`;
+        const badge = block.querySelector('[data-mermaid-renderer-badge]');
+
+        block.setAttribute('aria-label', label);
+        if (badge) badge.textContent = renderer.badge;
+    }
+
+    function getMermaid(renderer) {
+        if (!mermaidPromises.has(renderer)) {
+            const meta = renderer === RENDERERS.modern.id ? RENDERERS.modern : RENDERERS.legacy;
+            const promise = import(meta.runtime)
+                .then((module) => module.default)
+                .catch((error) => {
+                    // 导入失败时清除缓存，允许用户在网络恢复后重试同一 runtime，不切换到另一版本。
+                    mermaidPromises.delete(renderer);
+                    throw error;
+                });
+            mermaidPromises.set(renderer, promise);
         }
-        return mermaidPromise;
+        return mermaidPromises.get(renderer);
     }
 
     function enqueueRender(task) {
@@ -155,12 +202,18 @@
     }
 
     function setRenderState(block, status) {
+        const renderer = rendererMetaFor(block);
         block.dataset.mermaidState = status;
+        block.dataset.mermaidRuntimeState = status;
         const loading = block.querySelector('[data-mermaid-status]');
         const error = block.querySelector('[data-mermaid-error]');
+        const loadingText = block.querySelector('[data-mermaid-status-text]');
+        const errorText = block.querySelector('[data-mermaid-error-text]');
 
         if (loading) loading.hidden = status !== 'loading';
         if (error) error.hidden = status !== 'error';
+        if (loadingText) loadingText.textContent = `${renderer.label} 正在渲染图表`;
+        if (errorText) errorText.textContent = `${renderer.label} 渲染失败，未切换其他渲染器。请检查 Mermaid 语法。`;
     }
 
     function diagramDimensions(viewport) {
@@ -213,17 +266,18 @@
         applyTransform(viewport, state, zoomOutput);
     }
 
-    function prepareSvg(block, svg, width, height) {
+    function prepareSvg(block, svg, width, height, renderer) {
         svg.style.maxWidth = 'none';
         svg.style.width = `${width}px`;
         svg.style.height = `${height}px`;
         svg.setAttribute('role', 'img');
-        svg.setAttribute('aria-label', 'Mermaid 图表');
+        svg.setAttribute('aria-label', `${renderer.label} 图表`);
+        svg.dataset.mermaidRenderer = renderer.id;
         svg.setAttribute('focusable', 'false');
 
         if (!svg.querySelector('title')) {
             const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
-            title.textContent = 'Mermaid 图表';
+            title.textContent = `${renderer.label} 图表`;
             svg.prepend(title);
         }
 
@@ -231,6 +285,7 @@
     }
 
     async function renderBlock(block, options = {}) {
+        const renderer = rendererMetaFor(block);
         const source = sourceFor(block);
         if (!source) {
             setRenderState(block, 'error');
@@ -243,11 +298,11 @@
 
         try {
             await enqueueRender(async () => {
-                const mermaid = await getMermaid();
+                const mermaid = await getMermaid(renderer.id);
                 const theme = currentTheme(block);
-                mermaid.initialize(mermaidConfig(theme));
+                mermaid.initialize(mermaidConfig(theme, renderer.id));
 
-                const graphId = `wagtailblog-mermaid-${++renderSequence}`;
+                const graphId = `wagtailblog-mermaid-${renderer.kind}-${++renderSequence}`;
                 const result = await mermaid.render(graphId, source);
                 if (version !== state.renderVersion) return;
 
@@ -259,7 +314,7 @@
                 const dimensions = viewport ? diagramDimensions(viewport) : null;
                 if (!viewport || !dimensions) throw new Error('Mermaid returned an empty SVG');
 
-                prepareSvg(block, dimensions.svg, dimensions.width, dimensions.height);
+                prepareSvg(block, dimensions.svg, dimensions.width, dimensions.height, renderer);
                 result.bindFunctions?.(inner);
                 setRenderState(block, 'ready');
 
@@ -666,11 +721,12 @@
 
         const dialog = document.createElement('dialog');
         dialog.className = `mermaid-dialog${currentTheme(block) === 'dark' ? ' dark-theme' : ''}`;
-        dialog.setAttribute('aria-label', 'Mermaid 图表全屏预览');
+        const renderer = rendererMetaFor(block);
+        dialog.setAttribute('aria-label', `${renderer.label} 全屏预览`);
         dialog.innerHTML = `
             <div class="mermaid-dialog-shell">
                 <header class="mermaid-dialog-header">
-                    <span><i class="fa fa-sitemap" aria-hidden="true"></i> Mermaid 图表</span>
+                    <span><i class="fa fa-sitemap" aria-hidden="true"></i> ${renderer.label}</span>
                     <button class="mermaid-icon-button" type="button" data-dialog-action="close" title="关闭全屏" aria-label="关闭全屏">
                         <i class="fa fa-times" aria-hidden="true"></i>
                     </button>
@@ -851,6 +907,7 @@
         const theme = preferredTheme();
         blocks.forEach((block) => {
             bindBlock(block);
+            updateRendererUi(block);
             updateThemeUi(block, theme);
         });
 

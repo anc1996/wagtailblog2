@@ -1,0 +1,130 @@
+/* Modern Mermaid 嵌入 Wagtail 后的布局适配，不修改上游编辑器功能。 */
+html[data-wagtail-embed],
+html[data-wagtail-embed] body,
+html[data-wagtail-embed] #root {
+    width: 100% !important;
+    height: 100% !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+}
+
+main[data-wagtail-embed],
+main[data-wagtail-embed] > [data-wagtail-pane] {
+    min-width: 0 !important;
+    min-height: 0 !important;
+}
+
+main[data-wagtail-embed][data-wagtail-pane-mode="preview"] > [data-wagtail-pane="editor"] {
+    display: none !important;
+}
+
+main[data-wagtail-embed][data-wagtail-pane-mode="preview"] > [data-wagtail-pane="preview"] {
+    width: 100% !important;
+    flex: 1 1 100% !important;
+}
+
+[data-wagtail-fullscreen-toggle] {
+    display: none !important;
+}
+
+[data-wagtail-pane="preview"] {
+    container-type: inline-size;
+    display: flex !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
+}
+
+[data-wagtail-preview-toolbar] {
+    position: static !important;
+    inset: auto !important;
+    display: flex !important;
+    flex-wrap: wrap !important;
+    justify-content: flex-end !important;
+    width: 100% !important;
+    max-width: none !important;
+    min-height: 58px !important;
+    flex: 0 0 auto !important;
+    box-sizing: border-box !important;
+    padding: 8px 10px !important;
+    border-bottom: 1px solid #e5e7eb !important;
+    background: #ffffff !important;
+    gap: 6px !important;
+}
+
+[data-wagtail-preview-toolbar] > div {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    justify-content: flex-end !important;
+    min-width: 0 !important;
+    gap: 6px !important;
+}
+
+[data-wagtail-preview-toolbar] button {
+    flex: 0 0 auto !important;
+    white-space: nowrap !important;
+}
+
+[data-wagtail-preview-canvas] {
+    box-sizing: border-box !important;
+    min-height: 0 !important;
+    flex: 1 1 auto !important;
+    padding-top: 0 !important;
+}
+
+@container (max-width: 760px) {
+    [data-wagtail-preview-toolbar] button {
+        padding: 6px 8px !important;
+    }
+}
+
+@container (max-width: 620px) {
+    [data-wagtail-preview-toolbar] {
+        gap: 4px !important;
+        min-height: 52px !important;
+        padding: 6px 8px !important;
+    }
+
+    [data-wagtail-preview-toolbar] > div {
+        gap: 4px !important;
+    }
+
+    [data-wagtail-preview-toolbar] button {
+        padding: 6px 8px !important;
+    }
+
+    [data-wagtail-preview-toolbar] button > span {
+        display: none !important;
+    }
+
+}
+
+@media (max-width: 767px) {
+    main[data-wagtail-embed] {
+        flex-direction: column !important;
+    }
+
+    main[data-wagtail-embed] > [data-wagtail-pane="editor"] {
+        width: 100% !important;
+        height: 220px !important;
+        flex: 0 0 220px !important;
+    }
+
+    main[data-wagtail-embed] > [data-wagtail-pane="preview"] {
+        width: 100% !important;
+        min-height: 0 !important;
+        flex: 1 1 auto !important;
+    }
+
+    [data-wagtail-preview-toolbar] {
+        min-height: 48px !important;
+        padding: 6px !important;
+    }
+}
+
+@media (prefers-color-scheme: dark) {
+    [data-wagtail-preview-toolbar] {
+        border-color: #374151 !important;
+        background: #111827 !important;
+    }
+}

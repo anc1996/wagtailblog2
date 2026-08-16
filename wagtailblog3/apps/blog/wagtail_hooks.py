@@ -6,7 +6,6 @@ import logging
 from django.conf import settings
 from django.templatetags.static import static
 from django.utils.html import format_html
-from django.utils.safestring import mark_safe
 from django.db.models import Sum
 from django.shortcuts import render, get_object_or_404
 from django.core.exceptions import PermissionDenied
@@ -30,6 +29,7 @@ from .admin import PageViewSnippetViewSet, TagsSnippetViewSet
 from .models import PageViewCount
 from .services.content_analytics import ContentAnalyticsFilters, ContentAnalyticsQueryService
 from .admin_image_upload import upload_vditor_image
+from .ai_metadata_views import generate_blog_metadata, list_blog_metadata_templates
 from . import widget_adapters  # noqa: F401
 
 # 设置日志记录器
@@ -43,6 +43,22 @@ def register_vditor_image_upload_url():
 			"blog/vditor/images/upload/",
 			upload_vditor_image,
 			name="blog_vditor_image_upload",
+		),
+		path(
+			"blog/ai/metadata-templates/",
+			list_blog_metadata_templates,
+			name="blog_ai_metadata_templates",
+		),
+	]
+
+
+@hooks.register("register_admin_urls")
+def register_blog_ai_metadata_url():
+	return [
+		path(
+			"blog/ai/generate-metadata/",
+			generate_blog_metadata,
+			name="blog_ai_generate_metadata",
 		),
 	]
 
@@ -58,35 +74,21 @@ def global_admin_css():
 	return format_html('<link rel="stylesheet" href="{}">', static("css/all.min.css"))
 
 
-@hooks.register('insert_global_admin_css')
-def fix_wagtail_ai_zindex():
-	"""
-	架构师前端补丁：
-	解决 Wagtail-AI 的星号魔法棒被 RichTextField 工具栏物理遮挡导致无法点击的问题。
-	"""
-	# 这段样式没有用户输入，使用 mark_safe 输出固定的后台补丁。
-	return mark_safe(
-		"<style>\n"
-		".w-field--draftail_rich_text_area .wai-dropdown {\n"
-		"    z-index: 100 !important;\n"
-		"    top: -5px !important;\n"
-		"    right: 0px !important;\n"
-		"}\n"
-		"</style>"
-	)
-
-
-# 为编辑器加载诊断和 AI 上下文脚本。
+# 为编辑器加载诊断和项目自有正文上下文脚本。
 @hooks.register('insert_editor_js')
 def editor_js():
 	"""添加JavaScript支持到编辑器"""
 	return format_html(
 		'<script src="{}"></script>\n'
 		'<script src="{}"></script>\n'
+		'<script src="{}" data-blog-ai-metadata data-url="{}" data-template-url="{}"></script>\n'
 		'<script src="{}" data-blog-rich-text-image-paste '
 		'data-upload-url="{}" data-max-image-size="{}"></script>',
 		f"{static('blog/js/editor-enhancements.js')}?blog_editor=20260801.2",
-		static('blog/js/wagtail_ai_context.js'),
+		static('blog/js/blog_editor_context.js'),
+		static('blog/js/ai_blog_metadata.js'),
+		reverse('blog_ai_generate_metadata'),
+		reverse('blog_ai_metadata_templates'),
 		f"{static('blog/js/rich_text_image_paste.js')}?blog_editor=20260804.1",
 		reverse('blog_vditor_image_upload'),
 		getattr(settings, 'WAGTAILIMAGES_MAX_UPLOAD_SIZE', 10 * 1024 * 1024),

@@ -144,7 +144,6 @@ class LoggingConfigTests(SimpleTestCase):
         expected = {
             "wagtailblog3.mongo": "mongo/mongo_error.log",
             "wagtailblog3.mongodb": "mongo/mongo_error.log",
-            "wagtailblog3.ai_backends": "ai/ai_error.log",
             "wagtailblog3.storage_backends": "storage/storage_error.log",
         }
         for logger_name, suffix in expected.items():

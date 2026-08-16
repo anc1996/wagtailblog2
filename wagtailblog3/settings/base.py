@@ -55,6 +55,7 @@ INSTALLED_APPS = [
     "home",  # 首页应用
     "search.apps.SearchConfig",  # 搜索应用
     "blog",  # 添加博客应用
+	"content_ai.apps.ContentAIConfig",  # 项目自有内容 AI 配置
     "comments", # 添加评论系统
     "archive",  # 添加归档应用
     "base", # 添加基础应用
@@ -69,7 +70,6 @@ INSTALLED_APPS = [
     "drf_yasg",  # API 文档生成
     "corsheaders",  # 如果需要跨域支持
     "wagtail_modeladmin", # Wagtail ModelAdmin,模块允许您将项目中的任何模型添加到 Wagtail 管理界面
-	'wagtail_ai',  # ← wagtail-ai库
     
     "wagtail.contrib.forms",  # Wagtail 表单贡献模块
     "wagtail.contrib.redirects",  # Wagtail 重定向贡献模块

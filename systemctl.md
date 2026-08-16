@@ -72,6 +72,19 @@ wagtailblog3/settings/.env.production
 - 两个文件即使同时存在，也只读取 `WAGTAILBLOG_ENV` 指定的一个；
 - 由于 `load_dotenv(..., override=False)`，进程或 systemd 已提供的变量优先于文件内容。
 
+### BlogPage AI 元数据生成
+
+`AI_METADATA_*` 变量仅为 BlogPage 编辑器的按需 Responses API 请求提供配置，不新增
+systemd unit、端口、Celery 队列或定时任务。测试环境可在 `.env.test` 配置
+`AI_METADATA_PROVIDER=openai`、`AI_METADATA_API_KEY`、`AI_METADATA_BASE_URL`、
+`AI_METADATA_MODEL` 和可选的 `AI_METADATA_REASONING_EFFORT`；
+`AI_METADATA_RESPONSE_STORAGE` 必须保持 `false`，应用会拒绝在其为 `true` 时启动请求。
+
+生产环境默认不配置这些变量，也不得为调试加载 `.env.production` 或使用 `runserver`。
+如需生产启用，属于受保护正文向外部服务传输和生产环境配置变更，必须单独说明 provider、
+数据范围、`store=false` 证据、超时/失败行为、回滚方式，并获得授权后才可修改
+`.env.production` 和重启 `wagtailblog3.service`；Worker、Beat、Filebeat 和 Nginx 不受影响。
+
 ### 搜索高亮回滚开关
 
 `SEARCH_HIGHLIGHTS_ENABLED` 默认 `true`。设为 `false` 后，前台搜索回退到 WP1 的 Wagtail

@@ -64,7 +64,7 @@
 - Windows 主机不承担 Conda 运行环境；测试 Conda 位于 WSL2：`/root/anaconda3/envs/wagtailblog-test`；
 - Django 包：`wagtailblog3`；仓库根目录包含 `manage.py`；
 - 唯一开发与发布分支：`main`；远程：`origin`；
-- 生产服务器：Hyper-V 第一代虚拟机 `192.168.20.2`（主机名 `ziliao`，不是 WSL）；生产项目：`/home/source/Django/wagtail/wagtailblog3`；生产 Conda：`/root/anaconda3/envs/wagtailblog`；
+- 生产服务器：Hyper-V 第一代虚拟机 `192.168.20.2`（主机名 `ziliao`，端口 `22` ，密码 `123456` ，不是 WSL）；生产项目：`/home/source/Django/wagtail/wagtailblog3`；生产 Conda：`/root/anaconda3/envs/wagtailblog`；
 - 生产服务：Nginx + uWSGI + systemd，依赖 MySQL、MongoDB、Redis、MinIO、Docker、Elasticsearch、Celery 与 Filebeat。
 
 这些是当前事实的起点。每个发布或服务任务都必须重新核实路径、分支、commit、服务名、

@@ -42,7 +42,6 @@ LOG_DOMAINS: tuple[LogDomain, ...] = (
     LogDomain("portfolio", ("portfolio",)),
     LogDomain("search", ("search",)),
     LogDomain("mongo", ("wagtailblog3.mongo", "wagtailblog3.mongodb")),
-    LogDomain("ai", ("wagtailblog3.ai_backends",)),
     LogDomain("storage", ("wagtailblog3.storage_backends",)),
 )
 

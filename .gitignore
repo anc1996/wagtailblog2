@@ -35,7 +35,6 @@ staticfiles_collected/
 ''$'\350\257\264\346\230\216\344\271\246'
 # Local debugging / rollback artifacts
 .ai-fix-backups/
-wagtailblog3/static/wagtail_ai/
 
 # 本地运维、代码检查和浏览器验证产物
 /ops/

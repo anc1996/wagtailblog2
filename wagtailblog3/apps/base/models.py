@@ -135,13 +135,13 @@ class FormPage(AbstractEmailForm):
 	intro = RichTextField(
 		blank=True,
 		help_text="表单上方的介绍文本",
-		features=['ai','bold', 'italic', 'link', 'ol', 'ul']
+		features=['bold', 'italic', 'link', 'ol', 'ul']
 	)
 	
 	thank_you_text = RichTextField(
 		blank=True,
 		help_text="表单提交成功后显示的感谢文本",
-		features=['ai','bold', 'italic', 'link', 'ol', 'ul']
+		features=['bold', 'italic', 'link', 'ol', 'ul']
 	)
 	
 	feature_image = models.ForeignKey(
@@ -167,7 +167,7 @@ class FormPage(AbstractEmailForm):
 	confirmation_email_text = RichTextField(
 		blank=True,
 		help_text="确认邮件内容",
-		features=['ai','bold', 'italic', 'link']
+		features=['bold', 'italic', 'link']
 	)
 	
 	content_panels = AbstractEmailForm.content_panels + [

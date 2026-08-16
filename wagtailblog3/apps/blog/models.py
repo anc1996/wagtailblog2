@@ -23,7 +23,7 @@ from wagtail.admin.forms import WagtailAdminPageForm
 from wagtail.embeds.blocks import EmbedBlock
 from wagtail.models import Page, Orderable
 from wagtail.fields import StreamField, RichTextField
-from wagtail.admin.panels import FieldPanel, MultiFieldPanel, InlinePanel
+from wagtail.admin.panels import FieldPanel, HelpPanel, InlinePanel, MultiFieldPanel, TitleFieldPanel
 from wagtail.search import index
 from wagtail.images.models import Image, AbstractImage, AbstractRendition
 from wagtail.blocks import RichTextBlock, RawHTMLBlock
@@ -31,8 +31,6 @@ from wagtail.images.blocks import ImageChooserBlock
 from wagtail.documents.blocks import DocumentChooserBlock
 from wagtail.snippets.models import register_snippet
 from wagtail.blocks.stream_block import StreamValue
-from wagtail_ai.panels import AITitleFieldPanel, AIDescriptionFieldPanel, AIFieldPanel
-
 from blog.page_view_counter import PageViewCounter
 from blog.blocks import (
 	AudioBlock,
@@ -275,11 +273,6 @@ class BlogIndexPage(Page):
 	class Meta:
 		verbose_name = "博客索引页"
 		verbose_name_plural = "博客索引页"
-
-
-# 定义标签相关的 AI 提示词常量。
-PROMPT_TITLE = "极客标题生成"
-PROMPT_INTRO = "SEO描述生成"
 
 
 class BlogPageForm(WagtailAdminPageForm):
@@ -554,18 +547,32 @@ class BlogPage(Page):
 	]
 	
 	content_panels = [
+		HelpPanel(
+			mark_safe(
+				'<section id="blog-ai-metadata" class="help-block">'
+				'<p>点击生成会将当前未保存正文发送到测试环境配置的外部 AI 服务。生成结果不会自动保存或发布。</p>'
+				'<label for="blog-ai-template">提示词模板</label>'
+				'<select id="blog-ai-template" data-template-select disabled>'
+				'<option value="">正在加载可用提示词...</option>'
+				'</select>'
+				'<button type="button" class="button button-secondary" data-action="generate">生成元数据建议</button>'
+				'<div data-status role="status" aria-live="polite"></div>'
+				'<div data-preview hidden></div>'
+				'</section>'
+			)
+		),
 		# 1. 标题
-		AITitleFieldPanel('title'),
+		TitleFieldPanel('title', apply_if_live=True),
 		# 2. 组合信息
 		MultiFieldPanel([
 			FieldPanel('date'),
-			AIFieldPanel("tags"),
+			FieldPanel("tags"),
 			FieldPanel("authors", widget=forms.CheckboxSelectMultiple),
 			FieldPanel('categories', widget=forms.CheckboxSelectMultiple),
 		], heading="博客信息"),
 		
 		# 3. 简介及其他字段
-		AIDescriptionFieldPanel('intro'),
+		FieldPanel('intro'),
 		FieldPanel('featured_image'),
 		FieldPanel('body'),
 		InlinePanel('gallery_images', label="Gallery images"),
@@ -574,9 +581,8 @@ class BlogPage(Page):
 	promote_panels = [
 		MultiFieldPanel([
 			FieldPanel('slug'),
-			# SEO 标题和描述同样强绑定
-			AIFieldPanel('seo_title'),
-			AIFieldPanel('search_description'),
+			FieldPanel('seo_title'),
+			FieldPanel('search_description'),
 		], heading="For Search Engines"),
 		
 		MultiFieldPanel([

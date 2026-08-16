@@ -80,10 +80,11 @@ systemd unit、端口、Celery 队列或定时任务。测试环境可在 `.env.
 `AI_METADATA_MODEL` 和可选的 `AI_METADATA_REASONING_EFFORT`；
 `AI_METADATA_RESPONSE_STORAGE` 必须保持 `false`，应用会拒绝在其为 `true` 时启动请求。
 
-生产环境默认不配置这些变量，也不得为调试加载 `.env.production` 或使用 `runserver`。
-如需生产启用，属于受保护正文向外部服务传输和生产环境配置变更，必须单独说明 provider、
-数据范围、`store=false` 证据、超时/失败行为、回滚方式，并获得授权后才可修改
-`.env.production` 和重启 `wagtailblog3.service`；Worker、Beat、Filebeat 和 Nginx 不受影响。
+生产环境在未获得授权时默认不配置这些变量，也不得为调试加载 `.env.production` 或使用
+`runserver`。本次已获授权启用生产元数据生成：变量写入生产 `.env.production`，由
+`wagtailblog3.service` 读取；Worker、Beat、Filebeat 和 Nginx 不受影响。后续变更仍属于受保护
+正文向外部服务传输和生产环境配置变更，必须单独说明 provider、数据范围、`store=false` 证据、
+超时/失败行为、回滚方式，并获得授权后才可修改环境文件和重启服务。
 
 ### 搜索高亮回滚开关
 

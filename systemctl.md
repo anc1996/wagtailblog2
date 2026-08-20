@@ -23,8 +23,8 @@ uWSGI 的 6051 是仅供本机诊断的 HTTP 端口，不作为对外入口。
 | 服务 | 职责 | 是否开机启动 |
 | --- | --- | --- |
 | `wagtailblog3.service` | uWSGI / Django 网站 | 是 |
-| `wagtailblog3-celery-maintenance.service` | 日志索引同步和维护队列；可执行博客分析明细清理、Markdown 导入媒体精确补偿；内容搜索 Delivery 的租约消费与重试 | 是 |
-| `wagtailblog3-celery-beat.service` | 补偿日志索引 outbox、内容搜索 pending/过期租约 Delivery，每日调度博客分析明细清理，并每 60 秒投递到期的 Markdown 导入媒体 cleanup retry | 是 |
+| `wagtailblog3-celery-maintenance.service` | 日志索引同步和维护队列；执行 Markdown 导入会话组装、媒体精确补偿和 cleanup retry，以及内容搜索 Delivery 的租约消费与重试 | 是 |
+| `wagtailblog3-celery-beat.service` | 补偿日志索引 outbox、内容搜索 pending/过期租约 Delivery，每日调度博客分析明细清理；定时投递过期 Markdown 导入会话和媒体 cleanup retry | 是 |
 | `wagtailblog3-filebeat.service` | 采集项目日志并写入 Elasticsearch | 是 |
 
 ## 分支与环境配置
@@ -436,6 +436,30 @@ systemctl start wagtailblog3-celery-maintenance.service
 systemctl start wagtailblog3-celery-beat.service
 systemctl start wagtailblog3-filebeat.service
 ```
+
+### Markdown 导入客户端启动确认
+
+Windows 客户端 `markdown-importer.exe` 向生产网站上传时，网站、maintenance Worker 和 Beat
+必须同时运行；否则媒体虽然可能上传完成，但草稿组装或会话过期补偿会无人处理。生产服务器已将这四个
+项目服务设为 `enabled`，并且 maintenance Worker 使用 `Restart=always`。服务器正常开机后，先按上节
+顺序启动或确认服务，再执行以下命令：
+
+```bash
+systemctl is-active \
+  wagtailblog3.service \
+  wagtailblog3-celery-maintenance.service \
+  wagtailblog3-celery-beat.service \
+  wagtailblog3-filebeat.service
+
+/root/anaconda3/envs/wagtailblog/bin/python -m celery -A wagtailblog3 \
+  inspect registered -d maintenance@ziliao --timeout=10
+```
+
+四个状态都应为 `active`；第二条命令的输出必须包含
+`blog.tasks.assemble_markdown_import_session`、`blog.tasks.expire_markdown_import_sessions`、
+`blog.tasks.cleanup_markdown_import_artifact` 和
+`blog.tasks.dispatch_markdown_import_cleanup_retries`。满足后，客户端才可使用生产地址
+`http://192.168.20.2:6050/zh-hans` 和生产后台创建的 `mdimp_...` Token 导入未发布草稿。
 
 Nginx 只有在自身未运行或配置发生变化时才启动或重载：
 

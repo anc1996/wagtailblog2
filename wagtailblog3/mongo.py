@@ -227,9 +227,10 @@ class MongoManager:
 		# 🚨 修复点：PyMongo 强制要求使用 is None
 		if not pointer_id or self.blog_revisions is None:
 			return False
-		
+
 		try:
-			result = self.blog_revisions.delete_one({'_id': pointer_id})
+			mongo_id = pointer_id if isinstance(pointer_id, ObjectId) else ObjectId(str(pointer_id))
+			result = self.blog_revisions.delete_one({'_id': mongo_id})
 			return result.deleted_count > 0
 		except Exception as e:
 			logger.error(f"MongoDB删除单条快照错误: {e}", exc_info=True)

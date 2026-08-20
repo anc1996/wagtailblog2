@@ -1,5 +1,5 @@
 # 博客应用的页面、媒体和统计模型
-import logging,uuid,json,re,time
+import logging,uuid,json,re,time,hashlib,secrets
 
 from django.db.models.functions import Coalesce, Lower
 from django.utils import timezone
@@ -731,6 +731,7 @@ class BlogPage(Page):
 		started_at = time.monotonic()
 		is_new = self.pk is None
 		update_fields = kwargs.get('update_fields')
+		draft_only = bool(getattr(self, '_markdown_import_draft_only', False))
 		
 		# update_fields 不含 body 时视为元数据更新，避免把不完整的表单正文覆盖到正式 Mongo 内容。
 		is_draft_metadata_update = update_fields is not None and 'body' not in update_fields
@@ -742,7 +743,7 @@ class BlogPage(Page):
 			list(update_fields) if update_fields is not None else None,
 		)
 		
-		if not is_draft_metadata_update:
+		if not is_draft_metadata_update and not draft_only:
 			# 全量保存才写入正式集合；草稿正文已经由 serializable_data 保存到历史集合。
 			temp_body_raw = self.body.raw_data if hasattr(self.body, 'raw_data') else None
 			if temp_body_raw is None and self.body:
@@ -786,7 +787,7 @@ class BlogPage(Page):
 		)
 		
 		# 新页面先完成 MySQL 自增主键，再把 page_id 回填到 Mongo 正式文档。
-		if is_new and self.pk and not is_draft_metadata_update:
+		if is_new and self.pk and not is_draft_metadata_update and not draft_only:
 			type(self).objects.filter(pk=self.pk).update(mongo_content_id=self.mongo_content_id)
 			try:
 				mongo_manager = MongoManager()
@@ -1483,3 +1484,229 @@ class Author(models.Model):
 	class Meta:
 		verbose_name = '作者'
 		verbose_name_plural = '作者列表'
+
+
+class MarkdownImportBatchStatus(models.TextChoices):
+	PENDING = 'pending', '待处理'
+	PROCESSING = 'processing', '处理中'
+	SUCCESS = 'success', '成功'
+	PARTIAL_SUCCESS = 'partial_success', '部分成功'
+	FAILED = 'failed', '失败'
+	CLEANUP_RETRY = 'cleanup_retry', '等待补偿清理'
+
+
+class MarkdownImportSessionStatus(models.TextChoices):
+	CREATED = 'created', '已创建'
+	UPLOADING = 'uploading', '上传中'
+	READY = 'ready', '待组装'
+	ASSEMBLING = 'assembling', '组装中'
+	SUCCESS = 'success', '成功'
+	PARTIAL_SUCCESS = 'partial_success', '部分成功'
+	FAILED = 'failed', '失败'
+	EXPIRED = 'expired', '已过期'
+
+
+class MarkdownImportArtifactStatus(models.TextChoices):
+	PENDING = 'pending', '待处理'
+	PROCESSING = 'processing', '处理中'
+	SUCCEEDED = 'succeeded', '成功'
+	FAILED_MISSING = 'failed_missing', '失败并插入缺失标记'
+
+
+class MarkdownImportArtifactCleanupStatus(models.TextChoices):
+	NONE = 'none', '无需清理'
+	PENDING = 'pending', '等待清理'
+	RETRY = 'retry', '清理重试'
+	CLEANED = 'cleaned', '已清理'
+
+
+class MarkdownImportBatch(models.Model):
+	"""保存一次导入的幂等归属与补偿边界，不复制文章正文。"""
+
+	batch_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+	user = models.ForeignKey(
+		settings.AUTH_USER_MODEL,
+		on_delete=models.PROTECT,
+		related_name='markdown_import_batches',
+	)
+	idempotency_key = models.UUIDField()
+	request_fingerprint = models.CharField(max_length=64)
+	status = models.CharField(
+		max_length=24,
+		choices=MarkdownImportBatchStatus.choices,
+		default=MarkdownImportBatchStatus.PENDING,
+	)
+	target_parent = models.ForeignKey(
+		'wagtailcore.Page',
+		on_delete=models.PROTECT,
+		related_name='markdown_import_batches',
+	)
+	result_page = models.ForeignKey(
+		'wagtailcore.Page',
+		null=True,
+		blank=True,
+		on_delete=models.SET_NULL,
+		related_name='+',
+	)
+	result_revision_id = models.PositiveBigIntegerField(null=True, blank=True)
+	mongo_content_id = models.CharField(max_length=64, blank=True, default='')
+	test_run_id = models.UUIDField(null=True, blank=True)
+	error_code = models.CharField(max_length=64, blank=True, default='')
+	# 错误信息只能保存脱敏且截断后的诊断，不能写正文、凭据或本地绝对路径。
+	error_message = models.TextField(max_length=2000, blank=True, default='')
+	created_at = models.DateTimeField(auto_now_add=True)
+	updated_at = models.DateTimeField(auto_now=True)
+	completed_at = models.DateTimeField(null=True, blank=True)
+
+	class Meta:
+		verbose_name = 'Markdown 导入批次'
+		verbose_name_plural = 'Markdown 导入批次'
+		indexes = [
+			models.Index(
+				fields=('status', 'updated_at'),
+				name='blog_md_batch_stat_upd_idx',
+			),
+		]
+		constraints = [
+			models.UniqueConstraint(
+				fields=('user', 'idempotency_key'),
+				name='blog_md_import_user_key_uq',
+			),
+		]
+
+
+class MarkdownImportToken(models.Model):
+	"""保存客户端导入密钥的哈希；明文只在创建后的后台提示中出现一次。"""
+
+	name = models.CharField(max_length=120)
+	user = models.ForeignKey(
+		settings.AUTH_USER_MODEL,
+		on_delete=models.CASCADE,
+		related_name='markdown_import_tokens',
+	)
+	token_prefix = models.CharField(max_length=24, editable=False)
+	token_hash = models.CharField(max_length=64, unique=True, editable=False)
+	scopes = models.JSONField(default=list)
+	expires_at = models.DateTimeField(
+		null=True,
+		blank=True,
+		help_text='可选；填写 YYYY-MM-DD HH:MM，留空表示不过期。',
+	)
+	revoked_at = models.DateTimeField(null=True, blank=True)
+	last_used_at = models.DateTimeField(null=True, blank=True)
+	created_at = models.DateTimeField(auto_now_add=True)
+
+	class Meta:
+		verbose_name = 'Markdown 导入 Token'
+		verbose_name_plural = 'Markdown 导入 Token'
+		ordering = ('-created_at',)
+
+	def issue_plaintext(self):
+		value = 'mdimp_' + secrets.token_urlsafe(32)
+		self.token_prefix = value[:16]
+		self.token_hash = hashlib.sha256(value.encode('utf-8')).hexdigest()
+		return value
+
+	def is_valid(self):
+		return not self.revoked_at and (self.expires_at is None or self.expires_at > timezone.now())
+
+
+class MarkdownImportSession(models.Model):
+	"""保存大批量导入会话的清单与恢复状态，正文只保留在受控 JSON 字段。"""
+
+	session_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+	batch = models.OneToOneField(
+		MarkdownImportBatch,
+		on_delete=models.CASCADE,
+		related_name='upload_session',
+	)
+	manifest = models.JSONField()
+	status = models.CharField(
+		max_length=24,
+		choices=MarkdownImportSessionStatus.choices,
+		default=MarkdownImportSessionStatus.CREATED,
+	)
+	total_artifacts = models.PositiveIntegerField(default=0)
+	total_bytes = models.BigIntegerField(default=0)
+	completed_artifacts = models.PositiveIntegerField(default=0)
+	expires_at = models.DateTimeField()
+	assembly_requested_at = models.DateTimeField(null=True, blank=True)
+	created_at = models.DateTimeField(auto_now_add=True)
+	updated_at = models.DateTimeField(auto_now=True)
+
+	class Meta:
+		verbose_name = 'Markdown 大批量导入会话'
+		verbose_name_plural = 'Markdown 大批量导入会话'
+		indexes = [
+			models.Index(
+				fields=('status', 'expires_at'),
+				name='blog_md_session_stat_exp_idx',
+			),
+		]
+
+
+class MarkdownImportArtifact(models.Model):
+	"""记录单个媒体的精确对象证据，补偿时禁止按前缀扫描删除。"""
+
+	artifact_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+	batch = models.ForeignKey(
+		MarkdownImportBatch,
+		on_delete=models.CASCADE,
+		related_name='artifacts',
+	)
+	session = models.ForeignKey(
+		MarkdownImportSession,
+		null=True,
+		blank=True,
+		on_delete=models.CASCADE,
+		related_name='artifacts',
+	)
+	position = models.PositiveIntegerField()
+	media_type = models.CharField(max_length=16)
+	source_kind = models.CharField(max_length=24)
+	normalized_source = models.CharField(max_length=2048)
+	# MySQL utf8mb4 无法为 2048 字符来源直接建立唯一索引，使用摘要约束而保留完整来源证据。
+	normalized_source_hash = models.CharField(max_length=64)
+	safe_filename = models.CharField(max_length=255)
+	status = models.CharField(
+		max_length=24,
+		choices=MarkdownImportArtifactStatus.choices,
+		default=MarkdownImportArtifactStatus.PENDING,
+	)
+	storage_alias = models.CharField(max_length=64, blank=True, default='')
+	object_name = models.CharField(max_length=1024, blank=True, default='')
+	sha256 = models.CharField(max_length=64, blank=True, default='')
+	media_model = models.CharField(max_length=100, blank=True, default='')
+	media_object_id = models.PositiveBigIntegerField(null=True, blank=True)
+	error_code = models.CharField(max_length=64, blank=True, default='')
+	cleanup_status = models.CharField(
+		max_length=16,
+		choices=MarkdownImportArtifactCleanupStatus.choices,
+		default=MarkdownImportArtifactCleanupStatus.NONE,
+	)
+	cleanup_error_code = models.CharField(max_length=64, blank=True, default='')
+	cleanup_attempts = models.PositiveIntegerField(default=0)
+	cleanup_next_attempt_at = models.DateTimeField(null=True, blank=True)
+	created_at = models.DateTimeField(auto_now_add=True)
+	updated_at = models.DateTimeField(auto_now=True)
+	uploaded_at = models.DateTimeField(null=True, blank=True)
+
+	class Meta:
+		verbose_name = 'Markdown 导入媒体'
+		verbose_name_plural = 'Markdown 导入媒体'
+		constraints = [
+			models.UniqueConstraint(
+				fields=('batch', 'source_kind', 'normalized_source_hash'),
+				name='blog_md_artifact_source_uq',
+			),
+		]
+		indexes = [
+			models.Index(
+				fields=('status', 'updated_at'),
+				name='blog_md_art_stat_upd_idx',
+			),
+			models.Index(
+				fields=('cleanup_status', 'updated_at'),
+				name='blog_md_art_clean_upd_idx',
+			),
+		]

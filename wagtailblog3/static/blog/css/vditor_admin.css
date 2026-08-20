@@ -44,6 +44,35 @@
     border-bottom: 1px solid var(--w-color-border-furniture, #d9d9d9);
 }
 
+/* Markdown 预览中的复杂表格在编辑器内保持完整列结构，并允许横向查看。 */
+.blog-vditor-field .vditor-reset .blog-markdown-table-scroll {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: visible;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-gutter: stable;
+}
+
+.blog-vditor-field .vditor-reset .blog-markdown-table-scroll > table {
+    width: max-content;
+    min-width: 100%;
+    max-width: none;
+    table-layout: auto;
+}
+
+.blog-vditor-field .vditor-reset .blog-markdown-table-scroll th,
+.blog-vditor-field .vditor-reset .blog-markdown-table-scroll td {
+    vertical-align: top;
+    overflow-wrap: anywhere;
+}
+
+.blog-vditor-field .vditor-reset .katex-display {
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+}
+
 /* Keep Vditor fullscreen inside Wagtail's main work area. */
 .blog-vditor-field .vditor.vditor--fullscreen {
     top: var(--blog-vditor-fullscreen-top, 0px) !important;

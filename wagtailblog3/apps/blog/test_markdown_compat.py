@@ -63,6 +63,9 @@ $$E = mc^2$$
 
         self.assertEqual(before, after)
 
+    def test_multipart_file_limit_covers_large_markdown_imports(self):
+        self.assertEqual(settings.DATA_UPLOAD_MAX_NUMBER_FILES, 256)
+
 
 class MermaidRendererCompatibilityTests(SimpleTestCase):
     """验证 Mermaid 渲染器标识兼容旧 Mongo 正文且不触发批量迁移。"""
@@ -221,6 +224,30 @@ class VditorWidgetCompatibilityTests(SimpleTestCase):
         self.assertIsInstance(block.field.widget, VditorMarkdownWidget)
         self.assertEqual(block.to_python(self.markdown), self.markdown)
 
+    def test_vditor_preview_wraps_wide_tables_for_keyboard_scrolling(self):
+        static_root = Path(settings.PROJECT_DIR) / "static"
+        script = (static_root / "blog" / "js" / "vditor_markdown.js").read_text(
+            encoding="utf-8"
+        )
+        stylesheet = (static_root / "blog" / "css" / "vditor_admin.css").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("blog-markdown-table-scroll", script)
+        self.assertIn('role", "region"', script)
+        self.assertIn("mathBlockPreview: true", script)
+        self.assertIn("transformTableMath", script)
+        self.assertIn('"code, pre, script, style, textarea, .language-math"', script)
+        self.assertIn("collectMarkdownTableImageSpecs", script)
+        self.assertIn("restoreMarkdownTableImages", script)
+        self.assertIn("encodeMarkdownTableImageEmbedsForEditor", script)
+        self.assertIn("decodeMarkdownTableImageEmbedsFromEditor", script)
+        self.assertIn("TABLE_IMAGE_EMBED_PATTERN", script)
+        self.assertIn("isSafePreviewImageSource", script)
+        self.assertIn("data-blog-inline-image-id", script)
+        self.assertIn("blog-markdown-table-scroll", stylesheet)
+        self.assertIn("overflow-x: auto", stylesheet)
+
     def test_blog_page_uses_vditor_block_for_markdown_key(self):
         block = BlogPage.body.field.stream_block.child_blocks["markdown_block"]
 
@@ -279,6 +306,30 @@ class MarkdownRendererCompatibilityTests(SimpleTestCase):
         self.assertIn("language-python", html)
         self.assertIn("arithmatex", html)
         self.assertIn("language-mermaid", html)
+
+    def test_complex_html_table_preserves_row_and_column_spans(self):
+        source = (
+            "<table><thead><tr>"
+            '<th rowspan="2">A</th><th colspan="2">B</th>'
+            "</tr><tr><th>C</th><th>D</th></tr></thead>"
+            "<tbody><tr><td rowspan=\"2\">x</td>"
+            '<td colspan="2">$$x^2$$</td></tr>'
+            "<tr><td>y</td><td>z</td></tr></tbody></table>"
+        )
+
+        html = MarkdownRenderer.render(source)
+
+        self.assertIn('rowspan="2"', html)
+        self.assertIn('colspan="2"', html)
+        self.assertIn("arithmatex", html)
+
+    def test_table_span_attributes_do_not_allow_event_handlers(self):
+        html = MarkdownRenderer.render(
+            '<table><tr><td rowspan="2" onclick="alert(1)">safe</td></tr></table>'
+        )
+
+        self.assertIn('rowspan="2"', html)
+        self.assertNotIn("onclick", html.lower())
 
     def test_output_is_sanitised(self):
         html = MarkdownRenderer.render(
@@ -371,6 +422,37 @@ class MarkdownRendererCompatibilityTests(SimpleTestCase):
                     "src": "/stale-image.jpg",
                     "width": "800",
                     "height": "450",
+                }
+            ]
+        )
+
+    @patch("blog.markdown_renderer.ImageEmbedHandler.expand_db_attributes_many")
+    def test_table_image_embed_keeps_structure_and_uses_current_rendition(
+        self, expand_images
+    ):
+        source = (
+            '<table><tr><td rowspan="2">'
+            '<embed embedtype="image" id="42" format="fullwidth_web" '
+            'alt="表格图" src="/original.jpg" />'
+            "</td></tr></table>"
+        )
+        expand_images.return_value = [
+            '<img src="/current-rendition.jpg" alt="表格图" class="richtext-image full-width">'
+        ]
+
+        html = MarkdownRenderer.render(source)
+
+        self.assertIn('rowspan="2"', html)
+        self.assertIn('src="/current-rendition.jpg"', html)
+        self.assertNotIn("/original.jpg", html)
+        expand_images.assert_called_once_with(
+            [
+                {
+                    "embedtype": "image",
+                    "id": "42",
+                    "format": "fullwidth_web",
+                    "alt": "表格图",
+                    "src": "/original.jpg",
                 }
             ]
         )

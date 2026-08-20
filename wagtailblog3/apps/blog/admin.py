@@ -2,9 +2,10 @@ from django.contrib import admin
 from django.db.models import Count
 from taggit.models import Tag
 from wagtail.permission_policies import ModelPermissionPolicy
-from wagtail.snippets.views.snippets import SnippetViewSet
+from wagtail.snippets.views.snippets import CreateView, SnippetViewSet
 from wagtail.admin.panels import FieldPanel
-from .models import PageView, PageViewCount, ReactionType, Reaction
+from wagtail.admin import messages
+from .models import PageView, PageViewCount, ReactionType, Reaction, MarkdownImportToken
 from wagtail.admin.ui.tables import Column
 
 @admin.register(PageView)
@@ -87,6 +88,45 @@ class TagsSnippetViewSet(SnippetViewSet):
         qs = self.model.objects.all()
         qs = qs.annotate(post_count=Count('blog_blogpagetag_items'))
         return qs
+
+
+class MarkdownImportTokenCreateView(CreateView):
+    """在片段创建成功后仅提示一次明文 Token，数据库始终只保留哈希。"""
+
+    def save_instance(self):
+        self.form.instance.user = self.request.user
+        self.form.instance.scopes = ["markdown_import"]
+        self.plaintext_token = self.form.instance.issue_plaintext()
+        return super().save_instance()
+
+    def save_action(self):
+        response = super().save_action()
+        if not self.expects_json_response:
+            messages.warning(
+                self.request,
+                f"Markdown 导入 Token 仅显示本次，请立即复制：{self.plaintext_token}",
+            )
+        return response
+
+
+class MarkdownImportTokenSnippetViewSet(SnippetViewSet):
+    model = MarkdownImportToken
+    icon = "key"
+    menu_label = "Markdown 导入 Token"
+    add_to_admin_menu = False
+    add_view_class = MarkdownImportTokenCreateView
+    ordering = ("-created_at",)
+    panels = [FieldPanel("name"), FieldPanel("expires_at")]
+    list_display = [
+        "name",
+        "token_prefix",
+        "expires_at",
+        "revoked_at",
+        "last_used_at",
+        "created_at",
+    ]
+    search_fields = ("name", "token_prefix")
+    list_filter = ("revoked_at", "expires_at")
 
 
 class ReadOnlyPageViewPermissionPolicy(ModelPermissionPolicy):

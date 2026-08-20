@@ -3,6 +3,7 @@
 import re
 from collections import defaultdict
 from copy import deepcopy
+from html.parser import HTMLParser
 
 import markdown
 import nh3
@@ -17,6 +18,67 @@ from wagtail.rich_text.pages import PageLinkHandler
 
 _WAGTAIL_PAGE_LINK_ID_RE = re.compile(r"^[1-9][0-9]{0,18}$")
 _WAGTAIL_IMAGE_ID_RE = re.compile(r"^[1-9][0-9]{0,18}$")
+_DISPLAY_MATH_RE = re.compile(r"(?<!\\)\$\$(.+?)(?<!\\)\$\$", re.DOTALL)
+_INLINE_MATH_RE = re.compile(
+    r"(?<![\\$])\$(?!\$)(.+?)(?<![\\$])\$(?!\$)",
+    re.DOTALL,
+)
+
+
+class _RawHtmlMathParser(HTMLParser):
+    """为原生 HTML 表格中的公式补充 KaTeX 自动渲染标记。"""
+
+    _ignored_tags = {"code", "pre", "script", "style", "textarea"}
+
+    def __init__(self):
+        super().__init__(convert_charrefs=False)
+        self.parts = []
+        self._ignored_depth = 0
+
+    def handle_starttag(self, tag, attrs):
+        self.parts.append(self.get_starttag_text())
+        if tag.lower() in self._ignored_tags:
+            self._ignored_depth += 1
+
+    def handle_startendtag(self, tag, attrs):
+        self.parts.append(self.get_starttag_text())
+
+    def handle_endtag(self, tag):
+        self.parts.append(f"</{tag}>")
+        if tag.lower() in self._ignored_tags and self._ignored_depth:
+            self._ignored_depth -= 1
+
+    def handle_data(self, data):
+        if self._ignored_depth or "$" not in data:
+            self.parts.append(data)
+            return
+
+        def display_replacement(match):
+            return '<span class="arithmatex">\\[' + match.group(1).strip() + "\\]</span>"
+
+        data = _DISPLAY_MATH_RE.sub(display_replacement, data)
+        data = _INLINE_MATH_RE.sub(
+            lambda match: '<span class="arithmatex">\\('
+            + match.group(1).strip()
+            + "\\)</span>",
+            data,
+        )
+        self.parts.append(data)
+
+    def handle_entityref(self, name):
+        self.parts.append(f"&{name};")
+
+    def handle_charref(self, name):
+        self.parts.append(f"&#{name};")
+
+    def handle_comment(self, data):
+        self.parts.append(f"<!--{data}-->")
+
+    def handle_decl(self, decl):
+        self.parts.append(f"<!{decl}>")
+
+    def render(self):
+        return "".join(self.parts)
 
 
 class _PageLinkRewriter(LinkRewriter):
@@ -82,7 +144,16 @@ class MarkdownRenderer:
         "pre": {"class"},
         "div": {"class", "id"},
         "span": {"class", "id", "style"},
-        "table": {"class"},
+        # 保留 HTML 表格的合并单元格语义，否则 rowspan/colspan 被清理后会导致列错位。
+        "table": {"class", "role", "aria-label"},
+        "thead": {"class"},
+        "tbody": {"class"},
+        "tfoot": {"class"},
+        "tr": {"class"},
+        "th": {"class", "rowspan", "colspan", "scope", "headers"},
+        "td": {"class", "rowspan", "colspan", "headers"},
+        "colgroup": {"class", "span"},
+        "col": {"class", "span"},
     } # 元素
     
     _default_styles = {
@@ -192,6 +263,15 @@ class MarkdownRenderer:
         return _ImageEmbedRewriter()(html)
 
     @classmethod
+    def expand_raw_html_math(cls, html):
+        # Python-Markdown 不会进入原生 HTML 的文本节点，复杂表格中的公式需要在
+        # 清理前补充与 arithmatex 相同的 KaTeX 分隔符；代码节点保持原样。
+        parser = _RawHtmlMathParser()
+        parser.feed(html)
+        parser.close()
+        return parser.render()
+
+    @classmethod
     def render(cls, source, context=None):
         # 保留 Wagtail 块渲染签名，但渲染规则只依赖正文和全局配置。
         del context
@@ -202,4 +282,5 @@ class MarkdownRenderer:
         )
         rendered = cls.expand_wagtail_page_links(rendered)
         rendered = cls.expand_wagtail_image_embeds(rendered)
+        rendered = cls.expand_raw_html_math(rendered)
         return mark_safe(nh3.clean(rendered, **cls.nh3_kwargs()))

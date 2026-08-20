@@ -175,6 +175,13 @@ def get_celery_config(time_zone, redis_host, redis_port, redis_password):
 	返回值:
 		dict: 包含所有 Celery 配置项的字典，可直接用于更新 Django settings
 	"""
+	# 测试环境可通过独立队列隔离不同代码版本的 Worker；生产默认值保持兼容。
+	maintenance_queue = os.environ.get('CELERY_MAINTENANCE_QUEUE', 'maintenance').strip() or 'maintenance'
+	try:
+		broker_db = int(os.environ.get('CELERY_BROKER_DB', '2'))
+		result_db = int(os.environ.get('CELERY_RESULT_DB', '3'))
+	except ValueError:
+		broker_db, result_db = 2, 3
 	return {
 		# --------------------------------------------------
 		# 基础时区配置
@@ -190,12 +197,12 @@ def get_celery_config(time_zone, redis_host, redis_port, redis_password):
 		# --------------------------------------------------
 		# 消息代理和结果后端配置
 		# --------------------------------------------------
-		'CELERY_BROKER_URL': f'redis://:{redis_password}@{redis_host}:{redis_port}/2',
+		'CELERY_BROKER_URL': f'redis://:{redis_password}@{redis_host}:{redis_port}/{broker_db}',
 		# 消息代理地址，用于存储待执行的任务
 		# 格式：redis://[:password]@host:port/db_number
 		# 这里使用 Redis DB 2 作为消息队列存储
 		
-		'CELERY_RESULT_BACKEND': f'redis://:{redis_password}@{redis_host}:{redis_port}/3',
+		'CELERY_RESULT_BACKEND': f'redis://:{redis_password}@{redis_host}:{redis_port}/{result_db}',
 		# 任务结果存储后端，用于保存任务执行结果
 		# 这里使用 Redis DB 3 专门存储任务执行结果
 		# 将消息代理和结果后端分开使用不同的 DB，提高性能和数据隔离性
@@ -255,11 +262,15 @@ def get_celery_config(time_zone, redis_host, redis_port, redis_password):
 			'base.tasks.send_bulk_email': {'queue': 'email'},
 			# 批量邮件发送任务 → email 队列
 			
-			'base.tasks.cleanup_email_logs': {'queue': 'maintenance'},
-			'blog.tasks.cleanup_analytics_details': {'queue': 'maintenance'},
-			'search.tasks.wake_content_search_delivery': {'queue': 'maintenance'},
-			'search.tasks.consume_content_search_delivery': {'queue': 'maintenance'},
-			'search.tasks.dispatch_pending_content_search_deliveries': {'queue': 'maintenance'},
+			'base.tasks.cleanup_email_logs': {'queue': maintenance_queue},
+			'blog.tasks.cleanup_analytics_details': {'queue': maintenance_queue},
+			'blog.tasks.cleanup_markdown_import_artifact': {'queue': maintenance_queue},
+			'blog.tasks.dispatch_markdown_import_cleanup_retries': {'queue': maintenance_queue},
+			'blog.tasks.assemble_markdown_import_session': {'queue': maintenance_queue},
+			'blog.tasks.expire_markdown_import_sessions': {'queue': maintenance_queue},
+			'search.tasks.wake_content_search_delivery': {'queue': maintenance_queue},
+			'search.tasks.consume_content_search_delivery': {'queue': maintenance_queue},
+			'search.tasks.dispatch_pending_content_search_deliveries': {'queue': maintenance_queue},
 			# 邮件日志清理任务 → maintenance 队列
 			# 维护类任务使用独立队列，避免影响业务任务
 		},
@@ -288,10 +299,10 @@ def get_celery_config(time_zone, redis_host, redis_port, redis_password):
 			# 邮件队列：专门处理邮件发送任务
 			# 可以为此队列配置专门的 Worker，优化邮件发送性能
 			
-			'maintenance': {
-				'exchange': 'maintenance',
+			maintenance_queue: {
+				'exchange': maintenance_queue,
 				'exchange_type': 'direct',
-				'routing_key': 'maintenance',
+				'routing_key': maintenance_queue,
 			},
 			# 维护队列：处理数据清理、定期维护等低优先级任务
 			# 建议在系统空闲时段处理这类任务
@@ -382,24 +393,34 @@ def get_celery_config(time_zone, redis_host, redis_port, redis_password):
 				# 可以使用 crontab 对象实现更复杂的调度
 				# 例如：crontab(hour=2, minute=0) 表示每天凌晨 2 点执行
 				
-				'options': {'queue': 'maintenance'}
+				'options': {'queue': maintenance_queue}
 				# 任务选项：指定使用 maintenance 队列
 				# 维护任务在低优先级队列执行，不影响核心业务
 			},
 			'dispatch-pending-log-index-sync': {
 				'task': 'observability.tasks.dispatch_pending_log_index_sync_jobs',
 				'schedule': 30,
-				'options': {'queue': 'maintenance'},
+				'options': {'queue': maintenance_queue},
 			},
 			'dispatch-pending-content-search-deliveries': {
 				'task': 'search.tasks.dispatch_pending_content_search_deliveries',
 				'schedule': 30,
-				'options': {'queue': 'maintenance'},
+				'options': {'queue': maintenance_queue},
 			},
 			'cleanup-blog-analytics-details': {
 				'task': 'blog.tasks.cleanup_analytics_details',
 				'schedule': 60 * 60 * 24,
-				'options': {'queue': 'maintenance'},
+				'options': {'queue': maintenance_queue},
+			},
+			'dispatch-markdown-import-cleanup-retries': {
+				'task': 'blog.tasks.dispatch_markdown_import_cleanup_retries',
+				'schedule': 60,
+				'options': {'queue': maintenance_queue},
+			},
+			'expire-markdown-import-sessions': {
+				'task': 'blog.tasks.expire_markdown_import_sessions',
+				'schedule': 300,
+				'options': {'queue': maintenance_queue},
 			},
 			
 			# 可以在这里添加更多定时任务

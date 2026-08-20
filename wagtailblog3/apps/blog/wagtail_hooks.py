@@ -8,6 +8,7 @@ from django.templatetags.static import static
 from django.utils.html import format_html
 from django.db.models import Sum
 from django.shortcuts import render, get_object_or_404
+from django.shortcuts import redirect
 from django.core.exceptions import PermissionDenied
 from django.http import HttpResponse
 from django.core.paginator import Paginator
@@ -25,7 +26,11 @@ from wagtail.admin.rich_text.editors.draftail import features as draftail_featur
 from wagtail.admin.rich_text.converters.html_to_contentstate import InlineStyleElementHandler
 from wagtail.snippets.models import register_snippet
 
-from .admin import PageViewSnippetViewSet, TagsSnippetViewSet
+from .admin import (
+	MarkdownImportTokenSnippetViewSet,
+	PageViewSnippetViewSet,
+	TagsSnippetViewSet,
+)
 from .models import PageViewCount
 from .services.content_analytics import ContentAnalyticsFilters, ContentAnalyticsQueryService
 from .admin_image_upload import upload_vditor_image
@@ -358,3 +363,4 @@ def register_underline_feature(features):
 # 注册这个视图集，生成管理 UI
 register_snippet(TagsSnippetViewSet)
 register_snippet(PageViewSnippetViewSet)
+register_snippet(MarkdownImportTokenSnippetViewSet)

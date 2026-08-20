@@ -48,9 +48,16 @@ $(function() {
     function beautifyTables() {
         try {
             $('.content-block-wrapper[data-block-type="markdown_block"] table:not([class])').each(function() {
-                $(this)
+                var table = $(this);
+                var wrapper = table
                     .addClass('table table-bordered table-hover')
-                    .wrap('<div class="table-responsive"></div>');
+                    .wrap('<div class="table-responsive"></div>')
+                    .parent();
+                wrapper.attr({
+                    role: 'region',
+                    tabindex: '0',
+                    'aria-label': '可横向滚动的 Markdown 表格'
+                });
             });
             console.log("✅ 表格美化完成");
         } catch (e) {

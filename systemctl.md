@@ -23,8 +23,8 @@ uWSGI 的 6051 是仅供本机诊断的 HTTP 端口，不作为对外入口。
 | 服务 | 职责 | 是否开机启动 |
 | --- | --- | --- |
 | `wagtailblog3.service` | uWSGI / Django 网站 | 是 |
-| `wagtailblog3-celery-maintenance.service` | 日志索引同步和维护队列；可执行博客分析明细清理；内容搜索 Delivery 的租约消费与重试 | 是 |
-| `wagtailblog3-celery-beat.service` | 补偿日志索引 outbox、内容搜索 pending/过期租约 Delivery，并每日调度博客分析明细清理检查 | 是 |
+| `wagtailblog3-celery-maintenance.service` | 日志索引同步和维护队列；可执行博客分析明细清理、Markdown 导入媒体精确补偿；内容搜索 Delivery 的租约消费与重试 | 是 |
+| `wagtailblog3-celery-beat.service` | 补偿日志索引 outbox、内容搜索 pending/过期租约 Delivery，每日调度博客分析明细清理，并每 60 秒投递到期的 Markdown 导入媒体 cleanup retry | 是 |
 | `wagtailblog3-filebeat.service` | 采集项目日志并写入 Elasticsearch | 是 |
 
 ## 分支与环境配置
@@ -310,14 +310,18 @@ export WAGTAILBLOG_ENV=test
 python manage.py check
 ```
 
-启动测试网站：
+启动测试网站和 Markdown 导入维护 Worker：
 
 ```bash
-python manage.py runserver 0.0.0.0:8000
+cd /mnt/f/openclaw/workspace/wagtail/wagtailblog2
+bash tools/start_test_stack.sh
 ```
 
-浏览器访问 `http://127.0.0.1:8000/`，后台登录页为
-`http://127.0.0.1:8000/admin/login/`。若 8000 已被占用，先定位占用进程，不要通过
+脚本会同时启动测试网站 `0.0.0.0:8080` 和只监听
+`markdown-test-maintenance` 的 Worker，并统一使用测试环境队列参数。浏览器访问
+`http://192.168.20.5:8080/`，后台登录页为
+`http://192.168.20.5:8080/admin/login/`。以后测试项目必须使用上述脚本，不要只执行
+`python manage.py runserver`，否则组装任务可能进入无人消费的默认队列。若 8080 已被占用，先定位占用进程，不要通过
 反复启动制造多个测试实例。
 
 需要验证异步维护任务时，在第二个终端完成公共准备步骤后启动只监听
@@ -512,6 +516,21 @@ Celery Beat 状态文件位于：
 
 如果宿主机异常断电后 Beat 无法启动，先停止 Beat，再将损坏的 schedule 文件
 改名留存，最后重新启动 Beat；不要直接删除日志或数据库数据。
+
+### Markdown 导入媒体补偿
+
+Markdown 导入不会新增 systemd unit 或 Worker，复用现有 `maintenance` 队列：
+
+- `blog.tasks.cleanup_markdown_import_artifact(artifact_id)` 只接受明确的 artifact UUID；任务从 `MarkdownImportArtifact` 读取已记录的 storage alias、object name、模型标签和模型 ID，调用精确 cleanup，不按前缀或存储桶扫描。
+- `blog.tasks.dispatch_markdown_import_cleanup_retries()` 由 Beat 每 60 秒调用，只查询 `cleanup_status=retry`、`cleanup_attempts` 未达到上限且 `cleanup_next_attempt_at` 已到期（初次没有时间戳也允许投递）的审计行，然后逐个投递 UUID 到 `maintenance` 队列。
+- cleanup 成功将状态置为 `cleaned`；对象或模型已不存在视为幂等成功。引用保护、storage 不可用、删除异常会保留 `retry`、错误码、尝试次数和下一次退避时间；达到上限后不再自动投递，审计行保留供人工核查。
+- 大批量会话导入复用同一 Worker：`blog.tasks.assemble_markdown_import_session(session_id)` 只处理已完成上传的会话，并可重复投递；`blog.tasks.expire_markdown_import_sessions()` 每 300 秒标记过期会话，再仅按已记录的 artifact UUID 投递精确 cleanup。两者都不扫描 bucket，不创建或发布页面以外的内容。
+- 测试环境不得与生产共用该队列：测试通过 `CELERY_MAINTENANCE_QUEUE=markdown-test-maintenance`、`CELERY_BROKER_DB=12`、`CELERY_RESULT_DB=13` 启动独立 Worker；生产 `.env.production` 不设置这些覆盖项，继续使用 `maintenance`、DB 2/3。不同代码版本的 Worker 禁止混消费同一 Celery 队列。
+- WSL2 测试启动必须同时启动网站和上述独立 Worker：在仓库根目录执行 `bash tools/start_test_stack.sh`。脚本使用 `output/test-runserver-8080.pid` 和 `output/test-worker-markdown.pid` 管理本次测试进程，网站和 Worker 始终共享同一队列环境变量；不要只执行 `manage.py runserver`。
+- 部署该功能时必须同时确认 maintenance Worker 已注册这两个任务、Beat 已出现 `expire-markdown-import-sessions`，并在 MySQL、MongoDB、MinIO 和 Redis 可用后再重启 Django、maintenance Worker、Beat。会话迁移、生产限额、MinIO 分片生命周期规则和队列并发均需另行授权。
+- 任务依赖 MySQL、配置的对象存储和已有 Wagtail 媒体模型；不读取文章正文，不删除 MongoDB 正文或 revision，不创建页面，不发布内容。
+
+发布包含上述任务或 Beat 路由的代码时，必须按“基础设施 → `wagtailblog3.service` → maintenance Worker → Beat”顺序重启并执行健康检查；本地测试不重启生产服务。回滚到上一个已验证 commit 后，同样恢复这三个受影响服务，已存在的 cleanup retry 审计行不得通过删除数据库记录来掩盖。
 
 ### 内容搜索同步运维
 

@@ -26,6 +26,326 @@
         };
     }
 
+    function isEscaped(text, index) {
+        var slashCount = 0;
+        for (var cursor = index - 1; cursor >= 0 && text[cursor] === "\\"; cursor -= 1) {
+            slashCount += 1;
+        }
+        return slashCount % 2 === 1;
+    }
+
+    function nextMathMarker(text, start) {
+        for (var index = start; index < text.length; index += 1) {
+            if (text[index] !== "$" || isEscaped(text, index)) {
+                continue;
+            }
+            if (text[index + 1] === "$") {
+                return { index: index, display: true };
+            }
+            if (text[index - 1] !== "$" && text[index + 1] !== "$") {
+                return { index: index, display: false };
+            }
+        }
+        return null;
+    }
+
+    function closingMathMarker(text, start, display) {
+        var markerLength = display ? 2 : 1;
+        for (var index = start + markerLength; index < text.length; index += 1) {
+            if (text[index] !== "$" || isEscaped(text, index)) {
+                continue;
+            }
+            if (display) {
+                if (text[index + 1] === "$") {
+                    return index;
+                }
+            } else if (text[index - 1] !== "$" && text[index + 1] !== "$") {
+                return index;
+            }
+        }
+        return -1;
+    }
+
+    function createMathFragment(text, document) {
+        var fragment = document.createDocumentFragment();
+        var cursor = 0;
+        var changed = false;
+
+        while (cursor < text.length) {
+            var marker = nextMathMarker(text, cursor);
+            if (!marker) {
+                fragment.appendChild(document.createTextNode(text.slice(cursor)));
+                break;
+            }
+
+            if (marker.index > cursor) {
+                fragment.appendChild(
+                    document.createTextNode(text.slice(cursor, marker.index))
+                );
+            }
+            var close = closingMathMarker(text, marker.index, marker.display);
+            if (close < 0) {
+                fragment.appendChild(document.createTextNode(text.slice(marker.index)));
+                break;
+            }
+
+            var markerLength = marker.display ? 2 : 1;
+            var formula = text.slice(marker.index + markerLength, close).trim();
+            if (!formula) {
+                fragment.appendChild(
+                    document.createTextNode(text.slice(marker.index, close + markerLength))
+                );
+            } else {
+                var math = document.createElement(marker.display ? "div" : "span");
+                math.className = "language-math";
+                math.textContent = formula;
+                fragment.appendChild(math);
+                changed = true;
+            }
+            cursor = close + markerLength;
+        }
+
+        return changed ? fragment : null;
+    }
+
+    function transformTableMath(table, document) {
+        var walker = document.createTreeWalker(table, NodeFilter.SHOW_TEXT);
+        var textNodes = [];
+        var node;
+        while ((node = walker.nextNode())) {
+            var parent = node.parentElement;
+            if (
+                parent &&
+                !parent.closest("code, pre, script, style, textarea, .language-math")
+            ) {
+                textNodes.push(node);
+            }
+        }
+        textNodes.forEach(function (textNode) {
+            var fragment = createMathFragment(textNode.nodeValue || "", document);
+            if (fragment) {
+                textNode.replaceWith(fragment);
+            }
+        });
+    }
+
+    function readEmbedAttribute(markup, name) {
+        var pattern = new RegExp(
+            "\\b" + name + "\\s*=\\s*([\\\"'])(.*?)\\1",
+            "i"
+        );
+        var match = pattern.exec(markup || "");
+        return match ? match[2] : "";
+    }
+
+    function splitMarkdownTableCells(line) {
+        var value = String(line || "").trim();
+        if (value.charAt(0) === "|") {
+            value = value.slice(1);
+        }
+        if (value.charAt(value.length - 1) === "|" && value.charAt(value.length - 2) !== "\\") {
+            value = value.slice(0, -1);
+        }
+        var cells = [];
+        var current = "";
+        var escaped = false;
+        for (var index = 0; index < value.length; index += 1) {
+            var character = value.charAt(index);
+            if (character === "\\" && !escaped) {
+                escaped = true;
+                current += character;
+                continue;
+            }
+            if (character === "|" && !escaped) {
+                cells.push(current.trim());
+                current = "";
+            } else {
+                current += character;
+            }
+            escaped = false;
+        }
+        cells.push(current.trim());
+        return cells;
+    }
+
+    function isMarkdownTableDivider(line) {
+        var cells = splitMarkdownTableCells(line);
+        return cells.length > 1 && cells.every(function (cell) {
+            return /^:?-{1,}:?$/.test(cell.trim());
+        });
+    }
+
+    var TABLE_IMAGE_EMBED_PATTERN = /<embed\b[^>]*\bembedtype\s*=\s*["']image["'][^>]*\/?\s*>/gi;
+    var EDITOR_TABLE_IMAGE_EMBED_PATTERN = /&lt;embed\b([\s\S]*?)\/?&gt;/gi;
+
+    function isTableImageEmbed(markup) {
+        return (
+            readEmbedAttribute(markup, "embedtype").toLowerCase() === "image" &&
+            IMAGE_ID_PATTERN.test(readEmbedAttribute(markup, "id")) &&
+            IMAGE_FORMAT_PATTERN.test(readEmbedAttribute(markup, "format"))
+        );
+    }
+
+    function transformMarkdownTableEmbeds(source, transform, pattern) {
+        var lines = String(source || "").split(/\r?\n/);
+        var inFence = false;
+        for (var index = 0; index < lines.length - 1; index += 1) {
+            var line = lines[index];
+            if (/^\s*(```|~~~)/.test(line)) {
+                inFence = !inFence;
+                continue;
+            }
+            if (
+                inFence ||
+                line.indexOf("|") === -1 ||
+                !isMarkdownTableDivider(lines[index + 1])
+            ) {
+                continue;
+            }
+            var rowIndex = index;
+            while (
+                rowIndex < lines.length &&
+                lines[rowIndex].trim() &&
+                lines[rowIndex].indexOf("|") !== -1
+            ) {
+                lines[rowIndex] = lines[rowIndex].replace(
+                    pattern || TABLE_IMAGE_EMBED_PATTERN,
+                    function (markup) {
+                        return isTableImageEmbed(markup)
+                            ? transform(markup)
+                            : markup;
+                    }
+                );
+                rowIndex += 1;
+            }
+            index = rowIndex - 1;
+        }
+        return lines.join("\n");
+    }
+
+    function encodeMarkdownTableImageEmbedsForEditor(source) {
+        return transformMarkdownTableEmbeds(source, function (markup) {
+            return markup.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        });
+    }
+
+    function decodeMarkdownTableImageEmbedsFromEditor(source) {
+        return transformMarkdownTableEmbeds(
+            source,
+            function (markup) {
+                var decoded = markup
+                    .replace(/^&lt;/i, "<")
+                    .replace(/&gt;$/i, ">");
+                return isTableImageEmbed(decoded) ? decoded : markup;
+            },
+            EDITOR_TABLE_IMAGE_EMBED_PATTERN
+        );
+    }
+
+    function isSafePreviewImageSource(source) {
+        return /^(?:https?:\/\/|\/|\.\.?\/)/i.test(String(source || ""));
+    }
+
+    function collectMarkdownTableImageSpecs(source) {
+        var lines = String(source || "").split(/\r?\n/);
+        var htmlTableStarts = [];
+        var htmlTablePattern = /<table\b/gi;
+        var match;
+        while ((match = htmlTablePattern.exec(source || ""))) {
+            htmlTableStarts.push(match.index);
+        }
+        var candidates = [];
+        var markdownTableCount = 0;
+        var offset = 0;
+        var inFence = false;
+        for (var index = 0; index < lines.length - 1; index += 1) {
+            var line = lines[index];
+            if (/^\s*(```|~~~)/.test(line)) {
+                inFence = !inFence;
+                offset += line.length + 1;
+                continue;
+            }
+            if (!inFence && line.indexOf("|") !== -1 && isMarkdownTableDivider(lines[index + 1])) {
+                var rows = [];
+                rows.push(splitMarkdownTableCells(lines[index]));
+                var rowIndex = index + 2;
+                while (rowIndex < lines.length && lines[rowIndex].trim() && lines[rowIndex].indexOf("|") !== -1) {
+                    rows.push(splitMarkdownTableCells(lines[rowIndex]));
+                    rowIndex += 1;
+                }
+                var tableImages = [];
+                rows.forEach(function (cells, sourceRow) {
+                    cells.forEach(function (cell, sourceColumn) {
+                        var embedPattern = /<embed\b[^>]*\bembedtype\s*=\s*[\"']image[\"'][^>]*\/?\s*>/gi;
+                        var embedMatch;
+                        while ((embedMatch = embedPattern.exec(cell))) {
+                            tableImages.push({
+                                row: sourceRow,
+                                column: sourceColumn,
+                                id: readEmbedAttribute(embedMatch[0], "id"),
+                                format: readEmbedAttribute(embedMatch[0], "format"),
+                                src: readEmbedAttribute(embedMatch[0], "src"),
+                                alt: readEmbedAttribute(embedMatch[0], "alt"),
+                            });
+                        }
+                    });
+                });
+                var start = offset;
+                var tableIndex =
+                    htmlTableStarts.filter(function (position) {
+                        return position < start;
+                    }).length + markdownTableCount;
+                if (tableImages.length) {
+                    candidates.push({ tableIndex: tableIndex, images: tableImages });
+                }
+                markdownTableCount += 1;
+                index = rowIndex - 1;
+                offset = lines.slice(0, rowIndex).join("\n").length + (rowIndex ? 1 : 0);
+                continue;
+            }
+            offset += line.length + 1;
+        }
+        return candidates;
+    }
+
+    function restoreMarkdownTableImages(root, source, document) {
+        var specs = collectMarkdownTableImageSpecs(source);
+        var tables = Array.from(root.querySelectorAll("table"));
+        specs.forEach(function (spec) {
+            var table = tables[spec.tableIndex];
+            if (!table) {
+                return;
+            }
+            var rows = Array.from(table.querySelectorAll("tr"));
+            spec.images.forEach(function (imageSpec) {
+                var row = rows[imageSpec.row];
+                var cells = row && Array.from(row.children).filter(function (cell) {
+                    return cell.tagName === "TD" || cell.tagName === "TH";
+                });
+                var cell = cells && cells[imageSpec.column];
+                if (
+                    !cell ||
+                    !IMAGE_ID_PATTERN.test(imageSpec.id) ||
+                    !IMAGE_FORMAT_PATTERN.test(imageSpec.format) ||
+                    !imageSpec.src ||
+                    !isSafePreviewImageSource(imageSpec.src) ||
+                    cell.querySelector('[data-blog-inline-image-id="' + imageSpec.id + '"]')
+                ) {
+                    return;
+                }
+                var image = document.createElement("img");
+                image.src = imageSpec.src;
+                image.alt = imageSpec.alt || "";
+                image.loading = "lazy";
+                image.dataset.blogInlineImageId = imageSpec.id;
+                if (imageSpec.format === "fullwidth" || imageSpec.format === "fullwidth_web") {
+                    image.className = "richtext-image full-width";
+                }
+                cell.appendChild(image);
+            });
+        });
+    }
+
     function updateFormUploadState(form, delta) {
         if (!form) {
             return;
@@ -232,6 +552,9 @@
             this.uploadStatusElement = null;
             this.destroyed = false;
             this.initialValue = this.input.value || "";
+            this.initialEditorValue = encodeMarkdownTableImageEmbedsForEditor(
+                this.initialValue
+            );
             this.initialized = false;
             this.themeObserver = null;
             this.fullscreenObserver = null;
@@ -280,7 +603,7 @@
                 lang: this.input.dataset.vditorLocale || "zh_CN",
                 height: 480,
                 minHeight: 320,
-                value: this.initialValue,
+                value: this.initialEditorValue,
                 cache: { enable: false },
                 toolbar: [
                     "headings",
@@ -327,6 +650,8 @@
                         breaks: true,
                         footnotes: true,
                         codeBlockPreview: true,
+                        // 明确开启 $$...$$ 块公式预览；$...$ 行内公式由 Vditor 默认数学解析器处理。
+                        mathBlockPreview: true,
                     },
                     theme: {
                         current: isDarkAdminTheme() ? "dark" : "light",
@@ -345,9 +670,9 @@
                 after: function () {
                     if (
                         widget.editor &&
-                        widget.editor.getValue() !== widget.initialValue
+                        widget.editor.getValue() !== widget.initialEditorValue
                     ) {
-                        widget.editor.setValue(widget.initialValue);
+                        widget.editor.setValue(widget.initialEditorValue);
                     }
                     widget.input.value = widget.initialValue;
                     widget.initialized = true;
@@ -509,6 +834,28 @@
         transformPreview(html) {
             var template = document.createElement("template");
             template.innerHTML = html || "";
+            // Lute 不解析原生 HTML 表格内的数学标记；转换成 Vditor 自己的
+            // language-math 节点后，内置 KaTeX 渲染器会继续处理这些公式。
+            template.content.querySelectorAll("table").forEach(function (table) {
+                transformTableMath(table, document);
+            });
+            // 后台预览中的宽表格使用独立滚动容器，避免合并单元格挤压编辑器布局。
+            template.content.querySelectorAll("table").forEach(function (table) {
+                var parent = table.parentElement;
+                if (
+                    parent &&
+                    parent.classList.contains("blog-markdown-table-scroll")
+                ) {
+                    return;
+                }
+                var wrapper = document.createElement("div");
+                wrapper.className = "blog-markdown-table-scroll";
+                wrapper.setAttribute("role", "region");
+                wrapper.setAttribute("tabindex", "0");
+                wrapper.setAttribute("aria-label", "可横向滚动的 Markdown 表格");
+                table.replaceWith(wrapper);
+                wrapper.appendChild(table);
+            });
             template.content
                 .querySelectorAll('embed[embedtype="image"]')
                 .forEach(function (embed) {
@@ -527,6 +874,7 @@
                     image.src = source;
                     image.alt = embed.getAttribute("alt") || "";
                     image.loading = "lazy";
+                    image.dataset.blogInlineImageId = imageId;
                     if (
                         formatName === "fullwidth" ||
                         formatName === "fullwidth_web"
@@ -543,6 +891,14 @@
                     });
                     embed.replaceWith(image);
                 });
+            restoreMarkdownTableImages(
+                template.content,
+                this.input.value ||
+                    (this.editor && typeof this.editor.getValue === "function"
+                        ? this.editor.getValue()
+                        : ""),
+                document
+            );
             return template.innerHTML;
         }
 
@@ -1336,7 +1692,7 @@
         syncValue(value) {
             // Wagtail autosave reads this textarea without submitting the form.
             // Keep transient upload tokens inside Vditor only, never in revisions.
-            this.input.value = String(value || "").replace(
+            this.input.value = decodeMarkdownTableImageEmbedsFromEditor(value).replace(
                 IMAGE_UPLOAD_TOKEN_PATTERN,
                 ""
             );
@@ -1379,9 +1735,16 @@
         setState(value) {
             var nextValue = value == null ? "" : String(value);
             this.initialValue = nextValue;
+            this.initialEditorValue = encodeMarkdownTableImageEmbedsForEditor(
+                nextValue
+            );
             this.input.value = nextValue;
-            if (this.initialized && this.editor && this.editor.getValue() !== nextValue) {
-                this.editor.setValue(nextValue);
+            if (
+                this.initialized &&
+                this.editor &&
+                this.editor.getValue() !== this.initialEditorValue
+            ) {
+                this.editor.setValue(this.initialEditorValue);
             }
             log("widget:set-state", {
                 name: this.name,

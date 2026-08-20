@@ -37,7 +37,8 @@ urlpatterns = urlpatterns + i18n_patterns(
     path('archive/', include('archive.urls')),
     # 对于上面更具体规则没有捕获的任何内容，交由 Wagtail 的页面服务机制处理
     path('search/', include('search.urls', namespace='search')),  # 使用 include 而不是直接引用视图
-    re_path(r'^images/([^/]*)/(\d*)/([^/]*)/[^/]*$', ServeView.as_view(action='redirect'), name='wagtailimages_serve'),
+    # 图片源文件可能位于 markdown-import/<artifact_id>/<filename>，路由必须允许嵌套文件名。
+    re_path(r'^images/([^/]*)/(\d*)/([^/]*)/.*$', ServeView.as_view(action='redirect'), name='wagtailimages_serve'),
     
     # 这应该是列表中的最后一个模式：
     path("", include(wagtail_urls)),

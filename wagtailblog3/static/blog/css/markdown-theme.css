@@ -44,3 +44,52 @@ code.highlight:not(pre code),
     word-wrap: break-word !important;
     border: none !important;
 }
+
+/* 复杂 HTML 表格保持合并单元格结构，并在窄视口中通过容器横向查看。 */
+.markdown-body .table-responsive,
+.markdown-body .blog-markdown-table-scroll {
+    width: 100%;
+    max-width: 100%;
+    margin: 0 0 1.25rem;
+    overflow-x: auto;
+    overflow-y: visible;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-gutter: stable;
+}
+
+.markdown-body .table-responsive > table,
+.markdown-body .blog-markdown-table-scroll > table {
+    display: table;
+    width: max-content;
+    min-width: 100%;
+    max-width: none;
+    margin: 0;
+    table-layout: auto;
+}
+
+.markdown-body .table-responsive > table th,
+.markdown-body .table-responsive > table td,
+.markdown-body .blog-markdown-table-scroll > table th,
+.markdown-body .blog-markdown-table-scroll > table td {
+    vertical-align: top;
+    overflow-wrap: anywhere;
+}
+
+/* KaTeX 的长块公式不能撑破文章列，也不能被表格单元格裁掉。 */
+.markdown-body .arithmatex {
+    max-width: 100%;
+}
+
+.markdown-body .arithmatex .katex-display,
+.markdown-body .katex-display {
+    max-width: 100%;
+    margin: 0.75rem 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0.15rem 0;
+}
+
+.markdown-body td .arithmatex .katex-display,
+.markdown-body th .arithmatex .katex-display {
+    margin: 0.35rem 0;
+}

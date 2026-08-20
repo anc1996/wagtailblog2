@@ -287,9 +287,18 @@ BLOG_VDITOR_IMAGE_UPLOAD_COLLECTION_ID = (
     else None
 )
 
+# 复杂 Markdown 导入会为每个媒体建立一个 multipart 文件字段；保留有限上限，
+# 覆盖大文章的单次导入，同时避免把 multipart 解析开放为无限文件数。
+DATA_UPLOAD_MAX_NUMBER_FILES = 256
 # Django 默认将每个表单的最大字段数设置为 1000，但特别复杂的页面模型
 # 可能会在 Wagtail 的页面编辑器中超出此限制。
 DATA_UPLOAD_MAX_NUMBER_FIELDS = 10_000
+
+# 大批量导入通过会话逐个上传媒体，限制只用于保护数据库和对象存储配额。
+MARKDOWN_IMPORT_SESSION_TTL_SECONDS = 24 * 60 * 60
+MARKDOWN_IMPORT_SESSION_MAX_ARTIFACTS = 10_000
+MARKDOWN_IMPORT_SESSION_MAX_BYTES = 20 * 1024 * 1024 * 1024
+MARKDOWN_IMPORT_SESSION_UPLOAD_MAX_BYTES = 512 * 1024 * 1024
 
 # Wagtail 设置
 WAGTAIL_SITE_NAME = "wagtailblog3"

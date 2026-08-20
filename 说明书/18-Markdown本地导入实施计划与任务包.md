@@ -376,3 +376,5 @@
 
 - 2026-08-20，状态：Markdown 导入剩余测试门禁收尾完成。修正文档中 T14-T18 历史方案章节的过时“尚未实现”表述，明确该章节规则已由 T14-T18 实施并按 `test_run_id` 清理真实样本。测试环境创建一个已过期且无媒体对象的临时会话，在进程内将过期任务间隔缩短为 1 秒启动真实 Celery Beat；Beat 成功投递 `expire_markdown_import_sessions`，隔离 Worker 消费后会话变为 `expired`，临时 batch/session 随即精确删除，清理数量为 0。未创建 BlogPage、revision、MongoDB 正文、Wagtail 媒体或 MinIO 对象，未触碰生产服务。
 - 验证结果：WSL2 `manage.py test blog.test_markdown_import_tasks blog.test_markdown_import_api tools.markdown_import.test_client` 34/34 通过；Beat 过期实测通过；测试迁移 `0025-0028` 均已应用。完整 Markdown 导入回归、Django check、迁移检查和 `git diff --check` 在本记录更新后继续执行并记录最终结果。
+
+- 2026-08-20，生产部署门禁：代码已推送 `origin/main`，本地与远程均为 commit `af103861106e82d0e63b1991c6403fb09574fee5`。按用户提供的 SSH 地址连接后，远端实际为测试 WSL2（内核 `microsoft-standard-WSL2`、网卡地址 `192.168.20.5`、当前工作区为 `/mnt/f/openclaw/workspace/wagtail/wagtailblog2`，测试 8080 进程存在），生产目录 `/home/source/Django/wagtail/wagtailblog3`、生产 Conda `/root/anaconda3/envs/wagtailblog` 和生产应用 unit 均不存在。该主机身份与部署文档中的生产事实不一致，已停止在迁移、备份、collectstatic 和服务重启之前；未执行生产数据库、MongoDB、MinIO、Token 或页面写入，未重启任何生产服务。继续部署前必须重新确认可达的生产 IP、SSH 目标、项目目录和 unit 状态。

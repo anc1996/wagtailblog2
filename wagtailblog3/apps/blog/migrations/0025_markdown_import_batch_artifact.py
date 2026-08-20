@@ -10,7 +10,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ("blog", "0024_alter_blogpage_body"),
-        ("wagtailcore", "0098_merge_20260603_0945"),
+        ("wagtailcore", "0097_merge_20250811_1740"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 

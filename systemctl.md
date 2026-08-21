@@ -292,7 +292,7 @@ Redis 中没有历史邮件任务，并明确需要处理这些任务。当前 W
 `192.168.20.5`）中运行，使用 Conda 环境 `wagtailblog-test`，只允许
 保留 `wagtailblog3/settings/.env.test`。当前调试会话使用 transient systemd unit
 `wagtailblog-test-web-8080.service`、`wagtailblog-test-search-worker.service` 和
-`wagtailblog-test-search-beat-v2.service`，网站监听 `0.0.0.0:8080`。这些临时 unit 不是仓库部署资产，
+`wagtailblog-test-search-beat-v2.service`，网站仅监听 `192.168.20.5:8080`，不使用 Windows `127.0.0.1:8080` 自动转发。这些临时 unit 不是仓库部署资产，
 Windows 或 WSL 重启后必须重新核对，不得假定自动恢复。需要手工启动时仍可按下列前台命令运行。
 
 每个终端先执行公共准备步骤：
@@ -317,11 +317,11 @@ cd /mnt/f/openclaw/workspace/wagtail/wagtailblog2
 bash tools/start_test_stack.sh
 ```
 
-脚本会同时启动测试网站 `0.0.0.0:8080` 和只监听
+脚本会同时启动仅绑定桥接地址的测试网站 `192.168.20.5:8080` 和只监听
 `markdown-test-maintenance` 的 Worker，并统一使用测试环境队列参数。浏览器访问
 `http://192.168.20.5:8080/`，后台登录页为
 `http://192.168.20.5:8080/admin/login/`。以后测试项目必须使用上述脚本，不要只执行
-`python manage.py runserver`，否则组装任务可能进入无人消费的默认队列。若 8080 已被占用，先定位占用进程，不要通过
+`python manage.py runserver`，否则组装任务可能进入无人消费的默认队列；userscript 的测试博客地址也必须填写 `http://192.168.20.5:8080`，不能使用 Windows `http://127.0.0.1:8080`。若 8080 已被占用，先定位占用进程，不要通过
 反复启动制造多个测试实例。
 
 需要验证异步维护任务时，在第二个终端完成公共准备步骤后启动只监听

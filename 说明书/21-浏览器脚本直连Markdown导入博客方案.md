@@ -1333,3 +1333,32 @@ Playwright 截图、trace、HTML、日志全部写入 `output/playwright/userscr
 
 - 回滚仅需恢复上一提交中的两个版本标识、构建默认值和断言，再重新生成 TEST 副本；不涉及生产数据库或服务数据回滚。
 - 实际使用 `terra + 中推理` 完成版本递增与测试，未触发高风险发布升级条件。
+
+### 23.33 测试网站取消 Windows loopback 暴露（2026-08-21）
+
+#### 背景、目标与范围
+
+- 现状证据：Windows `netsh interface portproxy show all` 为空；`127.0.0.1:8080` 由 WSL 自动启动的 `wslrelay.exe` 转发，而测试 Django 监听 WSL2 的 `0.0.0.0:8080`。用户已确认浏览器 userscript 改用桥接地址 `http://192.168.20.5:8080` 可正常跨域导入。
+- 目标：停止仅因测试服务绑定所有地址而产生的 Windows `127.0.0.1:8080` 自动映射，保留 WSL2 `192.168.20.5:8080` 的测试服务和隔离 maintenance Worker；TEST userscript 的默认博客地址同步改为桥接地址，防止重建副本后恢复 loopback 地址。
+- 非目标：不变更生产端口、生产 systemd unit、CORS 规则、`ALLOWED_HOSTS`、数据库、MongoDB、Redis、Token、导入会话、媒体、草稿或页面发布；不使用全局 `localhostForwarding=false` 作为单端口方案，避免影响其他 WSL 服务。
+
+#### 设计、影响、验证与回滚
+
+- 实施：`tools/start_test_stack.sh` 将测试 Django 从 `0.0.0.0:8080` 改为仅绑定 `192.168.20.5:8080`；`tools/build_userscript_blog_import_test.ps1` 的 TEST 默认地址改为相同桥接地址；`systemctl.md` 记录测试入口不得使用 Windows loopback。`%UserProfile%/.wslconfig` 恢复默认 loopback 转发行为，再由精确监听范围控制本端口暴露。
+- 服务影响：会重启一次测试 runserver 和测试 maintenance Worker；生产服务不受影响。数据影响：不调用导入写接口，不创建或修改任何会话、媒体、草稿、revision 或正文。
+- 验收：WSL2 仅监听 `192.168.20.5:8080`；Windows 到 `127.0.0.1:8080` 连接失败，到 `192.168.20.5:8080/admin/login/` 返回 HTTP 200；TEST 构建默认值、脚本语法和相关 Django 测试通过；Worker 只消费 `markdown-test-maintenance`。
+- 回滚：将测试服务监听地址和 TEST 默认地址恢复到上一提交的值，重新执行 `bash tools/start_test_stack.sh`；不涉及数据回滚。若桥接地址不可用，停止测试服务并报告，不启用全局 WSL loopback 映射作为隐式替代。
+
+#### 模型/推理强度建议
+
+- 建议：使用 `gpt-5.6-terra + 中推理` 完成局部启动脚本、TEST 默认地址和运行验收；不需要外部模型调用。
+- 升级条件：若必须改动 Windows 防火墙、WSL 网络模式、生产端口、HTTPS/PNA 策略或跨主机访问控制，升级为 `gpt-5.6-sol + 高推理`，并在变更前重新获得对应网络与生产授权。
+- 验证门禁：必须同时证明 Windows loopback 已关闭、桥接地址可用、隔离 Worker 健康，且没有任何导入数据写入。
+
+#### 实施记录
+
+- 2026-08-21（完成）：确认 Windows 没有 `netsh portproxy` 规则；原 `127.0.0.1:8080` 为 WSL 自动 `wslrelay.exe` 映射。曾短暂设置全局 `localhostForwarding=false`，确认该选项会影响全部 WSL 本地端口后已立即移除，未将其作为本端口方案保留。
+- `tools/start_test_stack.sh` 已改为仅启动 `192.168.20.5:8080 --noreload`，TEST 构建默认地址同步改为 `http://192.168.20.5:8080`，并递增 TEST 副本至 `0.3.16-test.2`，SHA-256 为 `e743df87700d3fdde9dffb0ca511dd788053a160cf2800b534b3196afdc8e4b4`。`systemctl.md` 已记录测试入口和 userscript 均不得使用 Windows loopback。
+- 已重启测试栈：WSL2 Django PID `528` 仅监听 `192.168.20.5:8080`，Windows `127.0.0.1:8080` 不可达，`192.168.20.5:8080/admin/login/` 返回 HTTP 200。测试 Worker PID `529` 返回 `pong`，且只消费 `markdown-test-maintenance` 队列。
+- 验证：正式与 TEST userscript 均通过 `node --check`；`blog.test_markdown_import_cors` 16/16 通过；`manage.py check` 通过；`makemigrations --check --dry-run` 为 `No changes detected`。未调用导入 API 写入端点，未创建或修改 session、媒体、草稿、revision、MongoDB 正文或生产服务。
+- 实际使用 `terra + 中推理` 完成局部实现和运行验收；未调用外部模型，未触发网络架构或生产变更升级条件。回滚点为本次提交前的监听地址、TEST 默认地址和文档内容；生产不需要同步或重启，因为本批不影响生产代码或配置。

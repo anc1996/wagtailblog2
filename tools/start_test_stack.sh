@@ -19,7 +19,8 @@ if [[ -f output/test-worker-markdown.pid ]] && kill -0 "$(cat output/test-worker
     kill "$(cat output/test-worker-markdown.pid)" || true
 fi
 
-nohup "$python_bin" manage.py runserver 0.0.0.0:8080 --noreload \
+# 只绑定 WSL2 桥接地址，避免自动暴露 Windows loopback 入口。
+nohup "$python_bin" manage.py runserver 192.168.20.5:8080 --noreload \
     > output/test-runserver-8080.log 2>&1 < /dev/null &
 echo $! > output/test-runserver-8080.pid
 
@@ -29,5 +30,5 @@ nohup "$python_bin" -m celery -A wagtailblog3 worker \
     > output/test-worker-markdown.log 2>&1 < /dev/null &
 echo $! > output/test-worker-markdown.pid
 
-echo "test web: http://0.0.0.0:8080"
+echo "test web: http://192.168.20.5:8080"
 echo "test worker queue: $CELERY_MAINTENANCE_QUEUE"

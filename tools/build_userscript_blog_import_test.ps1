@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = '0.3.16-test.1'
+    [string]$Version = '0.3.16-test.2'
 )
 
 Set-StrictMode -Version Latest
@@ -43,7 +43,7 @@ $body = $body.Replace(
     "const blogConfigKey = 'zuihuitao.blogImport.v1';",
     "const blogConfigKey = 'zuihuitao.blogImport.test.v1';"
 )
-$body = $body.Replace("siteUrl: '',", "siteUrl: 'http://127.0.0.1:8080',")
+$body = $body.Replace("siteUrl: '',", "siteUrl: 'http://192.168.20.5:8080',")
 $sentinelLines = @(
     ';(() => {',
     '    const target = document.body || document.documentElement;',

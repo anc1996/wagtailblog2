@@ -13,6 +13,7 @@ from blog.markdown_import_api import (
     MarkdownImportMetadataSuggestionView,
     MarkdownImportMetadataTemplatesView,
     MarkdownImportView,
+    MarkdownImportUserscriptPrepareView,
     MarkdownImportSessionCreateView,
     _artifact_manifest,
     _blocks,
@@ -35,6 +36,64 @@ class MarkdownImportApiTests(SimpleTestCase):
         )
         self.parent = mock.Mock(pk=42)
         self.parent.permissions_for_user.return_value.can_add_subpage.return_value = True
+
+    @mock.patch("blog.markdown_import_api.BlogIndexPage.objects")
+    def test_userscript_prepare_returns_read_only_blocks_and_artifact_plan(self, index_manager):
+        index_manager.filter.return_value.first.return_value = self.parent
+        markdown = (
+            "# 标题\n\n"
+            "正文。\n\n"
+            "![远程图](https://cdn.example.test/image.png)\n"
+        )
+        request = self.factory.post(
+            "/blog/api/markdown-import/userscript/prepare/",
+            {
+                "target_parent_id": 42,
+                "title": "标题",
+                "intro": "正文摘要",
+                "date": "2026-08-20",
+                "tags": ["测试"],
+                "markdown": markdown,
+                "options": {"import_remote_images": True},
+            },
+            format="json",
+        )
+        force_authenticate(request, user=self.user)
+
+        response = MarkdownImportUserscriptPrepareView.as_view()(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["status"], "preview")
+        self.assertEqual(response.data["blocks"][0]["value"], "# 标题\n\n正文。\n\n")
+        self.assertEqual(response.data["required_artifacts"][0]["media_type"], "image")
+        self.assertEqual(
+            response.data["required_artifacts"][0]["normalized_source"],
+            "https://cdn.example.test/image.png",
+        )
+        self.assertEqual(response.data["summary"]["image_count"], 1)
+
+    @mock.patch("blog.markdown_import_api.BlogIndexPage.objects")
+    def test_userscript_prepare_rejects_non_https_image_without_writing(self, index_manager):
+        index_manager.filter.return_value.first.return_value = self.parent
+        request = self.factory.post(
+            "/blog/api/markdown-import/userscript/prepare/",
+            {
+                "target_parent_id": 42,
+                "title": "标题",
+                "intro": "摘要",
+                "date": "2026-08-20",
+                "tags": [],
+                "markdown": "![图片](http://cdn.example.test/image.png)",
+                "options": {"import_remote_images": True},
+            },
+            format="json",
+        )
+        force_authenticate(request, user=self.user)
+
+        response = MarkdownImportUserscriptPrepareView.as_view()(request)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["code"], "userscript_remote_image_scheme_invalid")
 
     @mock.patch("blog.markdown_import_api.BlogPage.objects")
     @mock.patch("blog.markdown_import_api.BlogIndexPage.objects")

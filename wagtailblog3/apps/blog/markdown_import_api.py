@@ -47,6 +47,12 @@ from blog.services.markdown_import_service import (
     create_unpublished_blog_draft,
 )
 from blog.services.markdown_import_parser import attach_table_inline_images
+from blog.services.markdown_import_parser import parse_markdown_blocks
+from blog.services.markdown_import_prepare import (
+    build_required_artifacts,
+    prepare_summary,
+    serialize_block,
+)
 from blog.services.markdown_import_types import MarkdownImportBlock
 from blog.services.markdown_import_sessions import (
     session_expiry_delta,
@@ -441,6 +447,9 @@ class MarkdownImportLimitsView(MarkdownImportBaseView):
                 "session_max_artifacts": getattr(settings, "MARKDOWN_IMPORT_SESSION_MAX_ARTIFACTS", 10000),
                 "session_max_bytes": getattr(settings, "MARKDOWN_IMPORT_SESSION_MAX_BYTES", 20 * 1024**3),
                 "session_upload_max_bytes": getattr(settings, "MARKDOWN_IMPORT_SESSION_UPLOAD_MAX_BYTES", 512 * 1024**2),
+                "prepare_max_markdown_bytes": getattr(
+                    settings, "MARKDOWN_IMPORT_PREPARE_MAX_MARKDOWN_BYTES", 5 * 1024 * 1024
+                ),
             }
         )
 
@@ -579,6 +588,55 @@ class MarkdownImportPreviewView(MarkdownImportBaseView):
                     for image in inline_images
                 ],
                 "blocks": [block.block_type for block in blocks],
+            }
+        )
+
+
+class MarkdownImportUserscriptPrepareView(MarkdownImportBaseView):
+    """为浏览器脚本生成只读导入计划，不创建任何导入对象。"""
+
+    def post(self, request):
+        payload = _payload(request)
+        _target_parent(payload, request.user)
+
+        title = payload.get("title")
+        if not isinstance(title, str) or not title.strip() or len(title.strip()) > 255:
+            raise MarkdownImportRequestError("userscript_title_invalid")
+        markdown = payload.get("markdown")
+        if not isinstance(markdown, str) or not markdown.strip():
+            raise MarkdownImportRequestError("userscript_markdown_required")
+        max_bytes = int(
+            getattr(settings, "MARKDOWN_IMPORT_PREPARE_MAX_MARKDOWN_BYTES", 5 * 1024 * 1024)
+        )
+        if len(markdown.encode("utf-8")) > max_bytes:
+            raise MarkdownImportRequestError("userscript_markdown_too_large")
+        options = payload.get("options", {})
+        if not isinstance(options, dict) or not isinstance(
+            options.get("import_remote_images", True), bool
+        ):
+            raise MarkdownImportRequestError("userscript_options_invalid")
+
+        # 复用已有元数据校验，避免 prepare 与真正 session 接受不同数据。
+        _date_value(payload)
+        _tags(payload)
+        _intro(payload)
+        try:
+            blocks = parse_markdown_blocks(markdown)
+            required_artifacts = build_required_artifacts(blocks)
+        except ValueError as exc:
+            raise MarkdownImportRequestError("userscript_prepare_failed") from exc
+        for artifact in required_artifacts:
+            scheme = urlsplit(artifact["normalized_source"]).scheme.casefold()
+            if scheme not in {"", "https"}:
+                raise MarkdownImportRequestError("userscript_remote_image_scheme_invalid")
+
+        return Response(
+            {
+                "status": "preview",
+                "content_fingerprint": hashlib.sha256(markdown.encode("utf-8")).hexdigest(),
+                "blocks": [serialize_block(block) for block in blocks],
+                "required_artifacts": list(required_artifacts),
+                "summary": prepare_summary(blocks, markdown),
             }
         )
 

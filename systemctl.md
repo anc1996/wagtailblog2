@@ -698,6 +698,17 @@ curl -I -H 'Host: wagtailblog.docs' http://127.0.0.1:6050/admin/login/
 
 ## 发布与静态文件
 
+### Markdown 导入 userscript 与 CORS 重要维护规则
+
+Markdown 导入脚本属于跨站点浏览器入口，新增网站不能只修改 `@match` 或正文选择器，必须在同一批次完成以下配套变更：
+
+- 在 `wagtailblog3/static/vendor/Script/downlaod_markdown.js` 增加精确 `@match`、`InterfaceList` 正文容器和标题规则；正文选择器必须来自真实页面 DOM，不得回退到 `body`。
+- 在 `wagtailblog3/settings/base.py` 的 `CORS_ALLOWED_ORIGIN_REGEXES` 增加精确的 HTTP/HTTPS 来源（仅在该网站确实提供 HTTP 页面时保留 HTTP），不得使用任意来源通配符；`CORS_URLS_REGEX` 仍只覆盖 Markdown 导入 API。
+- 在 `wagtailblog3/apps/blog/test_markdown_import_cors.py` 和相关 userscript 静态测试中锁定来源、预检头、实际 Bearer 响应、`@match`、正文容器和版本；同步更新 TEST 构建脚本并重新生成 `output/userscript-blog-import/` 下的本地调试副本。
+- 先在 WSL2 `wagtailblog-test` 环境运行 Django 定向测试、`manage.py check`、迁移检查和两个 userscript 的 `node --check`，再提交和发布。浏览器验收必须确认入口、标题、正文、OPTIONS 和实际响应；不得用 401/Token 错误误判为 CORS 失败。
+
+该类改动会影响 Django/uWSGI 的 CORS 配置，生产同步后必须重启 `wagtailblog3.service`；只有实际涉及任务代码或服务配置时才按本文件既有顺序重启 maintenance Worker、Beat、Filebeat。userscript 版本必须递增，旧 AdGuard 副本需停用，避免同一页面运行多个版本。生产发布不创建草稿、session、媒体或 revision，除非另有明确授权。
+
 当前测试和生产目录都按 Git 工作树维护，并使用 `main` 分支。每次部署仍必须先重新
 确认生产目录确实是干净且安全的 Git 工作树、远程地址正确，并确定测试通过的精确
 commit；不得直接对未知状态的生产目录执行 `git pull`，不得使用 `rsync --delete`。

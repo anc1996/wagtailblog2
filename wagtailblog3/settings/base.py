@@ -108,6 +108,52 @@ CORS_ALLOWED_ORIGINS = [
 	"http://0.0.0.0:8000",  # 本地IP访问
 ]
 
+# 浏览器脚本只会在这些文章来源页运行；人民网理论旧页面保留精确 HTTP 例外，不能放开任意来源。
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r"^https://(?:[a-z0-9-]+\.)?blog\.csdn\.net$",
+    r"^https://(?:www\.)?jianshu\.com$",
+    r"^https://juejin\.cn$",
+    r"^https://zhuanlan\.zhihu\.com$",
+    r"^https://www\.cnblogs\.com$",
+    r"^https://www\.jb51\.net$",
+    r"^https://blog\.51cto\.com$",
+    r"^https://www\.pianshen\.com$",
+    r"^https://www\.360doc\.com$",
+    r"^https://baijiahao\.baidu\.com$",
+    r"^https://jingyan\.baidu\.com$",
+    r"^https://www\.52pojie\.cn$",
+    r"^https://cloud\.tencent\.com$",
+    r"^https://developer\.aliyun\.com$",
+    r"^https://huaweicloud\.csdn\.net$",
+    r"^https://www\.bilibili\.com$",
+    r"^https://(?:www\.)?weibo\.com$",
+    r"^https://mp\.weixin\.qq\.com$",
+    r"^https://segmentfault\.com$",
+    r"^https://www\.qinglite\.cn$",
+    r"^https://www\.manongjc\.com$",
+    r"^https://www\.qstheory\.cn$",
+    r"^https?://theory\.people\.com\.cn$",
+    r"^https://www\.12371\.cn$",
+    r"^https?://opinion\.people\.com\.cn$",
+    r"^https?://finance\.people\.com\.cn$",
+    r"^https?://society\.people\.com\.cn$",
+    r"^https?://cpc\.people\.com\.cn$",
+    r"^https?://politics\.people\.com\.cn$",
+    r"^https?://www\.qizhiwang\.org\.cn$",
+    r"^https://tougao\.12371\.cn$",
+    r"^https://www\.xuexi\.cn$",
+    r"^https?://www\.rmlt\.com\.cn$",
+    r"^https?://www\.banyuetan\.org$",
+    r"^https?://www\.dangjian\.cn$",
+]
+
+# 导入认证始终使用显式 Bearer，绝不允许跨源请求附带 Django Cookie。
+CORS_ALLOW_CREDENTIALS = False
+# 仅将上述 CORS 策略应用到 Markdown 导入 API，避免扩大项目其他接口的跨源范围。
+CORS_URLS_REGEX = r"^/(?:zh-hans/)?blog/api/markdown-import/.*$"
+# Chrome 从公网文章来源请求内网测试站时会发送 PNA 预检；生产仍须使用 HTTPS API origin。
+CORS_ALLOW_PRIVATE_NETWORK = True
+
 CORS_ALLOW_METHODS = [  # 允许的HTTP请求方法
     'DELETE',  # 删除资源
     'GET',     # 获取资源
@@ -132,6 +178,8 @@ CORS_ALLOW_HEADERS = [  # 允许的HTTP请求头
 
 
 MIDDLEWARE = [
+    # CORS 预检必须先于会产生响应的中间件，才能在认证前安全结束 OPTIONS 请求。
+    "corsheaders.middleware.CorsMiddleware",
     'blog.middleware.PageViewMiddleware',
     "django.contrib.sessions.middleware.SessionMiddleware",  # 处理会话数据，确保每个请求都有会话功能
 	'django.middleware.locale.LocaleMiddleware',
@@ -299,6 +347,8 @@ MARKDOWN_IMPORT_SESSION_TTL_SECONDS = 24 * 60 * 60
 MARKDOWN_IMPORT_SESSION_MAX_ARTIFACTS = 10_000
 MARKDOWN_IMPORT_SESSION_MAX_BYTES = 20 * 1024 * 1024 * 1024
 MARKDOWN_IMPORT_SESSION_UPLOAD_MAX_BYTES = 512 * 1024 * 1024
+# 浏览器脚本预检只接受有限正文，避免把大正文一次性放入请求和解析内存。
+MARKDOWN_IMPORT_PREPARE_MAX_MARKDOWN_BYTES = 5 * 1024 * 1024
 
 # Wagtail 设置
 WAGTAIL_SITE_NAME = "wagtailblog3"

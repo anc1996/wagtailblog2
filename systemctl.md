@@ -439,7 +439,7 @@ systemctl start wagtailblog3-filebeat.service
 
 ### Markdown 导入客户端启动确认
 
-Windows 客户端 `markdown-importer.exe` 向生产网站上传时，网站、maintenance Worker 和 Beat
+浏览器 userscript 只在用户打开文章页面时运行，不是生产服务器上的 systemd 进程，不会随服务器开机自动执行；它提交导入会话后，由下方自动启动的 maintenance Worker 负责组装未发布草稿，Beat 负责过期会话和失败补偿。Windows 客户端 `markdown-importer.exe` 向生产网站上传时，网站、maintenance Worker 和 Beat
 必须同时运行；否则媒体虽然可能上传完成，但草稿组装或会话过期补偿会无人处理。生产服务器已将这四个
 项目服务设为 `enabled`，并且 maintenance Worker 使用 `Restart=always`。服务器正常开机后，先按上节
 顺序启动或确认服务，再执行以下命令：

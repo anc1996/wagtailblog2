@@ -230,3 +230,11 @@ python manage.py test wagtailblog3.apps.blog
 - 服务影响与验收：依赖变更需按顺序重启 `wagtailblog3.service`、`wagtailblog3-celery-maintenance.service`、`wagtailblog3-celery-beat.service`；不修改 unit，故不执行 `daemon-reload`。Filebeat 配置与日志路径未变，不重启。重启后核对三项服务和既有 Filebeat 均为 `active/enabled`，检查 Django、首页、后台入口、socket/端口与近期错误日志。
 - 回滚：发布前生产 commit `97a661b1e2f579ff549366b62234680d7688dfaf` 和 Wagtail 7.4.2 为回滚点。若安装或健康检查失败，停止本次涉及服务、fast-forward 以外不得改写历史；在确认生产仓库状态后恢复该 commit、安装 `Wagtail==7.4.2` 并按相同顺序重启，再执行 Django 与访问检查。无数据库、MongoDB 或媒体回滚。
 - 模型/推理强度建议：生产发布和回滚判断属于高风险工作，建议 `gpt-5.6-sol` 高推理独立复核；当前会话使用可用 Codex 模型执行，并以 SSH 状态、Git、依赖和健康检查作为门禁。任何模型选择不替代生产授权、测试或回滚验证。
+
+#### 实施记录
+
+- 2026-08-21：已提交并推送生产候选 `7583ff7dfde00920a21f6e0aa00ee7f1cdb9e815`（`chore: upgrade Wagtail to 7.4.3`）。WSL2 `HEAD`、`origin/main` 和 GitHub `main` 均为该 SHA；生产工作树原本干净且仅落后一个相同 commit，核对变更清单后已用 `git merge --ff-only origin/main` 同步，生产 `HEAD` 现为该 SHA 且工作树干净。
+- 依赖安装：生产服务实际使用的 Python 为 `/root/anaconda3/envs/wagtailblog/bin/python`。该环境的 `bin/pip` 使用 `env python`，非交互 SSH 会解析到 Conda 基础环境，故完整 requirements 安装在 `mysqlclient` 构建阶段失败，未进入安装阶段；未重启服务。随后使用正确解释器的 `python -m pip install --no-deps Wagtail==7.4.3`，只卸载 7.4.2 并安装 7.4.3。`python -m pip check` 通过。
+- 生产检查：`WAGTAILBLOG_ENV=production python manage.py check` 通过；`makemigrations --check --dry-run` 为 `No changes detected`；`migrate --plan` 为 `No planned migration operations`，未应用迁移、未执行数据或受保护内容操作。迁移计划仍显示项目既有 MySQL 条件唯一约束警告。
+- 服务与健康检查：已重启 `wagtailblog3.service`、`wagtailblog3-celery-maintenance.service` 与 `wagtailblog3-celery-beat.service`；三者均为 `active/enabled`，Filebeat 未重启且保持 `active/enabled`。uWSGI 在 `2026-08-21 18:17:31 CST` 完成启动，监听 `0.0.0.0:6051` 并创建 `/home/source/Django/wagtail/wagtailblog3/wagtailblog3.sock`。直连应用端口验证首页为 `302 -> /zh-hans/ -> 200`，后台为 `302 -> /admin/login/ -> 200`。Nginx 为 `active`；其 `:80` 默认站点不是本项目反向代理入口，故只将 uWSGI 直连结果作为本项目 HTTP 证据。
+- 数据、配置与回滚：未修改 `.env.production`、systemd unit、Nginx、Filebeat 配置、数据库、MongoDB、Redis、MinIO、页面、revision 或媒体，`systemctl.md` 无需更新。回滚点仍为生产前 commit `97a661b1e2f579ff549366b62234680d7688dfaf` 与 Wagtail 7.4.2；本记录待以文档收尾 commit 推送并同步到生产，不需要再次重启服务。

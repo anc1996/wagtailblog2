@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         下载文章为 Markdown 并预检导入博客
 // @namespace    https://wagtailblog.local/userscript
-// @version      0.3.15
+// @version      0.3.16
 // @description  将支持网站的正文转换为 Markdown，可预检后创建未发布博客草稿；请尊重原文版权。
 // @author       waahah
 // @match        *://blog.csdn.net/*
@@ -1253,7 +1253,7 @@ var TurndownService = (function () {
 
     {
         const blogConfigKey = 'zuihuitao.blogImport.v1';
-        const blogImportVersion = '0.3.15';
+        const blogImportVersion = '0.3.16';
         const defaultBlogConfig = {
             siteUrl: '',
             token: '',

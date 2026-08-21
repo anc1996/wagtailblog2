@@ -1314,3 +1314,21 @@ Playwright 截图、trace、HTML、日志全部写入 `output/playwright/userscr
 #### 模型/推理强度实际使用
 
 - 只读调研和浏览器证据使用 `luna + 中推理`；Django/userscript 实现、测试和发布复核使用 `terra + 中推理`。本批未触发不可逆迁移、生产数据修复或跨系统安全升级条件，未使用 `sol`。
+
+### 23.32 userscript 正式版本递增（2026-08-21）
+
+#### 背景与实施
+
+- 复核发现上一生产提交中的正式脚本仍标记为 `0.3.15`，TEST 副本为 `0.3.15-test.1`；虽然代码功能已更新，但 AdGuard 可能因版本号相同继续运行旧副本。
+- 已将正式脚本 `@version` 与运行时 `blogImportVersion` 升至 `0.3.16`，TEST 构建默认值升至 `0.3.16-test.1`，并同步更新版本静态回归断言。
+
+#### 验证与发布门禁
+
+- TEST 副本已重新生成，SHA-256 为 `417869fb558a140e20ff9cfb14e4440a1caaaf200bb292c701b5f966c21fd819`；正式与 TEST userscript 均通过 `node --check`。
+- WSL2 定向测试 41/41 通过，`manage.py check` 通过，`makemigrations --check --dry-run` 为 `No changes detected`。本批仅修改版本标识和测试断言，不创建数据、不改变 API/CORS 规则。
+- 待提交、推送和生产同步后，正式脚本版本为 `0.3.16`；用户侧应停用旧的 `0.3.15-test.1`，安装新的 `0.3.16-test.1`。
+
+#### 回滚与模型实际使用
+
+- 回滚仅需恢复上一提交中的两个版本标识、构建默认值和断言，再重新生成 TEST 副本；不涉及生产数据库或服务数据回滚。
+- 实际使用 `terra + 中推理` 完成版本递增与测试，未触发高风险发布升级条件。

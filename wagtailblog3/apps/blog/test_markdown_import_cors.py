@@ -159,8 +159,8 @@ class MarkdownImportCorsTests(SimpleTestCase):
         script_path = Path(__file__).resolve().parents[2] / "static/vendor/Script/downlaod_markdown.js"
         source = script_path.read_text(encoding="utf-8")
 
-        self.assertIn("// @version      0.3.15", source)
-        self.assertIn("const blogImportVersion = '0.3.15';", source)
+        self.assertIn("// @version      0.3.16", source)
+        self.assertIn("const blogImportVersion = '0.3.16';", source)
         self.assertIn("#zuihuitao-blog-import form{display:block!important}", source)
 
     def test_userscript_supports_the_three_new_article_containers(self):

@@ -1326,7 +1326,8 @@ Playwright 截图、trace、HTML、日志全部写入 `output/playwright/userscr
 
 - TEST 副本已重新生成，SHA-256 为 `417869fb558a140e20ff9cfb14e4440a1caaaf200bb292c701b5f966c21fd819`；正式与 TEST userscript 均通过 `node --check`。
 - WSL2 定向测试 41/41 通过，`manage.py check` 通过，`makemigrations --check --dry-run` 为 `No changes detected`。本批仅修改版本标识和测试断言，不创建数据、不改变 API/CORS 规则。
-- 待提交、推送和生产同步后，正式脚本版本为 `0.3.16`；用户侧应停用旧的 `0.3.15-test.1`，安装新的 `0.3.16-test.1`。
+- 已提交并推送 `4308d3773e963a3a281bdd2c8257e40614da31f8`，本地 `HEAD`、`origin/main` 与生产仓库均已同步到该 SHA。生产已完成 `collectstatic --noinput`，并重启 `wagtailblog3.service`；服务为 `active/enabled`，失败 unit 为 0，后台入口返回 HTTP 200。生产 prepare API 的 CORS OPTIONS 返回 HTTP 200，并正确返回 `http://opinion.people.com.cn` 的精确允许来源及私有网络响应头。
+- 正式脚本版本为 `0.3.16`；用户侧应停用旧的 `0.3.15-test.1`，安装新的 `0.3.16-test.1` 并刷新文章页面。本批未创建草稿、session、媒体或 revision，也未修改数据库内容。
 
 #### 回滚与模型实际使用
 

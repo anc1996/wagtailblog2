@@ -118,7 +118,7 @@ urllib3==1.26.20
 uuid==1.30
 uWSGI==2.0.30
 vine==5.1.0
-wagtail==7.4.2
+wagtail==7.4.3
 wagtail-modeladmin==2.3.0
 wagtail-video==1.0.1
 wagtailcodeblock==1.30.0.0

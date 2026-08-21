@@ -1290,3 +1290,27 @@ Playwright 截图、trace、HTML、日志全部写入 `output/playwright/userscr
 
 - 本次仅完成浏览器、HTTP 和日志核验并更新方案文档，未修改 API、Token、数据库、Worker、生产服务或 `systemctl.md`，未创建 session、媒体或草稿。
 - 回滚点为恢复本方案文档记录；无数据回滚。生产环境仍需单独按发布门禁同步当前 CORS 配置，不能用本地 8080 的验证替代生产验收。
+
+### 23.31 正式提交与生产发布（2026-08-21）
+
+#### 发布范围与提交
+
+- 用户已明确授权提交并部署最新 Markdown 导入 userscript、只读 prepare API、精确 CORS 配置、测试和维护文档。
+- 代码提交 `b3f2ecf0c328e64d7f33b2edfa09eccbc7e81666` 已推送 `origin/main`；生产仓库从 `ab88116b3cc4e68cf125e28e5552ba566ff35eeb` 安全 fast-forward 到同一 SHA，生产工作树干净。
+- `systemctl.md` 已增加“Markdown 导入 userscript 与 CORS 重要维护规则”，明确以后新增网站必须同步更新 `@match`、真实正文选择器、精确 CORS、回归测试、版本和浏览器验收。
+
+#### 测试、发布与服务影响
+
+- WSL2 `wagtailblog-test` 定向测试 41/41 通过；`manage.py check` 通过；`makemigrations --check --dry-run` 为 `No changes detected`；正式与 TEST userscript 均通过 `node --check`；TEST 副本 `0.3.15-test.1` SHA-256 为 `05f404d5cc1fd182e048d5ba939c65350a69a576f9e957fead459ebf1308dff2`。
+- 生产 `WAGTAILBLOG_ENV=production` 下 `manage.py check` 通过，迁移 dry-run 无变更；`collectstatic --noinput` 完成 1 个新增静态文件、1492 个未修改文件和 842 个 post-process。
+- 仅重启 `wagtailblog3.service`（uWSGI/Django）；`wagtailblog3-celery-maintenance.service`、Beat、Filebeat 未重启且四个服务最终均为 `active/enabled`。生产后台 HTTP 200；API OPTIONS 为 200，实际无效 Bearer POST 为 401 JSON，并返回 `Access-Control-Allow-Origin: http://opinion.people.com.cn`。
+- 未执行迁移、索引、Token 创建、session、媒体上传、BlogPage 草稿、revision、MongoDB 正文或页面发布；`systemctl.md` 已更新，未修改 unit、端口、Nginx 或基础设施。
+
+#### 回滚与残余风险
+
+- 代码回滚点为生产上一已验证 SHA `ab88116b3cc4e68cf125e28e5552ba566ff35eeb`；回滚时将生产仓库 fast-forward/恢复到该 SHA，重新 `collectstatic` 并重启 `wagtailblog3.service`，不回滚数据库内容。
+- 残余风险为外部网站模板变化、用户 AdGuard 中残留旧 userscript，以及未来新增网站忘记同步 CORS。生产数据写入和草稿创建仍需用户在脚本界面显式操作。
+
+#### 模型/推理强度实际使用
+
+- 只读调研和浏览器证据使用 `luna + 中推理`；Django/userscript 实现、测试和发布复核使用 `terra + 中推理`。本批未触发不可逆迁移、生产数据修复或跨系统安全升级条件，未使用 `sol`。

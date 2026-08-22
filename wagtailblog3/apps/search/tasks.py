@@ -1,4 +1,5 @@
 import logging
+from typing import Any
 
 from celery import shared_task
 from django.conf import settings
@@ -13,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 @shared_task(name="search.tasks.wake_content_search_delivery", ignore_result=True)
-def wake_content_search_delivery(event_id=None):
+def wake_content_search_delivery(event_id: Any = None) -> int:
     """提交后快速唤醒 dispatcher；数据库状态仍是唯一可靠的任务来源。"""
 
     if not settings.CONTENT_SEARCH_CONSUMER_ENABLED:
@@ -24,14 +25,14 @@ def wake_content_search_delivery(event_id=None):
 
 
 @shared_task(name="search.tasks.consume_content_search_delivery", ignore_result=True)
-def consume_content_search_delivery(delivery_id):
+def consume_content_search_delivery(delivery_id: int) -> Any:
     """maintenance Worker 入口：领取一个租约并以至少一次语义完成索引投递。"""
 
     return process_content_search_delivery(delivery_id)
 
 
 @shared_task(name="search.tasks.dispatch_pending_content_search_deliveries", ignore_result=True)
-def dispatch_pending_content_search_deliveries(limit=None):
+def dispatch_pending_content_search_deliveries(limit: int | None = None) -> int:
     """Beat 补偿待处理和过期租约 Delivery；broker 失败不会改变持久化状态。"""
 
     if not settings.CONTENT_SEARCH_CONSUMER_ENABLED:

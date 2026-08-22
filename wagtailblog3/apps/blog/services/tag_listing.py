@@ -1,5 +1,6 @@
-"""Read-only query service for the public tag index page."""
+"""公开标签索引和标签文章列表的只读查询服务。"""
 
+from typing import Any
 from django.core.paginator import Paginator
 from django.db.models import Count
 from django.utils.dateparse import parse_date
@@ -8,8 +9,12 @@ from taggit.models import Tag
 from blog.models import BlogPage
 
 
-def normalise_date_filter(value):
-    """Return a canonical ISO date string and parsed date, or an empty filter."""
+def normalise_date_filter(value: object) -> tuple[str, Any]:
+    """规范化日期过滤条件。
+
+    返回 ISO 日期字符串和解析后的日期对象；空值、格式错误或不可解析日期返回空字符串
+    与 ``None``，让调用方统一忽略无效筛选而不把异常暴露给列表页。
+    """
     text = (value or "").strip()
     try:
         parsed = parse_date(text) if text else None
@@ -22,11 +27,15 @@ def normalise_date_filter(value):
 
 def get_tag_index_context(
     *,
-    query_params,
-    tag_page_size,
-    article_page_size,
-):
-    """Build the shared context for full-page and asynchronous tag listings."""
+    query_params: Any,
+    tag_page_size: int,
+    article_page_size: int,
+) -> dict[str, Any]:
+    """构造完整页面和异步标签列表共用的上下文。
+
+    当存在 tag slug 时查询公开文章并按日期分页；没有 slug 时查询仍被公开文章引用的
+    标签并按引用数排序。所有分支都只使用 live/public 页面，避免草稿或受限页面泄露。
+    """
     requested_tag_slug = (query_params.get("tag") or "").strip()
     search_query = (query_params.get("q") or "").strip()
     start_date, start_date_value = normalise_date_filter(

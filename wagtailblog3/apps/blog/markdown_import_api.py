@@ -1,3 +1,10 @@
+"""Markdown 导入 API：解析请求、校验媒体清单并驱动同步或分阶段导入。
+
+该模块只负责 API 契约和状态编排；正文解析、媒体探测/存储、页面组装和补偿分别委托
+给 service 层。所有入口都要求认证，创建批次前完成权限、大小、哈希和幂等校验，失败
+时保留可审计的 batch/artifact 记录，避免页面、Mongo 草稿指针或媒体对象出现孤儿。
+"""
+
 import hashlib
 import json
 import re
@@ -73,16 +80,20 @@ from content_ai.services.blog_metadata import (
 
 
 class MarkdownImportRequestError(ValueError):
+    """携带稳定错误编码的请求校验异常，由基类视图转换为 DRF 响应。"""
+
     def __init__(self, code: str):
         self.code = code
         super().__init__(code)
 
 
 def _error(code: str, status: int) -> Response:
+    """构造统一失败响应，不把内部异常正文暴露给客户端。"""
     return Response({"status": "failed", "code": code}, status=status)
 
 
-def _payload(request) -> dict[str, Any]:
+def _payload(request: Any) -> dict[str, Any]:
+    """读取 JSON 或 multipart 中的 manifest，并确保最终是字典。"""
     data = request.data
     if isinstance(data, QueryDict):
         raw_manifest = data.get("manifest")
@@ -96,7 +107,8 @@ def _payload(request) -> dict[str, Any]:
     return data
 
 
-def _target_parent(payload, user):
+def _target_parent(payload: dict[str, Any], user: Any) -> BlogIndexPage:
+    """校验目标索引页 ID、全局添加权限和页面级子页权限。"""
     try:
         parent_id = int(payload.get("target_parent_id"))
     except (TypeError, ValueError) as exc:
@@ -112,7 +124,8 @@ def _target_parent(payload, user):
     return parent
 
 
-def _blocks(payload) -> tuple[MarkdownImportBlock, ...]:
+def _blocks(payload: dict[str, Any]) -> tuple[MarkdownImportBlock, ...]:
+    """把客户端块清单转换为不可变解析块，并校验允许的 block 类型和媒体 source。"""
     raw_blocks = payload.get("blocks")
     if not isinstance(raw_blocks, list):
         raise MarkdownImportRequestError("blocks_invalid")
@@ -148,7 +161,8 @@ def _blocks(payload) -> tuple[MarkdownImportBlock, ...]:
     return attach_table_inline_images(blocks)
 
 
-def _date_value(payload):
+def _date_value(payload: dict[str, Any]) -> date:
+    """解析 ISO 日期；缺省使用当天，格式错误返回稳定请求错误。"""
     raw_value = str(payload.get("date") or date.today().isoformat())
     try:
         return date.fromisoformat(raw_value)
@@ -156,7 +170,8 @@ def _date_value(payload):
         raise MarkdownImportRequestError("date_invalid") from exc
 
 
-def _tags(payload) -> tuple[str, ...]:
+def _tags(payload: dict[str, Any]) -> tuple[str, ...]:
+    """清理标签空白并限制数量/单项长度，返回去空后的元组。"""
     raw_tags = payload.get("tags", [])
     if raw_tags is None:
         return ()
@@ -168,7 +183,8 @@ def _tags(payload) -> tuple[str, ...]:
     return tags
 
 
-def _upload_digest(upload):
+def _upload_digest(upload: Any) -> tuple[int, str]:
+    """分块计算上传文件大小和 SHA-256，并恢复文件指针到开头。"""
     digest = hashlib.sha256()
     size = 0
     upload.seek(0)
@@ -179,7 +195,8 @@ def _upload_digest(upload):
     return size, digest.hexdigest()
 
 
-def _intro(payload) -> str:
+def _intro(payload: dict[str, Any]) -> str:
+    """校验并返回必填简介，限制最大 5000 字符。"""
     raw_intro = payload.get("intro")
     if not isinstance(raw_intro, str):
         raise MarkdownImportRequestError("intro_invalid")
@@ -191,7 +208,17 @@ def _intro(payload) -> str:
     return intro
 
 
-def _artifact_manifest(payload, blocks):
+def _artifact_manifest(
+    payload: dict[str, Any],
+    blocks: tuple[MarkdownImportBlock, ...],
+) -> list[dict[str, Any]]:
+    """校验客户端媒体清单与正文引用的一致性。
+
+    清单校验覆盖 UUIDv4、HTTPS/本地来源、媒体类型、引用范围、出现 ID、文件名、上传
+    字段、SHA-256、大小和位置。算法先从服务端解析块建立 source/type/scope 期望集合，
+    再逐项验证客户端清单并检查是否完整覆盖；因此客户端不能新增正文未引用的媒体，
+    也不能把同一 source 伪装成另一种类型或绕过远程协议限制。
+    """
     raw = payload.get("artifacts", [])
     if not isinstance(raw, list):
         raise MarkdownImportRequestError("artifacts_invalid")
@@ -343,7 +370,9 @@ def _artifact_manifest(payload, blocks):
     return manifests
 
 
-def _fingerprint_payload(payload, manifests):
+def _fingerprint_payload(
+    payload: dict[str, Any], manifests: list[dict[str, Any]]
+) -> dict[str, Any]:
     """幂等指纹只包含业务内容，忽略每次传输都会变化的 artifact UUID 和字段名。"""
 
     return {
@@ -364,7 +393,8 @@ def _fingerprint_payload(payload, manifests):
     }
 
 
-def _batch_response(batch):
+def _batch_response(batch: Any) -> dict[str, Any]:
+    """将同步批次对象转换为稳定的简短响应。"""
     return {
         "status": getattr(batch, "status", MarkdownImportBatchStatus.PROCESSING),
         "batch_id": str(batch.batch_id),
@@ -373,7 +403,9 @@ def _batch_response(batch):
     }
 
 
-def _session_manifest(payload, manifests):
+def _session_manifest(
+    payload: dict[str, Any], manifests: list[dict[str, Any]]
+) -> dict[str, Any]:
     """把 UUID/tuple 转为 JSON 标量，确保会话可在 worker 重启后恢复。"""
 
     serialized = dict(payload)
@@ -393,7 +425,8 @@ def _session_manifest(payload, manifests):
     return serialized
 
 
-def _cleanup_import_artifact(artifact):
+def _cleanup_import_artifact(artifact: Any) -> bool:
+    """根据 artifact 的 storage alias 和模型引用保护规则执行精确清理。"""
     alias = artifact.storage_alias
     storage_registry = {}
     if alias:
@@ -403,7 +436,7 @@ def _cleanup_import_artifact(artifact):
             # 让 cleanup 服务把未知 alias 记为 retry，而不是丢失补偿证据。
             storage_registry = {}
 
-    def reference_guard(current):
+    def reference_guard(current: Any) -> bool:
         # 导入对象名含 artifact UUID，页面删除和 Mongo 草稿删除后只需阻止其他审计行复用同一模型对象。
         return MarkdownImportArtifact.objects.filter(
             media_model=current.media_model,
@@ -418,6 +451,8 @@ def _cleanup_import_artifact(artifact):
 
 
 class MarkdownImportBaseView(APIView):
+    """所有 Markdown 导入端点共用的认证、权限和请求异常适配基类。"""
+
     authentication_classes = (
         MarkdownImportTokenAuthentication,
         JWTAuthentication,
@@ -425,7 +460,8 @@ class MarkdownImportBaseView(APIView):
     )
     permission_classes = (IsAuthenticated,)
 
-    def dispatch(self, request, *args, **kwargs):
+    def dispatch(self, request: Any, *args: Any, **kwargs: Any) -> Response:
+        """将业务校验异常转换为已完成 DRF 协商的错误响应。"""
         try:
             return super().dispatch(request, *args, **kwargs)
         except MarkdownImportRequestError as exc:
@@ -436,7 +472,9 @@ class MarkdownImportBaseView(APIView):
 
 
 class MarkdownImportLimitsView(MarkdownImportBaseView):
-    def get(self, request):
+    """返回客户端上传、媒体探测和 session 协议的只读限制。"""
+
+    def get(self, request: Any) -> Response:
         return Response(
             {
                 "max_image_size": getattr(settings, "WAGTAILIMAGES_MAX_UPLOAD_SIZE", None),
@@ -455,7 +493,9 @@ class MarkdownImportLimitsView(MarkdownImportBaseView):
 
 
 class MarkdownImportDestinationsView(MarkdownImportBaseView):
-    def get(self, request):
+    """列出当前用户可创建 BlogPage 子页的索引页。"""
+
+    def get(self, request: Any) -> Response:
         if not request.user.has_perm("blog.add_blogpage"):
             return _error("import_permission_denied", 403)
         destinations = []
@@ -472,7 +512,8 @@ class MarkdownImportDestinationsView(MarkdownImportBaseView):
 class MarkdownImportDuplicateTitlesView(MarkdownImportBaseView):
     """只读检查目标索引页下的同标题页面，不阻断新草稿创建。"""
 
-    def post(self, request):
+    def post(self, request: Any) -> Response:
+        """只读返回目标索引页下同标题页面，不创建或修改页面。"""
         payload = _payload(request)
         parent = _target_parent(payload, request.user)
         titles = payload.get("titles", [])
@@ -505,7 +546,8 @@ class MarkdownImportDuplicateTitlesView(MarkdownImportBaseView):
 class MarkdownImportMetadataTemplatesView(MarkdownImportBaseView):
     """返回当前可选模板；目标索引页权限仍是导入客户端的访问边界。"""
 
-    def get(self, request):
+    def get(self, request: Any) -> Response:
+        """校验目标页面权限后返回当前启用的元数据模板。"""
         _target_parent(request.query_params, request.user)
         return Response(
             {"templates": [template.as_dict() for template in list_active_blog_metadata_templates()]}
@@ -515,7 +557,8 @@ class MarkdownImportMetadataTemplatesView(MarkdownImportBaseView):
 class MarkdownImportMetadataSuggestionView(MarkdownImportBaseView):
     """按显式模板生成建议，不保存页面、批次或正文。"""
 
-    def post(self, request):
+    def post(self, request: Any) -> Response:
+        """调用显式 AI 模板生成建议，不保存页面、批次或正文。"""
         payload = _payload(request)
         _target_parent(payload, request.user)
         context = payload.get("context")
@@ -561,7 +604,9 @@ class MarkdownImportMetadataSuggestionView(MarkdownImportBaseView):
 
 
 class MarkdownImportPreviewView(MarkdownImportBaseView):
-    def post(self, request):
+    """执行目标页面、块和行内图片校验，返回预览统计，不产生持久化副作用。"""
+
+    def post(self, request: Any) -> Response:
         payload = _payload(request)
         _target_parent(payload, request.user)
         blocks = _blocks(payload)
@@ -595,7 +640,8 @@ class MarkdownImportPreviewView(MarkdownImportBaseView):
 class MarkdownImportUserscriptPrepareView(MarkdownImportBaseView):
     """为浏览器脚本生成只读导入计划，不创建任何导入对象。"""
 
-    def post(self, request):
+    def post(self, request: Any) -> Response:
+        """为浏览器 userscript 生成服务端解析的块和媒体计划。"""
         payload = _payload(request)
         _target_parent(payload, request.user)
 
@@ -644,7 +690,12 @@ class MarkdownImportUserscriptPrepareView(MarkdownImportBaseView):
 class MarkdownImportSessionCreateView(MarkdownImportBaseView):
     """创建大批量会话；正文清单只入库一次，媒体随后逐个上传。"""
 
-    def post(self, request):
+    def post(self, request: Any) -> Response:
+        """创建幂等 session 和 artifact 审计行，不在本请求上传媒体。
+
+        事务只覆盖 batch/session/artifact 清单写入；清单失败时删除本次新认领的空 batch，
+        防止幂等键永久占用。客户端后续按 artifact 单独上传，worker 再组装页面。
+        """
         payload = _payload(request)
         parent = _target_parent(payload, request.user)
         blocks = _blocks(payload)
@@ -725,7 +776,8 @@ class MarkdownImportSessionCreateView(MarkdownImportBaseView):
         return Response(session_payload(session), status=201)
 
 
-def _owned_session(session_id, user):
+def _owned_session(session_id: object, user: Any) -> MarkdownImportSession:
+    """解析 session UUID 并限制只能访问当前用户所属的 session。"""
     try:
         session_uuid = uuid.UUID(str(session_id))
     except (TypeError, ValueError) as exc:
@@ -741,14 +793,26 @@ def _owned_session(session_id, user):
 
 
 class MarkdownImportSessionDetailView(MarkdownImportBaseView):
-    def get(self, request, session_id):
+    """返回当前用户 session 的轮询状态。"""
+
+    def get(self, request: Any, session_id: object) -> Response:
         return Response(session_payload(_owned_session(session_id, request.user)))
 
 
 class MarkdownImportSessionArtifactUploadView(MarkdownImportBaseView):
     """每个请求最多接收一个文件，避免 Django multipart 文件计数成为瓶颈。"""
 
-    def post(self, request, session_id, artifact_id):
+    def post(
+        self,
+        request: Any,
+        session_id: object,
+        artifact_id: object,
+    ) -> Response:
+        """校验单个文件大小/哈希后导入 artifact，并推进 session 完成计数。
+
+        每次请求只允许一个文件；artifact 行锁把重复上传收敛为已成功/处理中分支，媒体
+        校验或存储失败只标记当前 artifact 缺失，不阻断同一 session 的其他媒体。
+        """
         session = _owned_session(session_id, request.user)
         if session.status in {
             MarkdownImportSessionStatus.EXPIRED,
@@ -833,7 +897,9 @@ class MarkdownImportSessionArtifactUploadView(MarkdownImportBaseView):
 
 
 class MarkdownImportSessionFinalizeView(MarkdownImportBaseView):
-    def post(self, request, session_id):
+    """确认所有 artifact 已结束并投递异步页面组装任务。"""
+
+    def post(self, request: Any, session_id: object) -> Response:
         session = _owned_session(session_id, request.user)
         if session_expired(session):
             from blog.services.markdown_import_sessions import _mark_expired
@@ -857,7 +923,14 @@ class MarkdownImportSessionFinalizeView(MarkdownImportBaseView):
 
 
 class MarkdownImportView(MarkdownImportBaseView):
-    def post(self, request):
+    """兼容旧客户端的一次性 Markdown 导入入口。
+
+    先完成权限、解析、清单、指纹和幂等认领，再逐个校验/保存媒体并组装草稿。任一
+    阶段失败都调用页面、Mongo 草稿指针和精确媒体 artifact 补偿；补偿不完整时批次
+    保持 ``CLEANUP_RETRY``，避免把受保护数据误判为已清理。
+    """
+
+    def post(self, request: Any) -> Response:
         payload = _payload(request)
         parent = _target_parent(payload, request.user)
         blocks = _blocks(payload)
@@ -913,7 +986,7 @@ class MarkdownImportView(MarkdownImportBaseView):
                     )
                     artifacts.append(artifact)
 
-            def importer(artifact):
+            def importer(artifact: Any) -> Any:
                 item = next(item for item in manifests if item["artifact_id"] == artifact.artifact_id)
                 upload = request.FILES.get(item["upload_field"])
                 if upload is None:

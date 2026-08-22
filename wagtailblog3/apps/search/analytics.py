@@ -1,4 +1,8 @@
 # 搜索统计分析工具
+from __future__ import annotations
+
+from typing import Any
+
 from wagtail.contrib.search_promotions.models import Query
 from django.db.models import Count, F, IntegerField
 from django.db.models.functions import Coalesce
@@ -9,10 +13,11 @@ logger = logging.getLogger(__name__)
 
 
 class SearchAnalytics:
+    """搜索统计工具；只读取查询统计，不参与搜索索引。"""
     """搜索分析工具"""
 
     @staticmethod
-    def get_popular_searches(days=30, limit=10):
+    def get_popular_searches(days: int = 30, limit: int = 10) -> list[dict[str, Any]]:
         """获取热门搜索词"""
         # 通过 daily_hits 关联表统计时间范围内的真实点击记录。
         start_date = datetime.now() - timedelta(days=days)
@@ -33,7 +38,7 @@ class SearchAnalytics:
         ]
 
     @staticmethod
-    def get_search_trends(days=30, order_by=None):
+    def get_search_trends(days: int = 30, order_by: str | None = None) -> list[dict[str, Any]]:
         """获取搜索趋势，支持排序"""
         # 先按天聚合，再使用白名单映射排序字段，避免把用户输入直接交给 ORM。
         start_date = datetime.now() - timedelta(days=days)
@@ -69,7 +74,7 @@ class SearchAnalytics:
         return list(daily_stats_query)
 
     @staticmethod
-    def log_search(query, results_count, search_type='all'):
+    def log_search(query: str, results_count: int, search_type: str = 'all') -> None:
         """记录搜索行为"""
         try:
             # 这里可以扩展记录更多信息

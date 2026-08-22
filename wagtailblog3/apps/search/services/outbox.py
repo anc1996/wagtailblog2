@@ -1,4 +1,5 @@
 import logging
+from typing import Any
 
 from django.conf import settings
 from django.db import transaction
@@ -19,7 +20,7 @@ from search.tasks import wake_content_search_delivery
 logger = logging.getLogger(__name__)
 
 
-def schedule_content_search_wakeup(event_id):
+def schedule_content_search_wakeup(event_id: Any) -> None:
     """消息发送失败不能回滚已提交的 Outbox，Beat 会在 WP3C 负责补偿扫描。"""
 
     try:
@@ -35,7 +36,7 @@ class ContentSearchOutboxService:
     """把公开页面状态变更和 Outbox 事件写入同一 MySQL 事务。"""
 
     @classmethod
-    def record_publication(cls, page):
+    def record_publication(cls, page: Any) -> Any:
         if not settings.CONTENT_SEARCH_PRODUCER_ENABLED:
             return None
         if not cls._is_public(page.pk):
@@ -62,19 +63,19 @@ class ContentSearchOutboxService:
         )
 
     @classmethod
-    def record_unpublish(cls, page):
+    def record_unpublish(cls, page: Any) -> Any:
         if not settings.CONTENT_SEARCH_PRODUCER_ENABLED:
             return None
         return cls._record_tombstone(page)
 
     @classmethod
-    def record_delete(cls, page):
+    def record_delete(cls, page: Any) -> Any:
         if not settings.CONTENT_SEARCH_PRODUCER_ENABLED:
             return None
         return cls._record_tombstone(page)
 
     @classmethod
-    def request_scope_recalculation(cls, root_page_id):
+    def request_scope_recalculation(cls, root_page_id: int) -> Any:
         if not settings.CONTENT_SEARCH_PRODUCER_ENABLED:
             return None
 
@@ -101,7 +102,7 @@ class ContentSearchOutboxService:
             return job
 
     @classmethod
-    def _record_tombstone(cls, page):
+    def _record_tombstone(cls, page: Any) -> Any:
         return cls._record_change(
             page_id=page.pk,
             operation=ContentSearchOperation.TOMBSTONE,
@@ -111,7 +112,14 @@ class ContentSearchOutboxService:
         )
 
     @classmethod
-    def _record_change(cls, page_id, operation, searchable, mongo_content_id, content_hash):
+    def _record_change(
+        cls,
+        page_id: int,
+        operation: str,
+        searchable: bool,
+        mongo_content_id: str | None,
+        content_hash: str | None,
+    ) -> ContentSearchOutbox:
         with transaction.atomic():
             # 首次发布时 State 尚不存在，先锁定 Page 行可避免两个发布请求并发创建不同初始版本。
             Page.objects.select_for_update().only("pk").get(pk=page_id)
@@ -143,5 +151,5 @@ class ContentSearchOutboxService:
             return event
 
     @staticmethod
-    def _is_public(page_id):
+    def _is_public(page_id: int) -> bool:
         return Page.objects.live().public().filter(pk=page_id).exists()

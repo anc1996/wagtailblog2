@@ -1,11 +1,13 @@
 """搜索评测指标计算。"""
 
 import math
+from typing import Any, Sequence
 
 
-def calculate_metrics(cases):
+def calculate_metrics(cases: Sequence[dict[str, Any]]) -> dict[str, Any]:
     """根据已人工标注的 Top 10 相关性和实际返回 ID 计算基线指标。"""
-    recalls = []
+    # 评估只读取离线样本，不访问搜索服务，也不会修改 Query 或分析数据。
+    recalls: list[float] = []
     reciprocal_ranks = []
     ndcgs = []
     latencies = []
@@ -61,7 +63,7 @@ def calculate_metrics(cases):
     }
 
 
-def _percentile(values, percentile):
+def _percentile(values: Sequence[float], percentile: float) -> float:
     ordered = sorted(values)
     index = max(0, math.ceil(percentile / 100 * len(ordered)) - 1)
     return ordered[index]

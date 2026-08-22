@@ -4,6 +4,7 @@ import re
 from collections import defaultdict
 from copy import deepcopy
 from html.parser import HTMLParser
+from typing import Any
 
 import markdown
 import nh3
@@ -30,30 +31,30 @@ class _RawHtmlMathParser(HTMLParser):
 
     _ignored_tags = {"code", "pre", "script", "style", "textarea"}
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(convert_charrefs=False)
         self.parts = []
         self._ignored_depth = 0
 
-    def handle_starttag(self, tag, attrs):
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         self.parts.append(self.get_starttag_text())
         if tag.lower() in self._ignored_tags:
             self._ignored_depth += 1
 
-    def handle_startendtag(self, tag, attrs):
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         self.parts.append(self.get_starttag_text())
 
-    def handle_endtag(self, tag):
+    def handle_endtag(self, tag: str) -> None:
         self.parts.append(f"</{tag}>")
         if tag.lower() in self._ignored_tags and self._ignored_depth:
             self._ignored_depth -= 1
 
-    def handle_data(self, data):
+    def handle_data(self, data: str) -> None:
         if self._ignored_depth or "$" not in data:
             self.parts.append(data)
             return
 
-        def display_replacement(match):
+        def display_replacement(match: re.Match[str]) -> str:
             return '<span class="arithmatex">\\[' + match.group(1).strip() + "\\]</span>"
 
         data = _DISPLAY_MATH_RE.sub(display_replacement, data)
@@ -65,36 +66,36 @@ class _RawHtmlMathParser(HTMLParser):
         )
         self.parts.append(data)
 
-    def handle_entityref(self, name):
+    def handle_entityref(self, name: str) -> None:
         self.parts.append(f"&{name};")
 
-    def handle_charref(self, name):
+    def handle_charref(self, name: str) -> None:
         self.parts.append(f"&#{name};")
 
-    def handle_comment(self, data):
+    def handle_comment(self, data: str) -> None:
         self.parts.append(f"<!--{data}-->")
 
-    def handle_decl(self, decl):
+    def handle_decl(self, decl: str) -> None:
         self.parts.append(f"<!{decl}>")
 
-    def render(self):
+    def render(self) -> str:
         return "".join(self.parts)
 
 
 class _PageLinkRewriter(LinkRewriter):
-    """Only resolve the Wagtail page links emitted by the Vditor widget."""
+    """只解析 Vditor 产生的 Wagtail 页面链接，保留其他锚点原样。"""
 
-    def get_tag_type_from_attrs(self, attrs):
+    def get_tag_type_from_attrs(self, attrs: dict[str, str]) -> str | None:
         return "page" if attrs.get("linktype") == "page" else None
 
 
 class _ImageEmbedRewriter(EmbedRewriter):
-    """Expand only valid Wagtail image embeds and leave other embeds alone."""
+    """只展开格式和 ID 均有效的 Wagtail 图片 embed，其他 embed 留给 nh3 处理。"""
 
-    def get_tag_type_from_attrs(self, attrs):
+    def get_tag_type_from_attrs(self, attrs: dict[str, str]) -> str | None:
         return "image" if attrs.get("embedtype") == "image" else None
 
-    def get_tag_replacements(self, tag_type, attrs_list):
+    def get_tag_replacements(self, tag_type: str | None, attrs_list: list[dict[str, str]]) -> list[str]:
         # EmbedRewriter drops unknown embed types by default. Markdown may contain
         # project-specific embeds, so leave those untouched for nh3 to handle.
         if tag_type is None:
@@ -163,12 +164,17 @@ class MarkdownRenderer:
     } # 属性
 
     @classmethod
-    def _settings(cls):
+    def _settings(cls) -> dict[str, Any]:
+        """读取 Markdown 渲染配置；配置只影响当前渲染，不修改原文。"""
         return getattr(settings, "BLOG_MARKDOWN", {})
 
     @classmethod
-    def prepare_source(cls, source):
-        """修复旧内容中的列表缩进，只作用于渲染副本。"""
+    def prepare_source(cls, source: object) -> str:
+        """修复旧内容中的列表缩进，只作用于渲染副本。
+
+        通过正则统一旧内容的二至三空格缩进，并在相邻列表层级缺少空行时补出边界；
+        这样 Markdown 解析器能稳定识别嵌套列表，同时不改变数据库中的原始正文。
+        """
         # 某些旧正文把引用符、缩进和列表标记组合在同一行；统一成四空格后才能被 Markdown 正确识别。
         source = smart_str(source or "")
         source = re.sub(
@@ -191,7 +197,7 @@ class MarkdownRenderer:
         return "\n".join(fixed_lines)
 
     @classmethod
-    def markdown_kwargs(cls):
+    def markdown_kwargs(cls) -> dict[str, Any]:
         config = cls._settings()
         kwargs = {
             "extensions": list(config.get("extensions", [])),
@@ -203,7 +209,7 @@ class MarkdownRenderer:
         return kwargs
 
     @classmethod
-    def nh3_kwargs(cls):
+    def nh3_kwargs(cls) -> dict[str, Any]:
         config = cls._settings()
         configured_attributes = config.get("allowed_attributes", {})
         attributes = defaultdict(set)
@@ -229,10 +235,10 @@ class MarkdownRenderer:
         return kwargs
 
     @classmethod
-    def expand_wagtail_page_links(cls, html):
-        """Resolve page-link IDs at render time without touching other anchors."""
+    def expand_wagtail_page_links(cls, html: str) -> str:
+        """在渲染时解析页面 ID，不触碰其他锚点。"""
 
-        def expand_page_links(attrs_list):
+        def expand_page_links(attrs_list: list[dict[str, str]]) -> list[str]:
             replacements = ["<a>"] * len(attrs_list)
             valid_indexes = []
             valid_attrs = []
@@ -259,11 +265,13 @@ class MarkdownRenderer:
         )(html)
 
     @classmethod
-    def expand_wagtail_image_embeds(cls, html):
+    def expand_wagtail_image_embeds(cls, html: str) -> str:
+        """展开经过 ID 和图片格式白名单校验的 Wagtail 图片 embed。"""
         return _ImageEmbedRewriter()(html)
 
     @classmethod
-    def expand_raw_html_math(cls, html):
+    def expand_raw_html_math(cls, html: str) -> str:
+        """只在原生 HTML 文本节点中补 KaTeX 分隔符，代码节点保持不变。"""
         # Python-Markdown 不会进入原生 HTML 的文本节点，复杂表格中的公式需要在
         # 清理前补充与 arithmatex 相同的 KaTeX 分隔符；代码节点保持原样。
         parser = _RawHtmlMathParser()
@@ -272,7 +280,8 @@ class MarkdownRenderer:
         return parser.render()
 
     @classmethod
-    def render(cls, source, context=None):
+    def render(cls, source: object, context: object = None) -> Any:
+        """依次执行 Markdown 转 HTML、Wagtail embed 展开和 nh3 白名单清理。"""
         # 保留 Wagtail 块渲染签名，但渲染规则只依赖正文和全局配置。
         del context
         # 先由 Markdown 扩展生成 HTML，再由 nh3 做白名单清洗，防止原始正文携带脚本或危险协议。

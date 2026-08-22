@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
+
 from django.utils.html import conditional_escape, strip_tags
 from django.utils.safestring import mark_safe
 
@@ -13,7 +15,8 @@ HIGHLIGHT_FRAGMENT_SIZE = 160
 BODY_HIGHLIGHT_MAX_ANALYZER_OFFSET = 100_000
 
 
-def safe_highlight_fragment(fragment):
+def safe_highlight_fragment(fragment: object) -> str:
+    """只保留转义文本和服务端生成的 mark 标签，拒绝原始 HTML。"""
     """只保留转义文本和服务端生成的 mark，拒绝索引中的原始 HTML。"""
 
     text = strip_tags(str(fragment))
@@ -23,7 +26,8 @@ def safe_highlight_fragment(fragment):
     return mark_safe(text)
 
 
-def build_highlight_fields(field_labels):
+def build_highlight_fields(field_labels: Sequence[tuple[str, str]]) -> dict[str, dict[str, int]]:
+    """根据字段标签构造 ES 高亮参数，并限制正文分析偏移。"""
     """统一旧索引和独立索引的片段数量、长度及正文分析上限。"""
 
     return {
@@ -41,7 +45,10 @@ def build_highlight_fields(field_labels):
     }
 
 
-def extract_safe_highlights(hit, field_labels):
+def extract_safe_highlights(
+    hit: Mapping[str, object], field_labels: Sequence[tuple[str, str]]
+) -> tuple[str, tuple[str, ...], str]:
+    """从单个 ES hit 提取已转义且去重的展示片段。"""
     """从单个 ES hit 提取经过转义和数量限制的展示片段。"""
 
     highlight = hit.get("highlight") or {}

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any, Iterable
 
 from django.conf import settings
 
@@ -22,7 +23,7 @@ class ContentSearchAliasSwitchResult:
     new_index: str
 
 
-def validate_content_search_alias(alias=None, index_prefix=None):
+def validate_content_search_alias(alias: str | None = None, index_prefix: str | None = None) -> str:
     """校验 read alias 只属于调用方指定的内容索引命名空间。"""
 
     if alias is None:
@@ -38,7 +39,11 @@ def validate_content_search_alias(alias=None, index_prefix=None):
     return alias
 
 
-def get_content_search_read_alias_indices(target, alias=None, index_prefix=None):
+def get_content_search_read_alias_indices(
+    target: Any,
+    alias: str | None = None,
+    index_prefix: str | None = None,
+) -> tuple[str, ...]:
     """读取 alias 的精确物理索引，并拒绝跨命名空间结果。"""
 
     if index_prefix is None:
@@ -66,7 +71,13 @@ def get_content_search_read_alias_indices(target, alias=None, index_prefix=None)
     return indices
 
 
-def switch_content_search_read_alias(target, new_index, alias=None, expected_indices=None, index_prefix=None):
+def switch_content_search_read_alias(
+    target: Any,
+    new_index: str,
+    alias: str | None = None,
+    expected_indices: Iterable[str] | None = None,
+    index_prefix: str | None = None,
+) -> ContentSearchAliasSwitchResult:
     """用一次 aliases API 将 read alias 切到明确物理索引。"""
 
     if index_prefix is None:
@@ -81,6 +92,7 @@ def switch_content_search_read_alias(target, new_index, alias=None, expected_ind
         alias,
         index_prefix=index_prefix,
     )
+    # 预期集合是并发发布保护：若读取后 alias 已变化，拒绝覆盖其他发布者的切换。
     if expected_indices is not None and tuple(sorted(expected_indices)) != current_indices:
         raise ContentSearchElasticsearchError("content_read_alias_changed", retryable=False)
     actions = [
@@ -101,7 +113,12 @@ def switch_content_search_read_alias(target, new_index, alias=None, expected_ind
     )
 
 
-def clear_content_search_read_alias(target, alias=None, expected_indices=None, index_prefix=None):
+def clear_content_search_read_alias(
+    target: Any,
+    alias: str | None = None,
+    expected_indices: Iterable[str] | None = None,
+    index_prefix: str | None = None,
+) -> tuple[str, ...]:
     """原子移除内容 alias，使前台可回退到旧搜索实现。"""
 
     if index_prefix is None:

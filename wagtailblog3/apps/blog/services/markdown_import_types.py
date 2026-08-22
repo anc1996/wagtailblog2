@@ -1,3 +1,5 @@
+"""Markdown 导入解析阶段使用的不可变块和行内图片数据对象。"""
+
 from dataclasses import dataclass
 from typing import Mapping, TypeAlias
 
@@ -26,7 +28,11 @@ class MarkdownInlineImage:
 
 @dataclass(frozen=True, slots=True)
 class MarkdownImportBlock:
-    """描述解析阶段的一个有序块，不包含数据库或存储对象。"""
+    """描述解析阶段的一个有序块，不包含数据库或存储对象。
+
+    ``value`` 保留可序列化的块内容，``source_*_line`` 用于错误定位，
+    ``inline_images`` 保存同一块内图片的稳定出现顺序；该对象只在解析/准备阶段存活。
+    """
 
     block_type: str
     value: BlockValue

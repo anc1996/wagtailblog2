@@ -1,9 +1,15 @@
-"""Wagtail admin endpoint used by Vditor clipboard image uploads."""
+"""Vditor 剪贴板图片上传使用的 Wagtail 管理端接口。
+
+该模块只负责把一次上传请求转换为 Wagtail 图片对象和结构化 JSON 响应。
+权限、图片格式、替代文本、collection 归属和 Wagtail 表单校验均在保存前完成；
+缩略图 rendition 属于保存原图后的派生步骤，失败时只记录日志，不让客户端重试整次上传。
+"""
 
 import logging
 import secrets
 import time
 from pathlib import Path
+from typing import Any
 
 from django.conf import settings
 from django.http import JsonResponse
@@ -18,14 +24,47 @@ from wagtail.images.permissions import permission_policy
 logger = logging.getLogger(__name__)
 
 
-def _error_response(code, message, status, *, details=None):
+def _error_response(
+    code: str,
+    message: str,
+    status: int,
+    *,
+    details: Any = None,
+) -> JsonResponse:
+    """构造统一的 JSON 错误响应。
+
+    参数：
+        code：供前端按程序分支处理的稳定错误编码。
+        message：面向调用方的简短错误说明。
+        status：HTTP 状态码，例如参数错误使用 400、权限错误使用 403。
+        details：可选的结构化补充信息，通常来自 Wagtail 表单字段错误。
+
+    返回：包含 ``error.code`` 和 ``error.message`` 的 :class:`JsonResponse`；
+        只有传入非空 ``details`` 时才附加 ``error.details``。
+    """
     payload = {"error": {"code": code, "message": message}}
     if details:
         payload["error"]["details"] = details
     return JsonResponse(payload, status=status)
 
 
-def _resolve_upload_collection(request):
+def _resolve_upload_collection(
+    request: Any,
+) -> tuple[Any, JsonResponse | None]:
+    """解析当前用户可写的图片 collection，并返回错误响应（如有）。
+
+    参数：
+        request：包含 ``user`` 和 ``POST`` 的 Django 请求对象；``collection_id``
+            来自请求参数，默认 collection 则来自配置项。
+
+    返回：``(collection, None)`` 表示可以继续保存；``(None, response)`` 表示
+        已构造好 400/403/409 错误响应，调用方应立即返回。
+
+    选择算法按“配置优先、请求其次、单一权限集合自动选择”的顺序执行。查询集合
+    本身已经限制为用户拥有 ``add`` 权限的 collection，因此即使请求伪造了 ID，
+    也只能命中授权范围内的对象；多个可写集合而没有明确选择时拒绝请求，避免图片
+    被静默放入错误目录。
+    """
     collections = permission_policy.collections_user_has_permission_for(
         request.user, "add"
     )
@@ -68,11 +107,30 @@ def _resolve_upload_collection(request):
     )
 
 
-def _random_title_suffix():
+def _random_title_suffix() -> str:
+    """生成固定九位的随机数字后缀。
+
+    返回：零填充到九位的数字字符串。使用 ``secrets`` 而不是普通伪随机模块，
+        使并发上传时的碰撞概率足够低；该后缀只用于标题去重，不承担安全令牌职责。
+    """
     return f"{secrets.randbelow(1_000_000_000):09d}"
 
 
-def _safe_upload_title(uploaded_file, image_model):
+def _safe_upload_title(uploaded_file: Any, image_model: Any) -> str:
+    """从文件名生成不会主动覆盖已有图片标题的候选值。
+
+    参数：
+        uploaded_file：Django 上传文件对象，读取其 ``name`` 属性。
+        image_model：当前 Wagtail 图片模型，用于查询标题是否已存在。
+
+    返回：可写入图片模型的标题字符串。
+
+    算法先去掉扩展名并截断到模型允许的 255 个字符；无冲突时保留原名。若原名为空
+    或已占用，则最多生成五个“基础标题-九位后缀”候选，并逐个用数据库 ``exists``
+    检查。基础标题在拼接前按 ``254 - len(suffix)`` 截断，为连字符预留一个字符，
+    从而保证最终长度不超过 255。五次都碰撞时返回最后一个候选，交由后续 Wagtail
+    表单/数据库约束处理，避免在这里无限重试。
+    """
     base_title = Path(uploaded_file.name or "").stem.strip()[:255]
     if base_title and not image_model.objects.filter(title=base_title).exists():
         return base_title
@@ -89,8 +147,22 @@ def _safe_upload_title(uploaded_file, image_model):
     return candidate
 
 
-def _upload_vditor_image(request):
-    """Create a Wagtail image from a Vditor clipboard upload."""
+def _upload_vditor_image(request: Any) -> JsonResponse:
+    """将 Vditor 剪贴板上传转换为 Wagtail 图片并返回 JSON 结果。
+
+    参数：
+        request：包含上传文件 ``FILES['file']``、可选格式/替代文本/collection 参数，
+            以及已通过管理端认证的 ``user`` 的 Django 请求对象。
+
+    返回：成功时返回 201 和图片元数据/预览地址；输入、权限或格式错误返回 400/403/409；
+        保存原图失败返回 500。响应结构由现有前端契约固定，不能在注释批次中改动。
+
+    处理边界：
+        ``time.monotonic`` 用于耗时日志，因为它不会受系统时钟校准影响；权限检查、
+        格式解析和表单 ``is_valid`` 都在 ``form.save`` 前完成。原图保存成功后才尝试
+        生成 rendition，预览是可重建的派生资源；即使预览失败，也必须返回已保存原图的
+        结果并记录异常，否则客户端重试会再写入一张重复原图。
+    """
 
     started_at = time.monotonic()
     uploaded_file = request.FILES.get("file")
@@ -139,6 +211,8 @@ def _upload_vditor_image(request):
         instance=image,
     )
 
+    # Wagtail 表单统一处理文件类型、图片内容、标题和 collection 等模型约束；
+    # 在这里先完成校验，可以保证无效上传不会进入原图保存路径。
     if not form.is_valid():
         logger.warning(
             "blog_vditor_image_upload_invalid file_type=%s file_size=%s elapsed_ms=%s",
@@ -166,6 +240,8 @@ def _upload_vditor_image(request):
             "image_save_failed", "The image could not be saved.", 500
         )
 
+    # 原图已经保存成功，下面只生成可重建的派生 rendition；预览失败不回滚原图，
+    # 避免客户端因一次派生资源故障重试而产生重复图片。
     preview = None
     try:
         rendition = image.get_rendition(image_format.filter_spec)
@@ -175,8 +251,6 @@ def _upload_vditor_image(request):
             "height": rendition.height,
         }
     except Exception:
-        # The original image is already valid and stored. A missing preview must not
-        # cause a retry that creates a duplicate image.
         logger.exception(
             "blog_vditor_image_upload_preview_failed image_id=%s format=%s",
             image.pk,
@@ -209,5 +283,16 @@ def _upload_vditor_image(request):
 
 @require_admin_access
 @require_POST
-def upload_vditor_image(request):
+def upload_vditor_image(request: Any) -> JsonResponse:
+    """公开注册 Vditor 图片上传视图。
+
+    参数：
+        request：Django HTTP 请求对象。
+
+    返回：委托给 :func:`_upload_vditor_image` 的 JSON 响应。
+
+    ``require_admin_access`` 和 ``require_POST`` 形成双重入口保护：前者限制为已登录
+    且具备 Wagtail 管理访问权的用户，后者拒绝 GET 等非上传方法；函数内部仍会再次检查
+    图片 ``add`` 权限，因为管理访问权不等于对图片 collection 的写权限。
+    """
     return _upload_vditor_image(request)

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, Iterable, Mapping
+
 from bson import ObjectId
 
 from wagtailblog3.mongo import MongoManager
@@ -10,12 +12,15 @@ from wagtailblog3.mongo import MongoManager
 class ContentSearchMongoReadError(Exception):
     """只向调用方暴露脱敏错误码，避免 Mongo 异常带出连接信息或正文。"""
 
-    def __init__(self, code):
+    def __init__(self, code: str):
         super().__init__(code)
         self.code = code
 
 
-def read_formal_contents_by_id(mongo_content_ids, mongo_manager=None):
+def read_formal_contents_by_id(
+    mongo_content_ids: Iterable[Any],
+    mongo_manager: Any = None,
+) -> dict[str, Mapping[str, list[Any]]]:
     """一次查询返回多个正式正文；无效或缺失 ID 由调用方按页面记录处理。"""
 
     object_ids = []

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 
 from django.conf import settings
 from django.db.models import Count
@@ -17,14 +18,18 @@ from search.services.elasticsearch import _read_error, _response_body, get_conte
 _CONTROL_OR_MARKUP = re.compile(r"[\x00-\x1f\x7f<>]")
 
 
-def _safe_suggestion_text(value):
+def _safe_suggestion_text(value: object) -> str:
+    """限制建议文本长度并拒绝控制字符/HTML 标记。"""
     value = str(value or "").strip()
     if len(value) < 2 or len(value) > 100 or _CONTROL_OR_MARKUP.search(value):
         return ""
     return value
 
 
-def get_popular_query_suggestions(query_string, limit=5):
+def get_popular_query_suggestions(
+    query_string: object, limit: int = 5
+) -> list[dict[str, Any]]:
+    """从 Wagtail 统计表读取热门词；查询异常降级为空列表。"""
     """热门搜索词仍来自统计表，但只在新建议 flag 开启时公开。"""
 
     if not query_string or len(query_string) < 2:
@@ -45,7 +50,8 @@ def get_popular_query_suggestions(query_string, limit=5):
         return []
 
 
-def _title_suggestion_alias():
+def _title_suggestion_alias() -> str:
+    """读取并校验标题建议 alias，拒绝不符合当前索引前缀的配置。"""
     alias = getattr(settings, "CONTENT_SEARCH_TITLE_SUGGESTIONS_READ_ALIAS", "")
     if not alias:
         return ""
@@ -56,7 +62,10 @@ def _title_suggestion_alias():
     return alias
 
 
-def get_public_title_suggestions(query_string, limit=5, locale=None):
+def get_public_title_suggestions(
+    query_string: object, limit: int = 5, locale: int | None = None
+) -> list[dict[str, Any]]:
+    """从标题索引读取候选，再用 BlogPage live/public 做最终边界校验。"""
     """从独立标题索引读取候选，再用 live/public 页面集合做最终边界校验。"""
 
     query_string = _safe_suggestion_text(query_string)
@@ -101,7 +110,10 @@ def get_public_title_suggestions(query_string, limit=5, locale=None):
         raise _read_error(error) from error
 
 
-def get_public_search_suggestions(query_string, limit=5, locale=None):
+def get_public_search_suggestions(
+    query_string: object, limit: int = 5, locale: int | None = None
+) -> list[dict[str, Any]]:
+    """组合热门词和标题索引两个可独立关闭的通道，并按 query 去重。"""
     """组合两个可独立关闭的建议通道，并按标题优先、查询词去重。"""
 
     results = []

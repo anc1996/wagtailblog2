@@ -1,3 +1,5 @@
+"""将 Markdown 解析结果和媒体结果组装为 BlogPage 草稿。"""
+
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from html import escape
@@ -9,11 +11,13 @@ from blog.services.markdown_import_types import MarkdownImportBlock
 
 
 class MarkdownImportAssemblyError(ValueError):
+    """稳定的组装错误编码，供调用方选择展示或补偿策略。"""
     """解析结果与媒体结果无法组成可靠正文时使用的稳定错误。"""
 
 
 @dataclass(frozen=True, slots=True)
 class DraftImportResult:
+    """草稿页面、revision 和 Mongo 草稿指针的成组结果。"""
     page: object
     revision: object
     mongo_draft_pointer: str
@@ -21,11 +25,13 @@ class DraftImportResult:
 
 @dataclass(frozen=True, slots=True)
 class DraftCompensationResult:
+    """补偿结果；errors 只记录稳定错误码，不泄漏异常原文。"""
     cleaned: bool
     errors: tuple[str, ...]
 
 
 def _media_key(block: MarkdownImportBlock) -> str:
+    """读取媒体 block 的 source，并拒绝缺失或非映射值。"""
     value = block.value
     if not isinstance(value, Mapping):
         raise MarkdownImportAssemblyError("media_source_invalid")
@@ -36,6 +42,7 @@ def _media_key(block: MarkdownImportBlock) -> str:
 
 
 def _chooser_value(result: MediaImportResult) -> int | str:
+    """将 Wagtail chooser 对象归一化为可序列化主键。"""
     value = result.value
     primary_key = getattr(value, "pk", None)
     if primary_key is not None:
@@ -51,6 +58,7 @@ def _assemble_media_block(
     block: MarkdownImportBlock,
     result: MediaImportResult,
 ) -> dict[str, object]:
+    """校验媒体结果类型并生成 StreamField block 原始值。"""
     if result.block_type == "markdown_block":
         return {"type": "markdown_block", "value": result.value}
     if result.block_type != block.block_type:
@@ -58,7 +66,8 @@ def _assemble_media_block(
     return {"type": block.block_type, "value": _chooser_value(result)}
 
 
-def _inline_image_replacement(reference, result: MediaImportResult) -> str:
+def _inline_image_replacement(reference: object, result: MediaImportResult) -> str:
+    """生成安全的 Wagtail 图片 embed，只保留项目需要的属性。"""
     if result.block_type == "markdown_block":
         return str(result.value)
     if result.block_type != "image_block":
@@ -82,9 +91,10 @@ def _inline_image_replacement(reference, result: MediaImportResult) -> str:
 
 def _rewrite_inline_images(
     source: str,
-    references,
+    references: Sequence[object],
     media_results: Mapping[str, MediaImportResult],
 ) -> str:
+    """按偏移倒序替换图片，保证原始偏移不会因前序替换而失效。"""
     rewritten = source
     previous_start = len(source)
     for reference in sorted(references, key=lambda item: item.start_offset, reverse=True):
@@ -184,15 +194,15 @@ def assemble_import_body(
 
 
 def create_unpublished_blog_draft(
-    parent,
+    parent: object,
     *,
     title: str,
-    date,
+    date: object,
     intro: str,
     body_values: Sequence[Mapping[str, object]],
     tags: Sequence[str] = (),
-    user,
-    page_factory=None,
+    user: object,
+    page_factory: object | None = None,
     log_action: str = "wagtail.create",
 ) -> DraftImportResult:
     """创建未发布页面并只保存 revision 草稿正文。"""
@@ -220,13 +230,17 @@ def create_unpublished_blog_draft(
 
 def compensate_draft_failure(
     *,
-    page,
+    page: object | None,
     mongo_draft_pointer: str,
     media_artifacts: Sequence[object],
-    delete_page,
-    delete_mongo_pointer,
-    cleanup_media,
+    delete_page: object,
+    delete_mongo_pointer: object,
+    cleanup_media: object,
 ) -> DraftCompensationResult:
+    """按页面、Mongo 指针、媒体依赖顺序执行精确补偿。
+
+    页面删除失败时停止后续依赖清理，避免删除仍可能被页面引用的资源。
+    """
     """按页面、Mongo 草稿指针、媒体 artifact 顺序执行精确补偿。"""
 
     errors: list[str] = []

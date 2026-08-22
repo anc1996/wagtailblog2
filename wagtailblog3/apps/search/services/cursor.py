@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
+from typing import Any
 
 from django.conf import settings
 from django.core import signing
@@ -18,26 +19,28 @@ CURSOR_DIRECTIONS = frozenset({"next", "previous"})
 class ContentSearchCursorError(ValueError):
     """游标无效、过期或与当前查询不匹配。"""
 
-    def __init__(self, code):
+    def __init__(self, code: str):
         super().__init__(code)
         self.code = code
 
 
 @dataclass(frozen=True)
 class ContentSearchCursor:
+    """签名游标的不可变载荷；排序值和 PIT 绑定到一次查询上下文。"""
+
     direction: str
-    sort: tuple
+    sort: tuple[Any, ...]
     pit_id: str | None = None
 
 
 def build_cursor_query_hash(
-    query_string,
-    search_type,
-    start_date=None,
-    end_date=None,
-    order_by=None,
-    locale=None,
-):
+    query_string: Any,
+    search_type: Any,
+    start_date: Any = None,
+    end_date: Any = None,
+    order_by: Any = None,
+    locale: Any = None,
+) -> str:
     """把影响结果集合或顺序的全部条件绑定到游标。"""
 
     payload = {
@@ -52,7 +55,7 @@ def build_cursor_query_hash(
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def encode_content_search_cursor(cursor, query_hash):
+def encode_content_search_cursor(cursor: ContentSearchCursor, query_hash: str) -> str:
     if cursor.direction not in CURSOR_DIRECTIONS or not cursor.sort:
         raise ContentSearchCursorError("cursor_payload_invalid")
     payload = {
@@ -66,10 +69,14 @@ def encode_content_search_cursor(cursor, query_hash):
     return signing.dumps(payload, salt=CURSOR_SALT, compress=True)
 
 
-def decode_content_search_cursor(token, query_hash):
+def decode_content_search_cursor(
+    token: str | None,
+    query_hash: str,
+) -> ContentSearchCursor | None:
     if not token:
         return None
     try:
+        # Django 签名同时保证完整性和有效期；过期游标必须重新从第一页建立。
         payload = signing.loads(
             token,
             salt=CURSOR_SALT,

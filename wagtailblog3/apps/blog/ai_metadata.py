@@ -32,6 +32,8 @@ class MetadataResponseError(MetadataGenerationError):
 
 @dataclass(frozen=True)
 class MetadataSuggestion:
+    """经过字段、长度和标签数量校验的元数据建议值。"""
+
     title: str
     intro: str
     tags: list[str]
@@ -47,12 +49,14 @@ class ResponsesClient(Protocol):
 
 
 def _normalise_text(value: Any) -> str:
+    """统一换行、空白并压缩连续空行，返回可送入模型的纯文本。"""
     text = str(value or "").replace("\r\n", "\n").replace("\r", "\n")
     text = re.sub(r"[ \t]+\n", "\n", text)
     return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
 def _rich_text_to_text(value: Any) -> str:
+    """从 Wagtail rich text JSON 提取文本，非法 JSON 回退为去 HTML 文本。"""
     if not isinstance(value, str):
         return _normalise_text(value)
     try:
@@ -65,6 +69,7 @@ def _rich_text_to_text(value: Any) -> str:
 
 
 def _markdown_to_text(value: Any) -> str:
+    """移除 Markdown 结构和媒体地址，只保留可用于元数据生成的语义文本。"""
     text = str(value or "")
     text = re.sub(r"```[\s\S]*?```", "", text)
     text = re.sub(r"!\[([^\]]*)\]\([^)]*\)", r"\1", text)
@@ -74,6 +79,7 @@ def _markdown_to_text(value: Any) -> str:
 
 
 def _text_from_block(block: dict[str, Any]) -> str:
+    """按 block 类型提取受限文本；媒体和对象 ID 默认不进入外部模型上下文。"""
     block_type = block.get("type")
     value = block.get("value")
     if block_type == "rich_text":
@@ -114,6 +120,7 @@ def extract_body_context(body: Any, *, max_chars: int | None = None) -> str:
 
 
 def _clean_scalar(value: Any, *, field_name: str, max_length: int) -> str:
+    """清理并限制模型返回的单个文本字段，拒绝空值和超长值。"""
     if not isinstance(value, str):
         raise MetadataResponseError(f"模型返回的{field_name}不是文本。")
     result = _normalise_text(html.unescape(strip_tags(value)))
@@ -146,9 +153,13 @@ def validate_suggestion(payload: Any) -> MetadataSuggestion:
 
 
 class OpenAIResponsesClient:
-    """使用 Responses API，显式关闭响应存储。"""
+    """使用 Responses API 生成结构化元数据，并显式关闭响应存储。
 
-    def __init__(self):
+    初始化阶段检查 provider、凭据、模型和存储策略；正文只作为当前请求 input 发送，
+    ``store=False`` 防止上游保存响应。业务层通过 Protocol 注入测试替身，不依赖 SDK 响应对象。
+    """
+
+    def __init__(self) -> None:
         api_key = getattr(settings, "AI_METADATA_API_KEY", "")
         base_url = getattr(settings, "AI_METADATA_BASE_URL", "")
         model = getattr(settings, "AI_METADATA_MODEL", "")
@@ -166,6 +177,7 @@ class OpenAIResponsesClient:
         self.timeout_seconds = getattr(settings, "AI_METADATA_TIMEOUT_SECONDS", 60)
 
     def generate(self, *, instructions: str, content: str) -> str:
+        """调用 JSON Schema Responses API 并返回原始 JSON 文本。"""
         kwargs: dict[str, Any] = {
             "model": self.model,
             "instructions": instructions,
@@ -206,7 +218,11 @@ def generate_metadata(
     client: ResponsesClient | None = None,
     prompt_template: dict[str, str] | None = None,
 ) -> MetadataSuggestion:
-    """生成建议但不保存页面、标签或任何正文数据。"""
+    """生成建议但不保存页面、标签或任何正文数据。
+
+    最多尝试三次；每次都先验证 JSON、字段类型、长度和标签数量，只有上一次输出不合规
+    时才重试。正文上下文在发送前已经按 block 类型和长度筛选，异常只暴露稳定错误类别。
+    """
     context = extract_body_context(body)
     instructions = (
         "你是中文技术博客编辑。只能依据提供的正文生成元数据，不得补造正文没有支持的事实。"

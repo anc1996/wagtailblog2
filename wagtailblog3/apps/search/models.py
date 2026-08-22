@@ -43,6 +43,7 @@ class ContentSearchScopeJobStatus(models.TextChoices):
 
 
 class ContentSearchState(models.Model):
+    """MySQL 中每个页面的搜索期望版本；它是 Outbox 投递的幂等基准。"""
     """页面公开搜索状态的权威版本，不依赖可被删除的 Page 外键。"""
 
     page_id = models.PositiveBigIntegerField(primary_key=True)
@@ -61,11 +62,12 @@ class ContentSearchState(models.Model):
         verbose_name = "内容搜索状态"
         verbose_name_plural = "内容搜索状态"
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"page={self.page_id} version={self.content_version}"
 
 
 class ContentSearchOutbox(models.Model):
+    """发布事务产生的持久事件；状态只由数据库事务和投递器推进。"""
     """MySQL 持久事件日志，Celery 仅在后续工作包中作为唤醒机制。"""
 
     event_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
@@ -111,11 +113,12 @@ class ContentSearchOutbox(models.Model):
             ),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"event={self.event_id} page={self.page_id} version={self.content_version}"
 
 
 class ContentSearchTarget(models.Model):
+    """一个 ES 连接及物理索引目标的配置快照，不持有正文数据。"""
     """逻辑投递目标只引用 settings 连接名和物理索引名，不保存连接密钥。"""
 
     target_id = models.SlugField(max_length=80, unique=True)
@@ -141,11 +144,12 @@ class ContentSearchTarget(models.Model):
             ),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.target_id}:{self.index_name}"
 
 
 class ContentSearchDelivery(models.Model):
+    """Outbox 到单一目标的租约状态，负责重试、过期回收和幂等结果。"""
     """一个事件到一个物理目标的可重试投递记录。"""
 
     event = models.ForeignKey(
@@ -199,11 +203,12 @@ class ContentSearchDelivery(models.Model):
             ),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"event={self.event_id} target={self.target_id} status={self.status}"
 
 
 class SearchIndexBuild(models.Model):
+    """一次物理索引构建及 alias 切换的审计状态。"""
     """独立内容索引构建的持久检查点，后续回填可从中断位置恢复。"""
 
     build_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
@@ -248,11 +253,12 @@ class SearchIndexBuild(models.Model):
             ),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"build={self.build_id} target={self.target_id} status={self.status}"
 
 
 class ContentSearchScopeJob(models.Model):
+    """访问限制变化触发的范围重算任务，按根页面合并重复请求。"""
     """访问限制变化的范围重算请求，不能在 signal 内同步枚举整个页面子树。"""
 
     root_page_id = models.PositiveBigIntegerField()
@@ -282,5 +288,5 @@ class ContentSearchScopeJob(models.Model):
             ),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"root={self.root_page_id} status={self.status}"

@@ -37,13 +37,14 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class DeliveryLease:
+    """一次成功领取的 Delivery 租约；owner 防止迟到 worker 覆盖状态。"""
     delivery_id: int
     event_id: int
     target_id: int
     owner: str
 
 
-def _batch_size(limit=None):
+def _batch_size(limit: object | None = None) -> int:
     configured_limit = getattr(settings, "CONTENT_SEARCH_DELIVERY_BATCH_SIZE", 100)
     try:
         value = int(configured_limit if limit is None else limit)
@@ -52,7 +53,7 @@ def _batch_size(limit=None):
     return max(1, min(value, 500))
 
 
-def _lease_seconds():
+def _lease_seconds() -> int:
     try:
         value = int(getattr(settings, "CONTENT_SEARCH_LEASE_SECONDS", 120))
     except (TypeError, ValueError, OverflowError):
@@ -60,7 +61,7 @@ def _lease_seconds():
     return max(1, value)
 
 
-def _max_attempts():
+def _max_attempts() -> int:
     try:
         value = int(getattr(settings, "CONTENT_SEARCH_MAX_ATTEMPTS", 10))
     except (TypeError, ValueError, OverflowError):
@@ -68,7 +69,8 @@ def _max_attempts():
     return max(1, value)
 
 
-def _retry_delay(attempts):
+def _retry_delay(attempts: int) -> float:
+    """计算带随机抖动的指数退避，避免多个 worker 同时重试。"""
     try:
         maximum = int(getattr(settings, "CONTENT_SEARCH_RETRY_MAX_SECONDS", 3600))
     except (TypeError, ValueError, OverflowError):
@@ -83,11 +85,11 @@ def _retry_delay(attempts):
     return min(maximum, exponential_delay + random.uniform(0, max(1, exponential_delay / 4)))
 
 
-def _worker_owner():
+def _worker_owner() -> str:
     return f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4()}"
 
 
-def _terminal_statuses():
+def _terminal_statuses() -> set[str]:
     return {
         ContentSearchStatus.SUCCEEDED,
         ContentSearchStatus.SUPERSEDED,
@@ -95,7 +97,8 @@ def _terminal_statuses():
     }
 
 
-def materialize_content_search_deliveries(limit=None):
+def materialize_content_search_deliveries(limit: object | None = None) -> int:
+    """为已启用目标补齐 Delivery；没有目标时保留 Outbox 等待建索引。"""
     """为当前已启用目标补齐 Delivery；没有目标时保留 Outbox 以待后续索引建立。"""
 
     if not settings.CONTENT_SEARCH_CONSUMER_ENABLED:
@@ -137,7 +140,8 @@ def materialize_content_search_deliveries(limit=None):
     return created_count
 
 
-def reclaim_expired_content_search_deliveries(limit=None):
+def reclaim_expired_content_search_deliveries(limit: object | None = None) -> int:
+    """回收崩溃 worker 遗留的过期租约，使事件安全重试。"""
     """回收 Worker 崩溃遗留的租约，允许相同外部版本安全重投。"""
 
     if not settings.CONTENT_SEARCH_CONSUMER_ENABLED:
@@ -185,7 +189,8 @@ def reclaim_expired_content_search_deliveries(limit=None):
     return reclaimed_count
 
 
-def due_content_search_delivery_ids(limit=None):
+def due_content_search_delivery_ids(limit: object | None = None) -> list[int]:
+    """返回到期 Delivery 主键；实际领取必须由 worker 使用行锁完成。"""
     """只返回已到期 Delivery 主键，实际领取必须由 Worker 使用行锁完成。"""
 
     if not settings.CONTENT_SEARCH_CONSUMER_ENABLED:
@@ -205,7 +210,8 @@ def due_content_search_delivery_ids(limit=None):
     )
 
 
-def _claim_content_search_delivery(delivery_id):
+def _claim_content_search_delivery(delivery_id: int):
+    """使用 skip_locked 原子领取 Delivery，并创建带过期时间的 owner 租约。"""
     now = timezone.now()
     owner = _worker_owner()
     with transaction.atomic():
@@ -255,7 +261,8 @@ def _claim_content_search_delivery(delivery_id):
         )
 
 
-def _load_current_event_and_state(lease):
+def _load_current_event_and_state(lease: DeliveryLease):
+    """比较事件与最新 State，决定 ready、retry、superseded 或 dead。"""
     event = ContentSearchOutbox.objects.get(pk=lease.event_id)
     state = ContentSearchState.objects.filter(page_id=event.page_id).first()
     if state is None:
@@ -275,7 +282,8 @@ def _load_current_event_and_state(lease):
     return event, state, "ready"
 
 
-def _confirm_formal_content(lease, formal_document):
+def _confirm_formal_content(lease: DeliveryLease, formal_document: object) -> str:
+    """ES 写入前再次锁定 State，避免 Mongo 新正文被旧事件索引。"""
     """在 ES 写入前再次锁定 State，避免 Mongo 新正文被旧版本事件索引。"""
 
     with transaction.atomic():
@@ -315,7 +323,8 @@ def _confirm_formal_content(lease, formal_document):
     return "ready"
 
 
-def _tombstone_document(event):
+def _tombstone_document(event: object) -> dict[str, object]:
+    """生成仅保留版本和公开状态的 tombstone，防止 ES 残留正文。"""
     """墓碑只保留版本和公开状态，防止取消发布后 ES 留存任何可展示正文。"""
 
     return {
@@ -391,7 +400,8 @@ def _retry_or_dead_delivery(lease, error_code):
     return result
 
 
-def refresh_content_search_outbox_status(event_id):
+def refresh_content_search_outbox_status(event_id: int):
+    """由各目标 Delivery 聚合 Outbox 状态；required 目标优先决定结果。"""
     """由各目标 Delivery 聚合 Outbox 状态，optional 目标失败不会阻断 required 目标收敛。"""
 
     with transaction.atomic():
@@ -446,7 +456,8 @@ def refresh_content_search_outbox_status(event_id):
     return event.status
 
 
-def process_content_search_delivery(delivery_id):
+def process_content_search_delivery(delivery_id: int):
+    """消费一个 Delivery；ES 写入在事务外执行，最终状态由租约 owner 保护。"""
     """消费一个 Delivery；外部 ES 写入始终在事务外，完成状态通过租约 owner 防止迟到覆盖。"""
 
     if not settings.CONTENT_SEARCH_CONSUMER_ENABLED:

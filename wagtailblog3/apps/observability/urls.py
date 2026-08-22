@@ -1,6 +1,6 @@
 """Wagtail 系统日志后台 URL。"""
 
-from django.urls import path
+from django.urls import path  # 声明系统日志后台的页面路由
 
 from .views import (
     LogAuditView,
@@ -11,7 +11,7 @@ from .views import (
 )
 
 
-app_name = "observability"
+app_name = "observability"  # 日志后台路由的反向解析命名空间
 
 urlpatterns = [
     # /admin/reports/system-logs/：日志概览首页，展示各日志域的大小、轮转和近期错误统计。

@@ -1,9 +1,11 @@
+"""Markdown 导入批次的幂等键校验、请求指纹和并发认领逻辑。"""
+
 import hashlib
 import json
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import TypeAlias
+from typing import Any, TypeAlias
 
 from django.db import IntegrityError, transaction
 
@@ -24,11 +26,18 @@ class IdempotencyConflictError(ValueError):
 
 @dataclass(frozen=True)
 class BatchClaim:
+    """一次幂等认领的结果，保存批次对象及其是否由本次请求新建。"""
+
     batch: MarkdownImportBatch
     created: bool
 
 
 def validate_idempotency_key(value: str | uuid.UUID) -> uuid.UUID:
+    """校验并规范化导入幂等键。
+
+    参数：字符串或 UUID 对象。
+    返回：RFC 4122 UUIDv4；格式或版本不符时抛出 :class:`IdempotencyKeyError`。
+    """
     try:
         key = value if isinstance(value, uuid.UUID) else uuid.UUID(str(value))
     except (AttributeError, TypeError, ValueError) as exc:
@@ -39,7 +48,12 @@ def validate_idempotency_key(value: str | uuid.UUID) -> uuid.UUID:
 
 
 def build_request_fingerprint(payload: JsonValue) -> str:
-    """对稳定导入契约生成指纹，不纳入临时路径或 multipart 边界。"""
+    """对稳定导入契约生成指纹，不纳入临时路径或 multipart 边界。
+
+    参数：JSON 可表示的请求内容。
+    返回：对规范化 JSON 字节串计算的 SHA-256 十六进制摘要。
+    异常：内容包含不可序列化值或非有限浮点数时抛出 ``ValueError``。
+    """
 
     try:
         canonical = json.dumps(
@@ -54,7 +68,8 @@ def build_request_fingerprint(payload: JsonValue) -> str:
     return hashlib.sha256(canonical).hexdigest()
 
 
-def _claim_existing(batch, request_fingerprint: str) -> BatchClaim:
+def _claim_existing(batch: MarkdownImportBatch, request_fingerprint: str) -> BatchClaim:
+    """复用已有批次，并确保同一幂等键没有绑定另一份请求内容。"""
     if batch.request_fingerprint != request_fingerprint:
         raise IdempotencyConflictError("idempotency_conflict")
     return BatchClaim(batch=batch, created=False)
@@ -66,9 +81,17 @@ def claim_import_batch(
     idempotency_key: str | uuid.UUID,
     request_fingerprint: str,
     target_parent_id: int,
-    manager=None,
+    manager: Any = None,
 ) -> BatchClaim:
-    """认领导入批次，并把同一幂等键的并发创建收敛到唯一记录。"""
+    """认领导入批次，并把同一幂等键的并发创建收敛到唯一记录。
+
+    参数：用户 ID、UUIDv4 幂等键、稳定请求指纹、目标父页面 ID，以及可选的模型管理器。
+    返回：包含批次对象和 ``created`` 标志的 :class:`BatchClaim`。
+
+    算法先读取已有记录；没有记录时在内层事务尝试创建。并发请求触发唯一约束后，
+    捕获 ``IntegrityError`` 并重新读取竞争请求创建的批次，再比较指纹。内层事务的
+    作用是回滚唯一约束失败，而不污染调用方可能仍在使用的外层事务。
+    """
 
     key = validate_idempotency_key(idempotency_key)
     batch_manager = manager or MarkdownImportBatch.objects

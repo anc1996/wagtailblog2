@@ -1,10 +1,12 @@
 # 搜索应用的模板过滤器
+from typing import Any
+
 from django import template
 
 register = template.Library()
 
 @register.filter
-def verbose_name(obj):
+def verbose_name(obj: Any) -> str:
     """获取模型的友好名称"""
     if hasattr(obj, 'content_type'):
         return obj.content_type.name
@@ -14,7 +16,7 @@ def verbose_name(obj):
 
 
 @register.filter
-def model_name(obj):
+def model_name(obj: Any) -> str:
     """获取模型名称"""
     if hasattr(obj, 'content_type'):
         return obj.content_type.model

@@ -1,4 +1,8 @@
-"""大批量 Markdown 导入会话的状态推进与最终组装。"""
+"""大批量 Markdown 导入会话的状态推进与最终组装。
+
+会话把媒体上传完成、页面草稿组装和失败补偿分成可重试阶段；正文和 Mongo 草稿指针
+只在组装成功后进入批次结果，状态接口只返回轮询所需元数据。
+"""
 
 from __future__ import annotations
 
@@ -100,10 +104,12 @@ def session_payload(session: MarkdownImportSession) -> dict[str, object]:
 
 
 def session_expired(session: MarkdownImportSession) -> bool:
+    """判断会话过期时间是否早于当前时刻。"""
     return session.expires_at <= timezone.now()
 
 
 def _missing_result(artifact: MarkdownImportArtifact) -> MediaImportResult:
+    """把缺失媒体转换为正文中的可审阅占位块。"""
     reference = artifact.normalized_source or artifact.safe_filename or "未知文件"
     marker = (
         f"[导入缺失：{artifact.media_type} 原始引用：{reference} "
@@ -113,6 +119,7 @@ def _missing_result(artifact: MarkdownImportArtifact) -> MediaImportResult:
 
 
 def _media_result(artifact: MarkdownImportArtifact) -> MediaImportResult:
+    """从成功 artifact 解析模型对象，或为缺失媒体生成占位结果。"""
     if artifact.status == MarkdownImportArtifactStatus.FAILED_MISSING:
         return _missing_result(artifact)
     if artifact.status != MarkdownImportArtifactStatus.SUCCEEDED:
@@ -129,6 +136,7 @@ def _media_result(artifact: MarkdownImportArtifact) -> MediaImportResult:
 
 
 def _cleanup_import_artifact(artifact: MarkdownImportArtifact) -> bool:
+    """按 storage alias 和引用保护规则清理单个导入媒体对象。"""
     try:
         storage_registry = {artifact.storage_alias: storages[artifact.storage_alias]}
     except Exception:
@@ -144,6 +152,7 @@ def _cleanup_import_artifact(artifact: MarkdownImportArtifact) -> bool:
 
 
 def _mark_expired(session: MarkdownImportSession) -> None:
+    """将会话标记为过期，并把已上传但未组装的媒体放入补偿队列。"""
     session.status = MarkdownImportSessionStatus.EXPIRED
     session.save(update_fields=["status", "updated_at"])
     # 会话没有生成页面时，已成功上传的媒体必须进入精确补偿队列，避免孤儿对象。
@@ -163,7 +172,16 @@ def _mark_expired(session: MarkdownImportSession) -> None:
 
 
 def assemble_session(session_id: str) -> dict[str, object]:
-    """在 worker 中组装页面；重复投递只返回已完成结果。"""
+    """在 worker 中组装页面；重复投递只返回已完成结果。
+
+    参数：会话 UUID 字符串。
+    返回：可供轮询的会话状态字典。
+
+    状态机先在行锁事务内处理终态、过期、上传未完成和 ``ASSEMBLING`` 竞争，确保同一
+    会话最多一个 worker 创建草稿。事务外执行较重的正文/媒体组装，成功后回写页面、revision
+    和 Mongo 草稿指针；任一阶段失败则调用页面、Mongo 指针和媒体清理补偿，并将未清理项
+    标记为 ``CLEANUP_RETRY``，不能静默丢失受保护数据。
+    """
 
     with transaction.atomic():
         session = (
@@ -305,6 +323,7 @@ def assemble_session(session_id: str) -> dict[str, object]:
 
 
 def session_expiry_delta() -> timedelta:
+    """读取会话 TTL 配置并至少保留 60 秒的过期窗口。"""
     return timedelta(
         seconds=max(60, int(getattr(settings, "MARKDOWN_IMPORT_SESSION_TTL_SECONDS", 86400)))
     )

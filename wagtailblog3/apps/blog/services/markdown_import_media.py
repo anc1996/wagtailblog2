@@ -1,3 +1,5 @@
+"""Markdown 导入媒体的内容探测、表单校验、持久化和精确补偿。"""
+
 import hashlib
 import hashlib
 from dataclasses import dataclass
@@ -14,6 +16,8 @@ from blog.models import (
 
 
 class MediaImportError(ValueError):
+    """携带稳定错误编码的媒体导入异常，不暴露内部存储或模型详情。"""
+
     def __init__(self, code: str):
         self.code = code
         super().__init__(code)
@@ -21,12 +25,16 @@ class MediaImportError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class MediaImportResult:
+    """把媒体结果适配为导入正文 block 类型和值。"""
+
     block_type: str
     value: object
 
 
 @dataclass(frozen=True, slots=True)
 class MediaProbeResult:
+    """媒体深度探测结果，表示容器、编解码器和 MIME 判断。"""
+
     valid: bool
     mime: str
     container: str
@@ -70,6 +78,7 @@ _MP4_AUDIO_CODECS = {
 
 
 def _mp3_frame_length(data: bytes, offset: int) -> int | None:
+    """解析指定偏移处 MP3 帧头并计算帧长度；非法头返回 ``None``。"""
     if offset + 4 > len(data):
         return None
     header = int.from_bytes(data[offset : offset + 4], "big")
@@ -90,6 +99,7 @@ def _mp3_frame_length(data: bytes, offset: int) -> int | None:
 
 
 def _probe_mp3(data: bytes) -> MediaProbeResult | None:
+    """跳过可选 ID3 标签，并要求连续两个有效帧后确认 MP3。"""
     offset = 0
     if data.startswith(b"ID3") and len(data) >= 10:
         tag_size = 0
@@ -108,7 +118,8 @@ def _probe_mp3(data: bytes) -> MediaProbeResult | None:
     return None
 
 
-def _parse_mp4_boxes(data: bytes, start: int, end: int):
+def _parse_mp4_boxes(data: bytes, start: int, end: int) -> list[tuple[str, int, int]] | None:
+    """解析 MP4 box 边界，拒绝截断、溢出和非法长度。"""
     boxes = []
     cursor = start
     while cursor < end:
@@ -131,7 +142,8 @@ def _parse_mp4_boxes(data: bytes, start: int, end: int):
     return boxes
 
 
-def _nested_mp4_boxes(data: bytes, start: int, end: int):
+def _nested_mp4_boxes(data: bytes, start: int, end: int) -> list[tuple[str, int, int]] | None:
+    """递归展开容器 box，保留父子边界用于轨道识别。"""
     boxes = _parse_mp4_boxes(data, start, end)
     if boxes is None:
         return None
@@ -147,6 +159,7 @@ def _nested_mp4_boxes(data: bytes, start: int, end: int):
 
 
 def _probe_mp4(data: bytes) -> MediaProbeResult | None:
+    """检查 ftyp/moov 和轨道 handler/stsd，优先返回视频编解码器。"""
     roots = _parse_mp4_boxes(data, 0, len(data))
     if roots is None:
         return None
@@ -180,8 +193,12 @@ def _probe_mp4(data: bytes) -> MediaProbeResult | None:
     return video or (found[0] if found else None)
 
 
-def probe_media_content(upload) -> MediaProbeResult:
-    """用文件结构和轨道信息探测媒体，不信任扩展名或客户端 MIME。"""
+def probe_media_content(upload: object) -> MediaProbeResult:
+    """用文件结构和轨道信息探测媒体，不信任扩展名或客户端 MIME。
+
+    读取前保存当前位置，完成后恢复，避免探测改变后续表单读取位置；读取失败、空内容
+    或格式不支持时返回无效结果而不是信任客户端声明。
+    """
     position = upload.tell()
     try:
         upload.seek(0)
@@ -201,16 +218,20 @@ def probe_media_content(upload) -> MediaProbeResult:
 
 
 def validate_media_upload(
-    media_type,
-    upload,
+    media_type: str,
+    upload: object,
     *,
-    form_factory=None,
-    model_instance=None,
-    form_data=None,
-    user=None,
-    content_probe=None,
-):
-    """执行内容探测和项目真实表单校验，但不写入对象存储。"""
+    form_factory: object = None,
+    model_instance: object = None,
+    form_data: object = None,
+    user: object = None,
+    content_probe: object = None,
+) -> object:
+    """执行内容探测和项目真实表单校验，但不写入对象存储。
+
+    音视频必须通过深度探测并确认 MIME、容器和编解码器与声明类型一致；图片则交给
+    Wagtail 表单。函数只返回已验证表单，实际 storage 写入由后续持久化函数负责。
+    """
 
     if media_type not in {"image", "audio", "video"}:
         raise MediaImportError("media_type_invalid")
@@ -271,25 +292,27 @@ def validate_media_upload(
     return form
 
 
-def _persist(artifact, *fields):
+def _persist(artifact: object, *fields: str) -> None:
+    """只更新 artifact 实际存在的字段，兼容测试替身和不同模型版本。"""
     available = [field for field in fields if hasattr(artifact, field)]
     if available:
         artifact.save(update_fields=available)
 
 
-def _set_cleanup_retry(artifact, error_code: str) -> bool:
+def _set_cleanup_retry(artifact: object, error_code: str) -> bool:
     artifact.cleanup_status = MarkdownImportArtifactCleanupStatus.RETRY
     artifact.cleanup_error_code = error_code
     _persist(artifact, "cleanup_status", "cleanup_error_code", "updated_at")
     return False
 
 
-def _default_model_resolver(model_label, object_id):
+def _default_model_resolver(model_label: str, object_id: object) -> object | None:
+    """按模型标签和主键解析媒体对象。"""
     model = apps.get_model(model_label)
     return model._default_manager.filter(pk=object_id).first()
 
 
-def _storage_from_registry(registry, alias):
+def _storage_from_registry(registry: object, alias: str) -> object | None:
     """兼容 Django StorageHandler 与测试/调用方传入的字典注册表。"""
 
     getter = getattr(registry, "get", None)
@@ -302,13 +325,17 @@ def _storage_from_registry(registry, alias):
 
 
 def cleanup_artifact_object(
-    artifact,
+    artifact: object,
     *,
-    storages,
-    reference_guard,
-    model_resolver=None,
+    storages: object,
+    reference_guard: object,
+    model_resolver: object = None,
 ) -> bool:
-    """只按审计行中的精确 alias/name 清理当前 artifact。"""
+    """只按审计行中的精确 alias/name 清理当前 artifact。
+
+    先验证 storage alias、引用保护和模型证据，再删除模型对象和精确 object name；任何
+    证据缺失、仍被引用或删除结果不确定都进入 retry，而不是扩大删除范围。
+    """
 
     if not artifact.storage_alias or not artifact.object_name:
         return _set_cleanup_retry(artifact, "cleanup_invalid_evidence")
@@ -360,7 +387,8 @@ def cleanup_artifact_object(
     return True
 
 
-def _safe_object_name(artifact, upload, *, max_length: int = 100) -> str:
+def _safe_object_name(artifact: object, upload: object, *, max_length: int = 100) -> str:
+    """生成带 artifact UUID 前缀且不超过文件字段长度的对象名。"""
     filename = get_valid_filename(PurePosixPath(upload.name or "media.bin").name)
     filename = filename or "media.bin"
     prefix = f"markdown-import/{artifact.artifact_id.hex}/"
@@ -374,7 +402,8 @@ def _safe_object_name(artifact, upload, *, max_length: int = 100) -> str:
     return f"{prefix}{filename}"
 
 
-def _upload_sha256(upload) -> str:
+def _upload_sha256(upload: object) -> str:
+    """分块计算上传内容 SHA-256，并恢复文件指针到开头。"""
     digest = hashlib.sha256()
     upload.seek(0)
     for chunk in iter(lambda: upload.read(1024 * 1024), b""):
@@ -383,7 +412,8 @@ def _upload_sha256(upload) -> str:
     return digest.hexdigest()
 
 
-def _missing_result(artifact, error_code: str) -> MediaImportResult:
+def _missing_result(artifact: object, error_code: str) -> MediaImportResult:
+    """记录稳定缺失错误并生成正文占位 block。"""
     artifact.status = MarkdownImportArtifactStatus.FAILED_MISSING
     artifact.error_code = error_code
     _persist(artifact, "status", "error_code", "updated_at")
@@ -395,7 +425,8 @@ def _missing_result(artifact, error_code: str) -> MediaImportResult:
     return MediaImportResult("markdown_block", marker)
 
 
-def _safe_missing_reference(artifact) -> str:
+def _safe_missing_reference(artifact: object) -> str:
+    """从审计字段生成不泄露绝对路径的安全引用。"""
     for candidate in (
         getattr(artifact, "normalized_source", ""),
         getattr(artifact, "safe_filename", ""),
@@ -411,7 +442,8 @@ def _safe_missing_reference(artifact) -> str:
     return "未知文件"
 
 
-def _delete_exact_names(storage, names):
+def _delete_exact_names(storage: object, names: object) -> bool:
+    """去重后只删除明确属于本次尝试的对象名，并复查删除结果。"""
     failed = False
     seen = set()
     for name in names:
@@ -427,7 +459,8 @@ def _delete_exact_names(storage, names):
     return not failed
 
 
-def _resolved_storage(storage):
+def _resolved_storage(storage: object) -> object:
+    """解析 Django lazy storage，便于比较真实 storage 实例。"""
     wrapped = getattr(storage, "_wrapped", None)
     if wrapped is None:
         return storage
@@ -437,20 +470,26 @@ def _resolved_storage(storage):
     return wrapped
 
 
-def _same_storage(left, right) -> bool:
+def _same_storage(left: object, right: object) -> bool:
+    """判断两个 storage 引用是否指向同一实际后端。"""
     return left is right or _resolved_storage(left) is _resolved_storage(right)
 
 
 def import_media_artifact(
-    artifact,
-    upload,
+    artifact: object,
+    upload: object,
     *,
-    validated_form,
-    storage,
-    storage_alias,
-    storage_registry=None,
-):
-    """保存单个媒体；任何失败只补偿当前 artifact 的精确对象。"""
+    validated_form: object,
+    storage: object,
+    storage_alias: str,
+    storage_registry: object = None,
+) -> MediaImportResult:
+    """保存单个媒体；任何失败只补偿当前 artifact 的精确对象。
+
+    持久化顺序是：验证 storage 身份、写入审计证据、检查名称碰撞、保存文件、绑定
+    FieldFile 并保存模型。若文件保存、模型保存或后续清理不确定，只记录精确对象名称
+    和模型证据并进入 retry，绝不删除计划名称以外的并发对象。
+    """
 
     # 当前图片与音视频字段均绑定 default storage，禁止把未验证别名写入审计证据。
     if storage_registry is None:
@@ -578,7 +617,8 @@ def import_media_artifact(
     return MediaImportResult(f"{artifact.media_type}_block", instance)
 
 
-def import_media_artifacts(artifacts, *, importer):
+def import_media_artifacts(artifacts: object, *, importer: object) -> list[MediaImportResult]:
+    """逐个导入媒体，单个失败转换为占位结果而不阻断同批其他媒体。"""
     results = []
     for artifact in artifacts:
         try:

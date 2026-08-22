@@ -5,6 +5,7 @@ from django.urls import path, reverse
 from django.shortcuts import render
 from django.contrib.admin.views.decorators import staff_member_required
 from django.http import JsonResponse
+from django.http import HttpRequest, HttpResponse
 from .analytics import SearchAnalytics
 import logging
 
@@ -12,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 @hooks.register('register_admin_menu_item')
 def register_search_analytics_menu():
+    """注册仅 staff 可访问的搜索统计菜单项。"""
     return MenuItem(
         '搜索分析',
         reverse('search_analytics'),
@@ -21,8 +23,9 @@ def register_search_analytics_menu():
 
 @hooks.register('register_admin_urls')
 def register_search_admin_urls():
+    """注册后台统计 URL；内部视图由 staff_member_required 保护。"""
     @staff_member_required
-    def search_analytics_view(request):
+    def search_analytics_view(request: HttpRequest) -> HttpResponse:
         # 接收前端传来的排序参数，默认为按日期升序
         # 前端只允许传入日期或搜索次数对应的四种排序值。
         order_by_param = request.GET.get('order_by', 'date')

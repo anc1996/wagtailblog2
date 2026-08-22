@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+from typing import Any, Iterable, Mapping, Sequence
 
 from wagtail.search.backends import get_search_backend
 
@@ -15,17 +16,23 @@ from search.services.content_index import (
 
 @dataclass(frozen=True)
 class ContentSearchWriteResult:
+    """单文档外部版本写入结果；`superseded` 表示 ES 拒绝旧版本覆盖新版本。"""
+
     status: str
 
 
 @dataclass(frozen=True)
 class ContentSearchBulkWriteResult:
+    """批量写入的成功与版本冲突计数，不代表业务 State 已被修改。"""
+
     succeeded: int
     superseded: int
 
 
 @dataclass(frozen=True)
 class ContentSearchIndexCreateResult:
+    """索引模板和物理索引的创建结果，用于记录幂等初始化步骤。"""
+
     template_created: bool
     index_created: bool
 
@@ -33,19 +40,19 @@ class ContentSearchIndexCreateResult:
 class ContentSearchElasticsearchError(Exception):
     """ES 写入失败的脱敏分类，调用方据此决定重试或死信。"""
 
-    def __init__(self, code, retryable):
+    def __init__(self, code: str, retryable: bool):
         super().__init__(code)
         self.code = code
         self.retryable = retryable
 
 
-def _response_body(response):
+def _response_body(response: Any) -> Any:
     """兼容 ES Python 客户端响应对象和测试替身。"""
 
     return getattr(response, "body", response)
 
 
-def _exception_status(error):
+def _exception_status(error: BaseException) -> int | None:
     meta = getattr(error, "meta", None)
     status = getattr(meta, "status", None)
     if status is None:
@@ -56,7 +63,7 @@ def _exception_status(error):
         return None
 
 
-def _classify_status(status):
+def _classify_status(status: int) -> ContentSearchWriteResult:
     if status == 409:
         return ContentSearchWriteResult(status="superseded")
     if 200 <= status < 300:
@@ -66,7 +73,7 @@ def _classify_status(status):
     raise ContentSearchElasticsearchError(f"es_http_{status}", retryable=False)
 
 
-def _read_error(error):
+def _read_error(error: BaseException) -> ContentSearchElasticsearchError:
     status = _exception_status(error)
     if status is None:
         return ContentSearchElasticsearchError("es_read_transport_error", retryable=True)
@@ -76,13 +83,13 @@ def _read_error(error):
     )
 
 
-def get_content_search_client(target):
+def get_content_search_client(target: Any) -> Any:
     """获取目标连接对应的 ES 客户端；目标索引名始终由调用方显式传入。"""
 
     return get_content_search_client_for_connection(target.connection_name)
 
 
-def get_content_search_client_for_connection(connection_name):
+def get_content_search_client_for_connection(connection_name: str) -> Any:
     """按配置连接名获取 ES 客户端，创建原型前不需要虚构 Target 记录。"""
 
     try:
@@ -96,11 +103,11 @@ def get_content_search_client_for_connection(connection_name):
 
 
 def create_content_search_index(
-    connection_name,
-    index_name,
-    template_name,
-    template_definition,
-):
+    connection_name: str,
+    index_name: str,
+    template_name: str,
+    template_definition: Mapping[str, Any],
+) -> ContentSearchIndexCreateResult:
     """创建精确物理索引并校验 mapping；绝不覆盖既有模板或索引。"""
 
     client = get_content_search_client_for_connection(connection_name)
@@ -155,7 +162,7 @@ def create_content_search_index(
     )
 
 
-def verify_content_search_index(target):
+def verify_content_search_index(target: Any) -> bool:
     """启用双投递前只读核对精确物理索引的 mapping。"""
 
     try:
@@ -179,7 +186,10 @@ def verify_content_search_index(target):
     return True
 
 
-def read_content_search_documents(target, page_ids):
+def read_content_search_documents(
+    target: Any,
+    page_ids: Sequence[int],
+) -> dict[int, Mapping[str, Any]]:
     """按页面 ID 批量读取最小字段，用于只读一致性检查。"""
 
     if not page_ids:
@@ -217,7 +227,11 @@ def read_content_search_documents(target, page_ids):
     return documents
 
 
-def scan_content_search_documents(target, after_page_id, limit):
+def scan_content_search_documents(
+    target: Any,
+    after_page_id: int,
+    limit: int,
+) -> list[tuple[int, Mapping[str, Any]]]:
     """通过 page_id 的 search_after 游标读取最小字段，不使用深 offset。"""
 
     try:
@@ -258,7 +272,7 @@ def scan_content_search_documents(target, after_page_id, limit):
     return documents
 
 
-def _bulk_operations(target, documents):
+def _bulk_operations(target: Any, documents: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
     operations = []
     for document in documents:
         operations.extend(
@@ -277,7 +291,10 @@ def _bulk_operations(target, documents):
     return operations
 
 
-def estimate_content_search_bulk_bytes(target, documents):
+def estimate_content_search_bulk_bytes(
+    target: Any,
+    documents: Iterable[Mapping[str, Any]],
+) -> int:
     """估算 Bulk 请求体大小，按 UTF-8 字节而不是字符数限制批次。"""
 
     operations = _bulk_operations(target, documents)
@@ -288,7 +305,10 @@ def estimate_content_search_bulk_bytes(target, documents):
     )
 
 
-def _classify_bulk_response(body, document_count):
+def _classify_bulk_response(
+    body: Mapping[str, Any],
+    document_count: int,
+) -> ContentSearchBulkWriteResult:
     if not isinstance(body, dict):
         raise ContentSearchElasticsearchError("es_invalid_bulk_response", retryable=True)
     items = body.get("items") or []
@@ -320,7 +340,10 @@ def _classify_bulk_response(body, document_count):
     return ContentSearchBulkWriteResult(succeeded=succeeded, superseded=superseded)
 
 
-def write_content_search_documents(target, documents):
+def write_content_search_documents(
+    target: Any,
+    documents: Iterable[Mapping[str, Any]],
+) -> ContentSearchBulkWriteResult:
     """批量写入同一物理索引，并让每个文档使用自己的外部版本。"""
 
     documents = list(documents)
@@ -353,7 +376,11 @@ def write_content_search_documents(target, documents):
     return _classify_bulk_response(_response_body(response), len(documents))
 
 
-def write_content_search_document(target, document, content_version):
+def write_content_search_document(
+    target: Any,
+    document: Mapping[str, Any],
+    content_version: int,
+) -> ContentSearchWriteResult:
     """以 ES 外部版本写入单页文档，迟到事件只能得到冲突而不能覆盖新版本。"""
 
     document = dict(document)

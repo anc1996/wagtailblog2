@@ -1,5 +1,6 @@
 # 搜索应用的页面视图
 from urllib.parse import urlencode
+from typing import Any, Mapping
 
 from django.conf import settings
 from django.core.paginator import EmptyPage, PageNotAnInteger, Paginator
@@ -28,15 +29,21 @@ class SearchCursorRequestError(ValueError):
 	"""公开游标不能验证或不能用于当前查询。"""
 
 
-def clean_search_param(value):
+def clean_search_param(value: Any) -> Any:
 	"""清理搜索参数，移除None值和'None'字符串"""
 	if value in [None, 'None', 'null', '']:
 		return None
 	return value.strip() if isinstance(value, str) else value
 
 
-def get_search_results_context(query_params, locale=None):
-	"""Build the shared paginated search context for page and fragment responses."""
+def get_search_results_context(
+	query_params: Mapping[str, Any],
+	locale: str | None = None,
+) -> dict[str, Any]:
+	"""构造页面、片段和 JSON 接口共用的搜索上下文。
+
+	先校验 offset 窗口和游标适用范围，再调用核心搜索引擎；分页错误不会触发 ES 查询。
+	"""
 	search_query = clean_search_param(query_params.get("query"))
 	search_type = query_params.get("type") or "all"
 	start_date = clean_search_param(query_params.get("start_date"))
@@ -105,8 +112,8 @@ def get_search_results_context(query_params, locale=None):
 	}
 
 
-def get_search_canonical_url(context):
-	"""Return the normalized, server-rendered search URL for browser history."""
+def get_search_canonical_url(context: Mapping[str, Any]) -> str:
+	"""返回规范化的服务端搜索 URL，供浏览器历史记录和异步响应复用。"""
 	if not context["search_query"]:
 		return reverse("search:search")
 
@@ -129,7 +136,7 @@ def get_search_canonical_url(context):
 	return f'{reverse("search:search")}?{urlencode(params)}'
 
 
-def get_search_cursor_url(context, cursor):
+def get_search_cursor_url(context: Mapping[str, Any], cursor: str) -> str:
 	"""构造与当前查询绑定的上一页或下一页地址。"""
 
 	params = {
@@ -143,7 +150,7 @@ def get_search_cursor_url(context, cursor):
 	return f'{reverse("search:search")}?{urlencode(params)}'
 
 
-def add_cursor_navigation(context):
+def add_cursor_navigation(context: dict[str, Any]) -> dict[str, Any]:
 	if not context.get("cursor_mode"):
 		return context
 	context["previous_cursor_url"] = (
@@ -159,8 +166,8 @@ def add_cursor_navigation(context):
 	return context
 
 
-def search(request):
-	"""Render the full progressive-enhancement search page."""
+def search(request: Any) -> Any:
+	"""渲染完整搜索页面，并兼容传统 AJAX 请求。"""
 	try:
 		context = add_cursor_navigation(
 			get_search_results_context(request.GET, getattr(request, "LANGUAGE_CODE", None))
@@ -206,7 +213,12 @@ def search(request):
 	return TemplateResponse(request, "search/search.html", context)
 
 
-def _search_error_response(request, query_params, message, status):
+def _search_error_response(
+	request: Any,
+	query_params: Mapping[str, Any],
+	message: str,
+	status: int,
+) -> Any:
 	"""让 HTML、传统 AJAX 和异步页面共享稳定的搜索错误语义。"""
 	query = clean_search_param(query_params.get("query"))
 	if request.headers.get("X-Requested-With") == "XMLHttpRequest":
@@ -227,8 +239,8 @@ def _search_error_response(request, query_params, message, status):
 	return TemplateResponse(request, "search/search.html", context, status=status)
 
 
-def search_results_api(request):
-	"""Return the server-rendered search-results fragment as JSON."""
+def search_results_api(request: Any) -> JsonResponse:
+	"""以 JSON 返回服务端渲染的结果片段和分页元数据。"""
 	if request.method != "GET":
 		response = JsonResponse(
 			{
@@ -322,7 +334,15 @@ def search_results_api(request):
 	return response
 
 
-def search_ajax(request, search_results, search_query, search_type=None, start_date=None, end_date=None, order_by=None):
+def search_ajax(
+	request: Any,
+	search_results: Any,
+	search_query: str | None,
+	search_type: str | None = None,
+	start_date: Any = None,
+	end_date: Any = None,
+	order_by: str | None = None,
+) -> JsonResponse:
 	"""AJAX搜索响应"""
 	try:
 		# 清理参数
@@ -370,7 +390,7 @@ def search_ajax(request, search_results, search_query, search_type=None, start_d
 		}, status=503)
 
 
-def search_suggestions(request):
+def search_suggestions(request: Any) -> JsonResponse:
 	"""
 	【架构师级：传统 AJAX 搜索建议端点】
 	与 REST API 保持 100% 架构对齐，统一调用 core 层的降维联想引擎。

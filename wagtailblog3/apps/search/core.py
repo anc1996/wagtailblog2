@@ -8,6 +8,7 @@ Blog 查询固定走独立内容索引，普通 Pages 查询继续使用 Wagtail
 import re
 import logging
 from datetime import datetime
+from typing import Any, Iterable, Mapping, Sequence
 
 from django.conf import settings
 from django.db.models import Count
@@ -46,7 +47,7 @@ CHINESE_STOPWORDS = {
 }
 
 
-def _is_meaningless_query(clean_query):
+def _is_meaningless_query(clean_query: str) -> bool:
 	"""单字或停用词直接拒绝，避免单字击穿导致 1000+ 无意义结果"""
 	if len(clean_query) < 2:
 		return True
@@ -63,7 +64,7 @@ class SearchUnavailableError(RuntimeError):
 	"""搜索后端不可用时返回的稳定领域错误。"""
 
 
-def _minimum_should_match(query_string):
+def _minimum_should_match(query_string: str) -> str:
 	"""按查询词数量调整召回门槛，避免短词被过度过滤或长查询充斥低相关结果。"""
 	tokens = re.findall(r"[A-Za-z0-9_]+|[\u4e00-\u9fff]", query_string)
 	if len(tokens) <= 2:
@@ -73,7 +74,7 @@ def _minimum_should_match(query_string):
 	return "60%"
 
 
-def _get_search_field_specs(query_compiler):
+def _get_search_field_specs(query_compiler: Any) -> list[tuple[str, float, str]]:
 	"""从实际 QuerySet 编译器取得字段名、权重和展示字段，避免硬编码索引前缀。"""
 	specs = []
 	fields = list(query_compiler.get_searchable_fields())
@@ -87,7 +88,10 @@ def _get_search_field_specs(query_compiler):
 	return specs
 
 
-def _build_quality_query(query_string, field_specs):
+def _build_quality_query(
+    query_string: str,
+    field_specs: Iterable[tuple[str, float, str]],
+) -> dict[str, Any]:
 	"""构造字段加权、短语优先且带动态词项门槛的公开搜索查询。"""
 	should_clauses = []
 	for field_name, weight, _ in field_specs:
@@ -121,15 +125,27 @@ def _build_quality_query(query_string, field_specs):
 	}
 
 
-def _safe_highlight_fragment(fragment):
+def _safe_highlight_fragment(fragment: Any) -> str:
 	"""只保留转义文本和本服务生成的 mark 标签，拒绝 ES 原始 HTML。"""
 	return safe_highlight_fragment(fragment)
 
 
 class HighlightedSearchResults:
-	"""使用 Wagtail 公开过滤条件执行带安全高亮的 ES 分页结果。"""
+	"""ES 高亮结果适配器；页面最终仍由公开 QuerySet 二次过滤。
 
-	def __init__(self, queryset, backend, index_name, query, sort, field_specs, query_string=""):
+	ES 只提供候选 ID 和高亮片段，避免下线或非公开页面因索引延迟直接暴露。
+	"""
+
+	def __init__(
+        self,
+        queryset: Any,
+        backend: Any,
+        index_name: str,
+        query: Mapping[str, Any],
+        sort: Any,
+        field_specs: Sequence[tuple[str, float, str]],
+        query_string: str = "",
+    ) -> None:
 		self.queryset = queryset
 		self.backend = backend
 		self.index_name = index_name
@@ -142,18 +158,18 @@ class HighlightedSearchResults:
 		)
 		self._count_cache = None
 
-	def _backend_search(self, body, **kwargs):
+	def _backend_search(self, body: Mapping[str, Any], **kwargs: Any) -> Mapping[str, Any]:
 		if getattr(self.backend, "use_new_elasticsearch_api", True):
 			return self.backend.es.search(**body, **kwargs)
 		return self.backend.es.search(body=body, **kwargs)
 
-	def _backend_count(self):
+	def _backend_count(self) -> int:
 		return self.backend.es.count(
 			index=self.index_name,
 			body={"query": self.query},
 		)["count"]
 
-	def count(self):
+	def count(self) -> int:
 		if self._count_cache is None:
 			try:
 				self._count_cache = self._backend_count()
@@ -162,13 +178,13 @@ class HighlightedSearchResults:
 				raise SearchUnavailableError("搜索后端暂时不可用") from error
 		return self._count_cache
 
-	def __len__(self):
+	def __len__(self) -> int:
 		return self.count()
 
-	def __bool__(self):
+	def __bool__(self) -> bool:
 		return self.count() > 0
 
-	def __getitem__(self, key):
+	def __getitem__(self, key: int | slice) -> Any:
 		if isinstance(key, slice):
 			start = key.start or 0
 			stop = key.stop if key.stop is not None else start + 20
@@ -178,14 +194,14 @@ class HighlightedSearchResults:
 			raise IndexError(key)
 		return items[0]
 
-	def _extract_highlights(self, hit):
+	def _extract_highlights(self, hit: Mapping[str, Any]) -> tuple[str, list[str], str]:
 		matched_field, fragments, title_fragment = extract_safe_highlights(
 			hit,
 			((field_name, label) for field_name, _, label in self.field_specs),
 		)
 		return matched_field, list(fragments), title_fragment
 
-	def _fetch_slice(self, start, size):
+	def _fetch_slice(self, start: int, size: int) -> list[Any]:
 		if size <= 0 or start >= MAX_RESULT_WINDOW:
 			return []
 		size = min(size, MAX_RESULT_WINDOW - start)
@@ -257,7 +273,7 @@ class HighlightedSearchResults:
 # =============================================================================
 # 工具函数
 # =============================================================================
-def _parse_date(date_val):
+def _parse_date(date_val: Any) -> Any:
 	if date_val and isinstance(date_val, str):
 		try:
 			return datetime.strptime(date_val, '%Y-%m-%d').date()
@@ -266,14 +282,19 @@ def _parse_date(date_val):
 	return date_val
 
 
-def _clean_query(query_string):
+def _clean_query(query_string: str) -> str:
 	return re.sub(r'["“”]', '', query_string).strip()
 
 
 # =============================================================================
 # 基础 QuerySet 构造
 # =============================================================================
-def _build_base_qs(search_type, parsed_start, parsed_end, order_by):
+def _build_base_qs(
+    search_type: str,
+    parsed_start: Any,
+    parsed_end: Any,
+    order_by: str | None,
+) -> Any:
 	if search_type == 'pages':
 		qs = build_public_pages_queryset(parsed_start, parsed_end, order_by)
 
@@ -294,13 +315,13 @@ def _build_base_qs(search_type, parsed_start, parsed_end, order_by):
 # 对外主接口
 # =============================================================================
 def _build_search_results_for_queryset(
-	qs,
-	clean_query,
-	search_type,
-	start_date=None,
-	end_date=None,
-	order_by=None,
-):
+	qs: Any,
+	clean_query: str,
+	search_type: str,
+	start_date: Any = None,
+	end_date: Any = None,
+	order_by: str | None = None,
+) -> Any:
 	"""执行 Wagtail Page 搜索，供 pages 和联邦 all 共享。"""
 	try:
 		# 先让 Wagtail 编译公开 QuerySet，再复用其 content type、权限和日期过滤条件。
@@ -346,7 +367,18 @@ def _build_search_results_for_queryset(
 		raise SearchUnavailableError("搜索后端暂时不可用") from error
 
 
-def perform_search(query_string, search_type='all', start_date=None, end_date=None, order_by=None):
+def perform_search(
+	query_string: str,
+	search_type: str = 'all',
+	start_date: Any = None,
+	end_date: Any = None,
+	order_by: str | None = None,
+) -> Any:
+	"""按搜索类型选择后端，并保持空查询和无效查询的短路语义。
+
+	Blog 使用独立内容索引，Pages 使用 Wagtail Page 索引，all 合并两条公开结果流。
+	后端不可用统一转换为 SearchUnavailableError，由视图层决定响应格式。
+	"""
 	parsed_start = _parse_date(start_date)
 	parsed_end = _parse_date(end_date)
 
@@ -402,7 +434,7 @@ def perform_search(query_string, search_type='all', start_date=None, end_date=No
 # =============================================================================
 # 接口结果转换
 # =============================================================================
-def format_search_results_for_api(search_results):
+def format_search_results_for_api(search_results: Iterable[Any]) -> list[dict[str, Any]]:
 	# 将页面对象转换为稳定的 JSON 字段，避免把 Wagtail 内部对象直接暴露给前端。
 	results_data = []
 	if not search_results:
@@ -442,7 +474,7 @@ def format_search_results_for_api(search_results):
 # =============================================================================
 # 搜索联想建议
 # =============================================================================
-def get_search_suggestions(query_string, limit=5):
+def get_search_suggestions(query_string: str, limit: int = 5) -> list[dict[str, Any]]:
 	if not query_string or len(query_string) < 2:
 		return []
 	if getattr(settings, "SEARCH_SUGGESTIONS_V2_ENABLED", False):

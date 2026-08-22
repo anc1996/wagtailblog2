@@ -1,3 +1,5 @@
+"""Markdown 导入远程图片的 HTTPS、DNS、大小和图像内容安全校验。"""
+
 import hashlib
 import http.client
 import ipaddress
@@ -22,6 +24,8 @@ class RemoteImageDownloadError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class RemoteImagePolicy:
+    """远程图片下载的字节数、像素数、重定向次数和超时上限。"""
+
     max_bytes: int = 10 * 1024 * 1024
     max_pixels: int = 40_000_000
     max_redirects: int = 3
@@ -30,6 +34,8 @@ class RemoteImagePolicy:
 
 @dataclass(frozen=True, slots=True)
 class RemoteFetchResponse:
+    """可流式读取的远程响应及其关闭回调，不持有完整响应正文。"""
+
     status: int
     headers: Mapping[str, str]
     chunks: Iterable[bytes]
@@ -38,6 +44,8 @@ class RemoteFetchResponse:
 
 @dataclass(frozen=True, slots=True)
 class DownloadedRemoteImage:
+    """远程图片落盘并通过内容校验后的不可变结果。"""
+
     path: Path
     safe_filename: str
     source_url: str
@@ -58,6 +66,7 @@ _REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
 
 
 def _normalized_parts(url: str) -> SplitResult:
+    """规范化 HTTPS URL，并拒绝凭据、缺失主机和控制字符。"""
     if not url or any(ord(character) < 32 for character in url):
         raise RemoteImageDownloadError("remote_url_invalid")
     try:
@@ -179,6 +188,7 @@ def _close_response(response: RemoteFetchResponse) -> None:
 def _download_to_path(
     response: RemoteFetchResponse, path: Path, max_bytes: int
 ) -> tuple[int, str]:
+    """流式写入临时文件并同步计算大小和 SHA-256，超过上限立即失败。"""
     content_length = response.headers.get("content-length")
     if content_length is not None:
         try:
@@ -205,6 +215,7 @@ def _download_to_path(
 
 
 def _inspect_image(path: Path, policy: RemoteImagePolicy) -> tuple[str, int, int]:
+    """验证图片格式、尺寸和完整性，防止伪造扩展名或解压炸弹。"""
     try:
         with Image.open(path) as image:
             image_format = str(image.format or "").upper()
@@ -232,7 +243,17 @@ def download_remote_image(
     resolver: Resolver = socket.getaddrinfo,
     fetcher: Fetcher = _default_fetcher,
 ) -> DownloadedRemoteImage:
-    """安全下载并解码远程图片，失败时不保留半文件。"""
+    """安全下载并解码远程图片，失败时不保留半文件。
+
+    参数：目标 URL、临时目录、是否允许外部图片及可选策略/解析器/抓取器。
+    返回：包含最终文件、格式、尺寸、字节数和摘要的 :class:`DownloadedRemoteImage`。
+    异常：协议、DNS、非公网地址、重定向、HTTP 状态、大小或图片内容不满足策略时抛出
+        :class:`RemoteImageDownloadError`。
+
+    算法在每次重定向后重新规范化 URL 并解析全部 DNS 地址；只要混入一个非公网地址
+    就拒绝，降低 SSRF 风险。响应先写入随机临时文件并检查大小/摘要，再验证图片内容，
+    最后按真实格式改名；任何异常都会关闭响应并删除临时文件，避免留下半文件。
+    """
 
     if not allow_external_images:
         raise RemoteImageDownloadError("external_images_not_allowed")

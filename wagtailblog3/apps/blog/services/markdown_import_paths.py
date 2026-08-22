@@ -1,3 +1,5 @@
+"""Markdown 导入本地媒体引用的路径安全解析。"""
+
 import os
 import re
 from dataclasses import dataclass
@@ -14,12 +16,15 @@ class LocalMediaPathError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class ResolvedLocalMedia:
+    """已通过安全边界校验的本地媒体路径及其规范化引用。"""
+
     path: Path
     normalized_source: str
     safe_filename: str
 
 
 def _reject_non_relative_source(source: str) -> None:
+    """拒绝 URL、绝对路径、Windows 盘符和 UNC 路径，确保输入必须相对 source root。"""
     parsed = urlsplit(source)
     if parsed.scheme or parsed.netloc:
         raise LocalMediaPathError("unsupported_local_path")
@@ -35,7 +40,16 @@ def _reject_non_relative_source(source: str) -> None:
 def resolve_local_media_path(
     source_root: str | os.PathLike[str], source: str
 ) -> ResolvedLocalMedia:
-    """解析根目录内的真实文件，并拒绝目录穿越与链接逃逸。"""
+    """解析根目录内的真实文件，并拒绝目录穿越与链接逃逸。
+
+    参数：source root 目录和 Markdown 中的相对媒体引用。
+    返回：包含真实路径、规范化引用和安全文件名的 :class:`ResolvedLocalMedia`。
+    异常：路径为空、带 NUL、绝对路径、越出根目录、缺失、非普通文件或不可读时抛出
+        :class:`LocalMediaPathError`。
+
+    先 URL 解码再做边界校验，避免编码后的 ``..`` 绕过检查；随后通过 ``resolve``
+    和 ``relative_to`` 双重确认候选路径仍在根目录内，同时拒绝无法读取的目标。
+    """
 
     # Markdown 链接允许对非 ASCII 文件名和路径分隔符做百分号编码，先解码再执行边界校验。
     cleaned = unquote(source.strip())

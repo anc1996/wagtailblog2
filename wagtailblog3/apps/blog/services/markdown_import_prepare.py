@@ -42,6 +42,7 @@ def serialize_block(block: MarkdownImportBlock) -> dict[str, Any]:
 
 
 def _safe_filename(source: str) -> str:
+    """从媒体引用提取不超过 255 字符的文件名，并提供稳定回退名。"""
     path = PurePosixPath(urlsplit(source).path)
     name = path.name or "remote-image.bin"
     name = name.split("?")[0].split("#")[0].strip()
@@ -49,13 +50,22 @@ def _safe_filename(source: str) -> str:
 
 
 def _source_kind(source: str) -> str:
+    """按 URL scheme 将 HTTPS 引用与本地引用分流。"""
     return "remote_https" if urlsplit(source).scheme.casefold() == "https" else "local"
 
 
 def build_required_artifacts(
     blocks: tuple[MarkdownImportBlock, ...],
 ) -> tuple[dict[str, Any], ...]:
-    """按正文顺序合并同源引用，生成现有 session manifest 可复用的计划。"""
+    """按正文顺序合并同源引用，生成可复用的 session manifest 计划。
+
+    参数：解析后的有序块集合。
+    返回：按首次出现顺序排列的媒体计划元组。
+
+    算法使用有序字典按 source 去重，同时保留 block/inline 两种引用范围和出现 ID。
+    同一 source 被声明为不同媒体类型时立即失败，避免后续存储阶段把一个对象解释成
+    两种内容；同一 source 跨范围出现则标记为 ``mixed``，不丢失引用关系。
+    """
 
     grouped: OrderedDict[str, dict[str, Any]] = OrderedDict()
     for block in blocks:
@@ -104,6 +114,7 @@ def build_required_artifacts(
 def prepare_summary(
     blocks: tuple[MarkdownImportBlock, ...], markdown: str
 ) -> dict[str, int]:
+    """汇总解析结果的块数量、图片引用数量和 Markdown 字符数。"""
     image_count = sum(
         1
         for block in blocks

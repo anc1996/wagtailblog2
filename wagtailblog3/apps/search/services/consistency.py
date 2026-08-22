@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 from datetime import timedelta
+from typing import Any, Iterable, MutableMapping
 
 from django.db.models import Count, Sum
 from django.utils import timezone
@@ -20,7 +21,7 @@ from search.services.elasticsearch import (
 )
 
 
-def _bounded_limit(value, default, maximum):
+def _bounded_limit(value: Any, default: int, maximum: int) -> int:
     try:
         converted = int(value)
     except (TypeError, ValueError, OverflowError):
@@ -28,19 +29,24 @@ def _bounded_limit(value, default, maximum):
     return max(1, min(converted, maximum))
 
 
-def _safe_int(value):
+def _safe_int(value: Any) -> int | None:
     try:
         return int(value)
     except (TypeError, ValueError, OverflowError):
         return None
 
 
-def _append_sample(samples, key, page_id, sample_limit):
+def _append_sample(
+    samples: MutableMapping[str, list[int]],
+    key: str,
+    page_id: int,
+    sample_limit: int,
+) -> None:
     if len(samples[key]) < sample_limit:
         samples[key].append(page_id)
 
 
-def get_content_search_sync_status(targets):
+def get_content_search_sync_status(targets: Iterable[Any]) -> list[dict[str, Any]]:
     """汇总每个目标的 Delivery 状态；只返回计数、年龄和脱敏失败分类。"""
 
     now = timezone.now()
@@ -93,7 +99,12 @@ def get_content_search_sync_status(targets):
     return report_targets
 
 
-def check_content_search_consistency(target, after_page_id=0, limit=1000, sample_limit=20):
+def check_content_search_consistency(
+    target: Any,
+    after_page_id: int = 0,
+    limit: int = 1000,
+    sample_limit: int = 20,
+) -> dict[str, Any]:
     """比较一批 State 与 ES 文档，并独立扫描同一游标后的 ES 额外文档。"""
 
     limit = _bounded_limit(limit, default=1000, maximum=5000)
@@ -115,6 +126,7 @@ def check_content_search_consistency(target, after_page_id=0, limit=1000, sample
         "extra": [],
     }
 
+    # State 是 MySQL 的期望版本，ES 文档只用于只读比对；此处不尝试自动修复任何一侧。
     for state in states:
         document = index_documents.get(state.page_id)
         if document is None:

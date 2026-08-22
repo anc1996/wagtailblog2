@@ -1,3 +1,5 @@
+"""Markdown 导入解析：保持原文结构并提取可导入的媒体块。"""
+
 from dataclasses import dataclass, replace
 from html.parser import HTMLParser
 from urllib.parse import urlsplit
@@ -29,6 +31,7 @@ EMBED_HOSTS = frozenset(
 
 @dataclass(frozen=True, slots=True)
 class _ExtractedBlock:
+    """解析出的独立 block，记录原文行范围以保持源顺序。"""
     start_line: int
     end_line: int
     block_type: str
@@ -37,6 +40,7 @@ class _ExtractedBlock:
 
 @dataclass(frozen=True, slots=True)
 class _PendingInlineImage:
+    """待替换的表格内图片；偏移用于倒序替换，避免位置漂移。"""
     source: str
     alt: str
     title: str
@@ -59,6 +63,7 @@ def _line_offsets(source: str) -> list[int]:
 
 
 class _TableHTMLImageParser(HTMLParser):
+    """定位真实 HTML 表格中的图片标签，忽略 script/style 内容。"""
     """只定位真实 HTML 表格中的图片标签，保留原文偏移供后续定点替换。"""
 
     def __init__(self, source: str, *, base_offset: int = 0) -> None:
@@ -139,6 +144,7 @@ class _TableHTMLImageParser(HTMLParser):
 
 
 class _CellHTMLImageParser(HTMLParser):
+    """定位单个 Markdown 表格单元格内的 HTML 图片。"""
     """定位 Markdown 表格单元格中的 HTML 图片，不解析单元格外部结构。"""
 
     def __init__(
@@ -203,6 +209,7 @@ class _CellHTMLImageParser(HTMLParser):
 
 
 class _SingleMediaHTMLParser(HTMLParser):
+    """验证一个独立 img/audio/video 标签及其资源属性。"""
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self.root_tag: str | None = None
@@ -252,6 +259,7 @@ def _source_kind(source: str) -> str:
 
 
 def _code_span_ranges(source: str) -> tuple[tuple[int, int], ...]:
+    """返回代码 span 范围，代码中的图片语法不会被导入。"""
     ranges: list[tuple[int, int]] = []
     cursor = 0
     while cursor < len(source):
@@ -276,6 +284,7 @@ def _inside_ranges(offset: int, ranges: tuple[tuple[int, int], ...]) -> bool:
 
 
 def _markdown_image_end(source: str, start: int) -> int | None:
+    """扫描嵌套括号和引号，找到 Markdown 图片语法的完整结束偏移。"""
     if not source.startswith("![", start):
         return None
     cursor = start + 2
@@ -330,6 +339,10 @@ def _markdown_cell_images(
     row_index: int,
     cell_index: int,
 ) -> list[_PendingInlineImage]:
+    """解析单元格内 Markdown/HTML 图片并保留源文本绝对偏移。
+
+    先扫描 Markdown 图片，再屏蔽代码 span 后解析 HTML，避免重复识别。
+    """
     images: list[_PendingInlineImage] = []
     code_ranges = _code_span_ranges(source)
     cursor = 0
@@ -391,6 +404,10 @@ def _markdown_cell_images(
 
 
 def _table_inline_images(source: str) -> tuple[MarkdownInlineImage, ...]:
+    """收集表格图片并转换为稳定的 ``MarkdownInlineImage`` 引用。
+
+    无法定位的 HTML 片段会被跳过，调用方仍保留原始 Markdown。
+    """
     lines = source.splitlines(keepends=True)
     offsets = _line_offsets(source)
     tokens = MarkdownIt("commonmark").enable("table").parse(source)
@@ -495,6 +512,10 @@ def _table_inline_images(source: str) -> tuple[MarkdownInlineImage, ...]:
 def attach_table_inline_images(
     blocks: tuple[MarkdownImportBlock, ...] | list[MarkdownImportBlock],
 ) -> tuple[MarkdownImportBlock, ...]:
+    """为 Markdown block 附加服务端重建的表格图片引用。
+
+    occurrence_id 由源行、表格、行列和图片序号组成，不信任客户端偏移。
+    """
     """服务端与客户端共同从正文重建引用，避免信任客户端提交的偏移。"""
 
     attached: list[MarkdownImportBlock] = []
@@ -525,6 +546,7 @@ def attach_table_inline_images(
 
 
 def _standalone_image(children: list[Token] | None) -> dict[str, str] | None:
+    """仅接受单独 image token，避免误拆带文字的段落。"""
     if not children or len(children) != 1 or children[0].type != "image":
         return None
     token = children[0]
@@ -540,6 +562,7 @@ def _standalone_image(children: list[Token] | None) -> dict[str, str] | None:
 
 
 def _embed_value(children: list[Token] | None, raw: str) -> dict[str, str] | None:
+    """提取并限制 embed URL，允许主机由 ``EMBED_HOSTS`` 固定控制。"""
     url = ""
     title = ""
     if children and len(children) >= 2:
@@ -557,6 +580,7 @@ def _embed_value(children: list[Token] | None, raw: str) -> dict[str, str] | Non
 
 
 def _html_media_value(raw: str) -> tuple[str, dict[str, str]] | None:
+    """将单个 HTML 媒体标签转换为 block 类型和值。"""
     parser = _SingleMediaHTMLParser()
     try:
         parser.feed(raw.strip())
@@ -589,6 +613,7 @@ def _html_media_value(raw: str) -> tuple[str, dict[str, str]] | None:
 def _paragraph_extraction(
     token: Token, raw: str, start_line: int, end_line: int
 ) -> _ExtractedBlock | None:
+    """按图片、HTML 媒体、embed 顺序提取段落级特殊 block。"""
     image = _standalone_image(token.children)
     if image is not None:
         return _ExtractedBlock(start_line, end_line, "image_block", image)
@@ -628,6 +653,7 @@ def _skip_block_separator(lines: list[str], start_line: int) -> int:
 
 
 def parse_markdown_blocks(source: str) -> tuple[MarkdownImportBlock, ...]:
+    """按源代码顺序拆出独立 block，其余 Markdown 原文保持不变。"""
     """按源码顺序拆出独占媒体块，其余 Markdown 字节内容保持不变。"""
 
     lines = source.splitlines(keepends=True)

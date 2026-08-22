@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from typing import Any, Mapping
 
 
 CONTENT_INDEX_MAPPING_VERSION = "v003"
@@ -49,7 +50,7 @@ _INDEX_VERSION_PATTERN = re.compile(r"v[0-9]{3,16}\Z")
 _INDEX_NAME_PATTERN = re.compile(r"[a-z0-9][a-z0-9._-]*\Z")
 
 
-def validate_content_index_version(version):
+def validate_content_index_version(version: Any) -> str:
     """限制版本格式，避免命令把别名或通配符当作物理索引。"""
 
     if not isinstance(version, str) or not _INDEX_VERSION_PATTERN.fullmatch(version):
@@ -57,7 +58,7 @@ def validate_content_index_version(version):
     return version
 
 
-def validate_content_index_name(index_name, index_prefix):
+def validate_content_index_name(index_name: Any, index_prefix: str) -> str:
     """物理索引必须位于配置前缀下，禁止别名、通配符和跨环境名称。"""
 
     if not isinstance(index_name, str) or not _INDEX_NAME_PATTERN.fullmatch(index_name):
@@ -68,19 +69,22 @@ def validate_content_index_name(index_name, index_prefix):
     return index_name
 
 
-def default_content_index_name(index_prefix, version=CONTENT_INDEX_MAPPING_VERSION):
+def default_content_index_name(
+    index_prefix: str,
+    version: Any = CONTENT_INDEX_MAPPING_VERSION,
+) -> str:
     """生成稳定的版本化物理索引名，读别名不参与任何写入。"""
 
     return f"{index_prefix}-{validate_content_index_version(version)}"
 
 
-def content_index_template_name(index_name):
+def content_index_template_name(index_name: str) -> str:
     """模板与单一物理索引一一对应，避免不同 analyzer 原型互相覆盖。"""
 
     return f"{index_name}-template"
 
 
-def content_index_mapping_version(version, analyzer_profile):
+def content_index_mapping_version(version: Any, analyzer_profile: str) -> str:
     """将 mapping 版本和 analyzer 实验配置一起写入构建审计记录。"""
 
     validate_content_index_version(version)
@@ -90,13 +94,13 @@ def content_index_mapping_version(version, analyzer_profile):
 
 
 def build_content_index_template(
-    index_name,
-    analyzer_profile="balanced",
-    version=CONTENT_INDEX_MAPPING_VERSION,
-    shards=1,
-    replicas=0,
-    refresh_interval="30s",
-):
+    index_name: str,
+    analyzer_profile: str = "balanced",
+    version: Any = CONTENT_INDEX_MAPPING_VERSION,
+    shards: Any = 1,
+    replicas: Any = 0,
+    refresh_interval: str = "30s",
+) -> dict[str, Any]:
     """构造单索引模板；字段白名单防止草稿或原始正文意外进入 ES。"""
 
     version = validate_content_index_version(version)
@@ -172,7 +176,10 @@ def build_content_index_template(
     }
 
 
-def content_index_template_matches(existing_template, expected_template):
+def content_index_template_matches(
+    existing_template: Mapping[str, Any],
+    expected_template: Mapping[str, Any],
+) -> bool:
     """只复用带相同应用标识和 mapping 版本的模板，避免覆盖未知配置。"""
 
     templates = existing_template.get("index_templates", [])

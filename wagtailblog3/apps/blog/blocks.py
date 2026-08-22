@@ -1,6 +1,9 @@
 # 博客正文使用的 StreamField 块
 
+"""博客正文使用的 StreamField 块及其兼容渲染逻辑。"""
+
 import mimetypes
+from typing import Any
 
 from django import forms
 from django.db import models
@@ -22,7 +25,7 @@ class VditorMarkdownBlock(blocks.TextBlock):
     """使用项目自有 Vditor 编辑器的 Markdown 块。"""
 
     @cached_property
-    def field(self):
+    def field(self) -> forms.CharField:
         # 每个块实例复用同一个表单字段，隐藏文本域仍是提交和存储的唯一来源。
         field_kwargs = {
             "widget": VditorMarkdownWidget(attrs={"rows": self.rows})
@@ -30,12 +33,13 @@ class VditorMarkdownBlock(blocks.TextBlock):
         field_kwargs.update(self.field_options)
         return forms.CharField(**field_kwargs)
 
-    def render_basic(self, value, context=None):
+    def render_basic(self, value: str, context: Any = None) -> str:
         # 渲染时才把 Markdown 转成 HTML，避免改变 MongoDB 中保存的原始字符串。
         return MarkdownRenderer.render(value, context)
 
 # 纯净前端代码块：只替换前台模板，不改变后台编辑行为。
 class PureCodeBlock(CodeBlock):
+    """使用博客专用模板渲染代码，同时保留 Wagtail 原生编辑字段。"""
     class Meta:
         # 强制指定前台输出的模板路径
         template = 'blog/streams/code_block.html'
@@ -70,7 +74,7 @@ class MermaidBlock(blocks.StructBlock):
 		help_text="新图表使用 Modern Mermaid；历史图表保持旧版，确认后再升级。",
 	)
 
-	def to_python(self, value):
+	def to_python(self, value: Any) -> Any:
 		# 只在读取已有正文时补充内存中的兼容标识，不对 MongoDB 做批量迁移或写回。
 		if isinstance(value, dict) and "code" in value and "renderer" not in value:
 			value = dict(value)
@@ -90,16 +94,16 @@ class MermaidBlock(blocks.StructBlock):
 
 # 自定义文档模型
 class BlogDocument(AbstractDocument):
-	"""自定义博客文档模型"""
+	"""扩展 Wagtail 文档模型，增加可在后台编辑的文档描述。"""
 
 	description = models.TextField(blank=True)  # 文档描述
 	admin_form_fields = Document.admin_form_fields + ('description',)  # 添加描述字段到后台表单
 
 
 class AudioBlock(AudioChooserBlock):
-	"""音频选择器块 - 使用外部模板渲染，并支持标题"""
+	"""音频选择器块，使用外部模板渲染并向模板传递完整媒体对象。"""
 
-	def render(self, value, context=None):
+	def render(self, value: Any, context: Any = None) -> str:
 		# 调用 render_to_string，将渲染工作交给模板文件
 		return render_to_string(
 			"blog/streams/audio_block.html",
@@ -114,7 +118,7 @@ class VideoBlock(VideoChooserBlock):
 	视频选择器块 - 使用外部模板进行Gretzia风格渲染
 	"""
 
-	def render(self, value, context=None):
+	def render(self, value: Any, context: Any = None) -> str:
 		"""
 		使用视频块模板渲染，并保留文章渲染上下文。
 		"""
@@ -128,7 +132,7 @@ class VideoBlock(VideoChooserBlock):
 		)
 
 	@staticmethod
-	def _get_video_type(value):
+	def _get_video_type(value: Any) -> str:
 		"""在旧媒体记录缺少 content_type 时，根据文件名推断视频类型。"""
 		if not value:
 			return 'video/mp4'
@@ -160,7 +164,7 @@ class VideoBlock(VideoChooserBlock):
 class CustomTableBlock(WagtailTableBlock):
 	"""自定义表格块，继承自 Wagtail 的 TableBlock。"""
 
-	def render(self, value, context=None):
+	def render(self, value: Any, context: Any = None) -> str:
 		"""
 		覆盖render方法，使用自定义模板。
 		这个实现参考了 Wagtail 官方 TableBlock 的 render 方法，
@@ -223,6 +227,7 @@ class CustomTableBlock(WagtailTableBlock):
 
 # 声明一个高级自定义嵌入块类
 class CustomEmbedBlock(blocks.StructBlock):
+    """统一保存媒体标题和嵌入地址，并兼容旧版纯字符串 URL 数据。"""
     title = blocks.CharBlock(
         required=True,
         label="媒体标题 / 无障碍描述",
@@ -234,7 +239,7 @@ class CustomEmbedBlock(blocks.StructBlock):
     )
 
     # 兼容旧数据：历史版本可能只保存了一个纯字符串 URL。
-    def to_python(self, value):
+    def to_python(self, value: Any) -> Any:
         # 如果从数据库读出来的数据是一个纯字符串（旧版的纯 URL 数据）
         if isinstance(value, str):
             # 包装成当前 StructBlock 所需的字典结构，避免迁移历史正文。

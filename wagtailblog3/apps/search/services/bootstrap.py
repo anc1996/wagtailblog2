@@ -10,7 +10,11 @@ from search.models import ContentSearchOperation, ContentSearchState
 from search.services.document import build_formal_content_snapshot
 
 
-def bootstrap_content_search_states(after_page_id=0, limit=100, dry_run=True):
+def bootstrap_content_search_states(
+    after_page_id: int = 0,
+    limit: int = 100,
+    dry_run: bool = True,
+) -> dict[str, int]:
     """按 Page 主键游标初始化缺失 State；已有 State 永远不被本命令覆盖。"""
 
     page_ids = list(

@@ -8,18 +8,19 @@ from .services.content_query import ContentSearchResults
 from .services.federated_query import FederatedSearchResults
 from .services.cursor import ContentSearchCursorError
 import logging
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-def clean_search_param(value):
+def clean_search_param(value: Any) -> Any:
 	if value in [None, 'None', 'null', '']:
 		return None
 	return value.strip() if isinstance(value, str) else value
 
 
 @api_view(['GET'])
-def search_api(request):
+def search_api(request: Any) -> Response:
 	"""
 	面向前端 jQuery 或现代化网关的 REST 搜索入口
 	"""
@@ -121,7 +122,7 @@ def search_api(request):
 
 
 @api_view(['GET'])
-def search_suggestions_api(request):
+def search_suggestions_api(request: Any) -> Response:
 	"""
 	REST API 搜索建议端点 (用于前端搜索框下拉联想)
 	"""

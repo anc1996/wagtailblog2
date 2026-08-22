@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
+from datetime import date, datetime
+
+from django.db.models import QuerySet
+
 from blog.models import BlogPage
 from wagtail.models import Page
 
 
-def build_public_pages_queryset(start_date=None, end_date=None, order_by=None):
+def build_public_pages_queryset(
+    start_date: date | datetime | None = None,
+    end_date: date | datetime | None = None,
+    order_by: str | None = None,
+) -> QuerySet[Page]:
+	"""返回已发布、公开且排除 BlogPage 的普通页面集合。"""
 	"""返回已发布、公开且排除 BlogPage 的普通页面集合。"""
 	blog_ids = BlogPage.objects.values("id")
 	queryset = Page.objects.live().public().exclude(id__in=blog_ids)

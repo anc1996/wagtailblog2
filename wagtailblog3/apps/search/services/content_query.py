@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from types import SimpleNamespace
+from typing import Any, Iterable, Iterator, Mapping, Sequence
 
 from django.conf import settings
 from django.db.models import Case, When
@@ -43,7 +44,7 @@ CONTENT_SEARCH_QUERY_MAX_PAGE_SIZE = 100
 class ContentSearchQueryUnavailable(RuntimeError):
     """独立查询未准备好或查询失败时使用的稳定错误。"""
 
-    def __init__(self, code):
+    def __init__(self, code: str):
         super().__init__(code)
         self.code = code
 
@@ -52,8 +53,8 @@ class ContentSearchQueryUnavailable(RuntimeError):
 class ContentSearchHitHighlight:
     page_id: int
     matched_field: str
-    fragments: tuple
-    title_fragment: object = ""
+    fragments: tuple[str, ...]
+    title_fragment: str = ""
 
 
 @dataclass(frozen=True)
@@ -63,7 +64,7 @@ class ContentSearchQueryPage:
     page_ids: tuple[int, ...]
     total: int
     took_ms: int | None
-    sort_values: tuple[tuple, ...] = ()
+    sort_values: tuple[tuple[Any, ...], ...] = ()
     pit_id: str | None = None
     highlights: tuple[ContentSearchHitHighlight, ...] = ()
 
@@ -73,29 +74,35 @@ class ContentSearchCursorPage:
 
     cursor_mode = True
 
-    def __init__(self, object_list, total, previous_cursor=None, next_cursor=None):
+    def __init__(
+        self,
+        object_list: Sequence[Any],
+        total: int,
+        previous_cursor: str | None = None,
+        next_cursor: str | None = None,
+    ) -> None:
         self.object_list = object_list
         self.paginator = SimpleNamespace(count=total)
         self.previous_cursor = previous_cursor
         self.next_cursor = next_cursor
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[Any]:
         return iter(self.object_list)
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.object_list)
 
-    def has_previous(self):
+    def has_previous(self) -> bool:
         return bool(self.previous_cursor)
 
-    def has_next(self):
+    def has_next(self) -> bool:
         return bool(self.next_cursor)
 
-    def has_other_pages(self):
+    def has_other_pages(self) -> bool:
         return self.has_previous() or self.has_next()
 
 
-def content_search_read_alias():
+def content_search_read_alias() -> str:
     alias = getattr(settings, "CONTENT_SEARCH_READ_ALIAS", "")
     if not alias:
         raise ContentSearchQueryUnavailable("content_read_alias_not_configured")
@@ -106,7 +113,7 @@ def content_search_read_alias():
     return alias
 
 
-def get_content_search_serving_target():
+def get_content_search_serving_target() -> ContentSearchTarget:
     """读取连接元数据，实际索引名始终由稳定 read alias 决定。"""
 
     try:
@@ -126,7 +133,7 @@ def get_content_search_serving_target():
     return target
 
 
-def _minimum_should_match(query_string):
+def _minimum_should_match(query_string: str) -> str:
     tokens = [token for token in query_string.split() if token]
     if len(tokens) <= 2:
         return "100%"
@@ -135,7 +142,12 @@ def _minimum_should_match(query_string):
     return "60%"
 
 
-def build_content_search_query(query_string, start_date=None, end_date=None, date_field="date"):
+def build_content_search_query(
+    query_string: str,
+    start_date: Any = None,
+    end_date: Any = None,
+    date_field: str = "date",
+) -> dict[str, Any]:
     must = [
         {
             "multi_match": {
@@ -160,7 +172,10 @@ def build_content_search_query(query_string, start_date=None, end_date=None, dat
     return {"bool": {"must": must, "filter": filters}}
 
 
-def build_content_search_sort(order_by=None, date_field="date"):
+def build_content_search_sort(
+    order_by: str | None = None,
+    date_field: str = "date",
+) -> list[dict[str, Any]]:
     if date_field not in {"date", "first_published_at"}:
         raise ValueError("不允许的内容日期字段")
     if order_by == "date":
@@ -170,7 +185,7 @@ def build_content_search_sort(order_by=None, date_field="date"):
     return [{"_score": "desc"}, {"page_id": "asc"}]
 
 
-def reverse_content_search_sort(sort):
+def reverse_content_search_sort(sort: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     """上一页查询反转全部排序方向，结果返回后再恢复展示顺序。"""
 
     reversed_sort = []
@@ -185,7 +200,7 @@ def reverse_content_search_sort(sort):
     return reversed_sort
 
 
-def _total_hits(hits):
+def _total_hits(hits: Mapping[str, Any]) -> int:
     total = hits.get("total", 0)
     if isinstance(total, dict):
         total = total.get("value", 0)
@@ -195,7 +210,7 @@ def _total_hits(hits):
         raise ContentSearchElasticsearchError("es_invalid_total_hits", retryable=True)
 
 
-def _public_page_ids_in_order(page_ids):
+def _public_page_ids_in_order(page_ids: Sequence[int]) -> tuple[int, ...]:
     if not page_ids:
         return ()
     public_ids = set(
@@ -204,7 +219,10 @@ def _public_page_ids_in_order(page_ids):
     return tuple(page_id for page_id in page_ids if page_id in public_ids)
 
 
-def _public_hits_in_order(page_ids, sort_values):
+def _public_hits_in_order(
+    page_ids: Sequence[int],
+    sort_values: Sequence[tuple[Any, ...] | None],
+) -> tuple[tuple[int, ...], tuple[tuple[Any, ...], ...]]:
     public_page_ids = _public_page_ids_in_order(page_ids)
     public_ids = set(public_page_ids)
     filtered = [
@@ -218,7 +236,10 @@ def _public_hits_in_order(page_ids, sort_values):
     return public_page_ids, tuple(item[1] for item in filtered)
 
 
-def _public_highlights_in_order(public_page_ids, highlights_by_page_id):
+def _public_highlights_in_order(
+    public_page_ids: Sequence[int],
+    highlights_by_page_id: Mapping[int, ContentSearchHitHighlight],
+) -> tuple[ContentSearchHitHighlight, ...]:
     return tuple(
         highlights_by_page_id[page_id]
         for page_id in public_page_ids
@@ -227,20 +248,20 @@ def _public_highlights_in_order(public_page_ids, highlights_by_page_id):
 
 
 def query_content_search_page(
-    target,
-    query_string,
-    start=0,
-    size=20,
-    start_date=None,
-    end_date=None,
-    order_by=None,
-    index_name=None,
-    request_timeout=None,
-    search_after=None,
-    reverse=False,
-    pit_id=None,
-    date_field="date",
-):
+    target: Any,
+    query_string: str,
+    start: int = 0,
+    size: int = 20,
+    start_date: Any = None,
+    end_date: Any = None,
+    order_by: str | None = None,
+    index_name: str | None = None,
+    request_timeout: float | None = None,
+    search_after: Sequence[Any] | None = None,
+    reverse: bool = False,
+    pit_id: str | None = None,
+    date_field: str = "date",
+) -> ContentSearchQueryPage:
     """查询精简索引后只返回经过 live/public guard 的页面 ID。"""
 
     try:
@@ -327,7 +348,15 @@ def query_content_search_page(
 class ContentSearchResults:
     """把独立索引的 ID 结果转换成 Wagtail 页面列表。"""
 
-    def __init__(self, target, query_string, start_date=None, end_date=None, order_by=None, date_field="date"):
+    def __init__(
+        self,
+        target: Any,
+        query_string: str,
+        start_date: Any = None,
+        end_date: Any = None,
+        order_by: str | None = None,
+        date_field: str = "date",
+    ) -> None:
         self.target = target
         self.query_string = query_string
         self.start_date = start_date
@@ -336,7 +365,7 @@ class ContentSearchResults:
         self.date_field = date_field
         self._count_cache = None
 
-    def count(self):
+    def count(self) -> int:
         if self._count_cache is None:
             try:
                 page = query_content_search_page(
@@ -353,13 +382,13 @@ class ContentSearchResults:
             self._count_cache = page.total
         return self._count_cache
 
-    def __len__(self):
+    def __len__(self) -> int:
         return min(self.count(), 10000)
 
-    def __bool__(self):
+    def __bool__(self) -> bool:
         return self.count() > 0
 
-    def __getitem__(self, key):
+    def __getitem__(self, key: int | slice) -> Any:
         if isinstance(key, slice):
             start = key.start or 0
             stop = key.stop if key.stop is not None else start + 20
@@ -370,7 +399,7 @@ class ContentSearchResults:
             raise IndexError(key)
         return items[0]
 
-    def _fetch(self, start, size):
+    def _fetch(self, start: int, size: int) -> list[Any]:
         try:
             result = query_content_search_page(
                 self.target,
@@ -393,7 +422,13 @@ class ContentSearchResults:
         self._attach_highlights(pages, result.highlights)
         return pages
 
-    def cursor_page(self, token, page_size, search_type="blog", locale=""):
+    def cursor_page(
+        self,
+        token: str | None,
+        page_size: int,
+        search_type: str = "blog",
+        locale: str = "",
+    ) -> ContentSearchCursorPage:
         """使用签名 search_after 游标读取一页公开结果。"""
 
         query_hash = build_cursor_query_hash(
@@ -461,7 +496,7 @@ class ContentSearchResults:
         return ContentSearchCursorPage(pages, result.total, previous_cursor, next_cursor)
 
     @staticmethod
-    def _pages_for_ids(page_ids):
+    def _pages_for_ids(page_ids: Sequence[int]) -> list[Any]:
         if not page_ids:
             return []
         preserved = Case(*[When(pk=page_id, then=position) for position, page_id in enumerate(page_ids)])
@@ -469,7 +504,11 @@ class ContentSearchResults:
             BlogPage.objects.live().public().filter(pk__in=page_ids).specific().order_by(preserved)
         )
 
-    def _attach_highlights(self, pages, highlights):
+    def _attach_highlights(
+        self,
+        pages: Iterable[Any],
+        highlights: Iterable[ContentSearchHitHighlight],
+    ) -> None:
         highlights_by_id = {highlight.page_id: highlight for highlight in highlights}
         for page in pages:
             highlight = highlights_by_id.get(page.pk)
@@ -483,14 +522,23 @@ class ContentSearchResults:
                 setattr(page, "search_title_query", self.query_string)
 
 
-def build_content_search_results(query_string, start_date=None, end_date=None, order_by=None):
+def build_content_search_results(
+    query_string: str,
+    start_date: Any = None,
+    end_date: Any = None,
+    order_by: str | None = None,
+) -> ContentSearchResults:
     target = get_content_search_serving_target()
     return ContentSearchResults(target, query_string, start_date, end_date, order_by)
 
 
 def build_content_search_results_for_date_field(
-    query_string, start_date=None, end_date=None, order_by=None, date_field="date"
-):
+    query_string: str,
+    start_date: Any = None,
+    end_date: Any = None,
+    order_by: str | None = None,
+    date_field: str = "date",
+) -> ContentSearchResults:
     """为联邦查询显式绑定日期字段，避免把 BlogPage.date 误用于普通页面。"""
     target = get_content_search_serving_target()
     return ContentSearchResults(target, query_string, start_date, end_date, order_by, date_field)

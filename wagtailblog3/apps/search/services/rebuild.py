@@ -39,6 +39,7 @@ from search.services.mongo import (
 
 
 class ContentSearchRebuildError(Exception):
+    """不携带敏感原文的稳定重建错误编码。"""
     """回填失败的脱敏分类，不携带正文、连接信息或底层异常原文。"""
 
     def __init__(self, code):
@@ -48,6 +49,7 @@ class ContentSearchRebuildError(Exception):
 
 @dataclass(frozen=True)
 class ContentSearchRebuildBatch:
+    """单批回填结果；只有整批写入成功才推进 checkpoint。"""
     done: bool
     checkpoint_page_id: int
     scanned: int
@@ -57,7 +59,8 @@ class ContentSearchRebuildBatch:
     batch_bytes: int
 
 
-def _positive_int(value, default, maximum=None):
+def _positive_int(value: object, default: int, maximum: int | None = None) -> int:
+    """将外部批量参数归一化到正整数范围。"""
     try:
         value = int(value)
     except (TypeError, ValueError, OverflowError):
@@ -68,7 +71,8 @@ def _positive_int(value, default, maximum=None):
     return value
 
 
-def _build_for_target(target_id, lock=False):
+def _build_for_target(target_id: str, lock: bool = False):
+    """读取目标及最新 build；写状态时通过行锁保证并发安全。"""
     target_query = ContentSearchTarget.objects
     if lock:
         target_query = target_query.select_for_update()
@@ -84,7 +88,8 @@ def _build_for_target(target_id, lock=False):
     return target, build
 
 
-def _public_page_upper_bound():
+def _public_page_upper_bound() -> int:
+    """返回启动回填时公开页面的最大主键，固定扫描上界。"""
     return (
         BlogPage.objects.live()
         .public()
@@ -94,7 +99,7 @@ def _public_page_upper_bound():
     )
 
 
-def start_content_search_build(target_id, resume=False):
+def start_content_search_build(target_id: str, resume: bool = False):
     """注册双投递起点并固定扫描上界，然后才允许开始回填。"""
 
     if not settings.CONTENT_SEARCH_PRODUCER_ENABLED:
@@ -154,7 +159,8 @@ def start_content_search_build(target_id, resume=False):
     return _build_for_target(target_id)
 
 
-def _split_documents_by_bytes(target, documents, max_batch_bytes):
+def _split_documents_by_bytes(target: object, documents: list[dict[str, object]], max_batch_bytes: int):
+    """按 ES bulk 估算字节数切分文档，单文档超限时立即失败。"""
     current = []
     current_bytes = 0
     for document in documents:
@@ -171,7 +177,8 @@ def _split_documents_by_bytes(target, documents, max_batch_bytes):
         yield current, current_bytes
 
 
-def _mark_build_failed(build_id, error_code, *, missing=0, failed=0):
+def _mark_build_failed(build_id: int, error_code: str, *, missing: int = 0, failed: int = 0) -> None:
+    """原子记录失败状态和计数，保留已有 checkpoint 供恢复。"""
     with transaction.atomic():
         build = SearchIndexBuild.objects.select_for_update().get(pk=build_id)
         build.status = SearchIndexBuildStatus.FAILED
@@ -194,14 +201,15 @@ def _mark_build_failed(build_id, error_code, *, missing=0, failed=0):
 
 
 def _checkpoint_build(
-    build_id,
-    page_id,
-    scanned,
-    succeeded,
-    superseded,
-    batch_count,
-    batch_bytes,
+    build_id: int,
+    page_id: int,
+    scanned: int,
+    succeeded: int,
+    superseded: int,
+    batch_count: int,
+    batch_bytes: int,
 ):
+    """在事务中推进 checkpoint；较旧 checkpoint 永远不能覆盖新值。"""
     with transaction.atomic():
         build = SearchIndexBuild.objects.select_for_update().get(pk=build_id)
         if build.checkpoint_page_id >= page_id:
@@ -232,7 +240,7 @@ def _checkpoint_build(
         return build
 
 
-def rebuild_content_search_batch(target_id, batch_size, max_batch_bytes):
+def rebuild_content_search_batch(target_id: str, batch_size: int, max_batch_bytes: int) -> ContentSearchRebuildBatch:
     """处理一个 MySQL 游标批次；只有整批成功才推进 checkpoint。"""
 
     batch_size = _positive_int(batch_size, 200, maximum=1000)
@@ -349,7 +357,12 @@ def rebuild_content_search_batch(target_id, batch_size, max_batch_bytes):
     )
 
 
-def rebuild_content_search_index(target_id, batch_size, max_batch_bytes, max_batches=None):
+def rebuild_content_search_index(
+    target_id: str,
+    batch_size: int,
+    max_batch_bytes: int,
+    max_batches: int | None = None,
+):
     """循环回填直到扫描上界完成，或按运维指定的批次数安全暂停。"""
 
     if max_batches is not None:
@@ -364,12 +377,13 @@ def rebuild_content_search_index(target_id, batch_size, max_batch_bytes, max_bat
     return build, batches, result
 
 
-def _append_sample(samples, key, value, limit):
+def _append_sample(samples: dict[str, list[object]], key: str, value: object, limit: int) -> None:
+    """只保留有限样本，避免一致性报告输出大规模页面 ID。"""
     if len(samples[key]) < limit:
         samples[key].append(value)
 
 
-def _check_build_index_consistency(target, sample_limit=20, batch_size=1000):
+def _check_build_index_consistency(target: object, sample_limit: int = 20, batch_size: int = 1000) -> dict[str, object]:
     """只检查公开页面和 ES 中可搜索文档，避免把历史墓碑误判为缺失。"""
 
     sample_limit = _positive_int(sample_limit, 20, maximum=100)
@@ -453,7 +467,7 @@ def _check_build_index_consistency(target, sample_limit=20, batch_size=1000):
     return {"counts": counts, "samples": samples}
 
 
-def get_content_search_build_gate(target_id, mutate=False):
+def get_content_search_build_gate(target_id: str, mutate: bool = False) -> dict[str, object]:
     """检查回填、Delivery 和公开文档的一致性；连续两次干净检查才就绪。"""
 
     if mutate:
@@ -523,7 +537,7 @@ def get_content_search_build_gate(target_id, mutate=False):
     }
 
 
-def content_search_build_report(build):
+def content_search_build_report(build: object) -> dict[str, object]:
     """返回不含正文和错误原文的构建摘要。"""
 
     return {

@@ -1,3 +1,8 @@
+"""从 MongoDB 正式正文构造内容搜索文档和内容哈希。"""
+
+from collections.abc import Mapping, Sequence
+from typing import Any
+
 import hashlib
 import json
 from dataclasses import dataclass
@@ -10,18 +15,21 @@ _FORMAL_CONTENT_UNSET = object()
 
 @dataclass(frozen=True)
 class FormalContentSnapshot:
+    """正式正文的稳定标识和哈希；草稿 revision 不参与计算。"""
     mongo_content_id: str
     content_hash: str
 
 
 @dataclass(frozen=True)
 class FormalContentDocument:
+    """待写入搜索索引的最小公开文档及其版本校验信息。"""
     mongo_content_id: str
     content_hash: str
     document: dict
 
 
-def _related_ids(page, relation_name):
+def _related_ids(page: object, relation_name: str) -> list[int]:
+    """只投影公开筛选需要的关联主键，不复制关系对象或展示字段。"""
     """只投影公开筛选所需的关联主键，不复制关系对象或展示字段。"""
 
     relation = getattr(page, relation_name, None)
@@ -32,7 +40,10 @@ def _related_ids(page, relation_name):
     return list(relation.values_list("pk", flat=True))
 
 
-def _build_formal_payload(page, formal_content=_FORMAL_CONTENT_UNSET):
+def _build_formal_payload(
+    page: object, formal_content: object = _FORMAL_CONTENT_UNSET
+) -> dict[str, Any] | None:
+    """从正式 Mongo 正文生成搜索投影；空正文是合法值，缺失正文才返回 None。"""
     """从正式 Mongo 正文构造索引输入，草稿 Revision 永远不参与公开搜索版本。"""
 
     mongo_content_id = getattr(page, "mongo_content_id", None)
@@ -63,7 +74,8 @@ def _build_formal_payload(page, formal_content=_FORMAL_CONTENT_UNSET):
     }
 
 
-def _content_hash(payload):
+def _content_hash(payload: Mapping[str, Any]) -> str:
+    """按稳定 JSON 字段计算哈希，并排除只影响排序的首次发布时间。"""
     # 首次发布时间只服务于普通页面排序，不属于 Mongo 正文；否则新增索引字段会误判正文版本变化。
     hash_payload = dict(payload)
     hash_payload.pop("first_published_at", None)
@@ -71,7 +83,10 @@ def _content_hash(payload):
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
-def build_formal_content_snapshot(page, formal_content=_FORMAL_CONTENT_UNSET):
+def build_formal_content_snapshot(
+    page: object, formal_content: object = _FORMAL_CONTENT_UNSET
+) -> FormalContentSnapshot | None:
+    """只从正式正文构造 hash，草稿 revision 永远不进入公开搜索版本。"""
     """只从 Mongo 正式正文构造 hash，草稿 Revision 永远不参与公开搜索版本。"""
 
     payload = _build_formal_payload(page, formal_content=formal_content)
@@ -84,10 +99,11 @@ def build_formal_content_snapshot(page, formal_content=_FORMAL_CONTENT_UNSET):
 
 
 def build_formal_content_document(
-    page,
-    content_version,
-    formal_content=_FORMAL_CONTENT_UNSET,
-):
+    page: object,
+    content_version: int,
+    formal_content: object = _FORMAL_CONTENT_UNSET,
+) -> FormalContentDocument | None:
+    """生成不含 HTML、草稿指针或 Mongo 原始块的最小公开索引文档。"""
     """生成最小公开索引文档，不包含 HTML、草稿指针或 Mongo 原始块。"""
 
     payload = _build_formal_payload(page, formal_content=formal_content)
@@ -116,7 +132,12 @@ def build_formal_content_document(
     )
 
 
-def build_formal_content_documents(pages, content_versions, formal_contents):
+def build_formal_content_documents(
+    pages: Sequence[object],
+    content_versions: Mapping[int, int],
+    formal_contents: Mapping[str, object],
+) -> tuple[list[FormalContentDocument], list[int]]:
+    """基于批量 Mongo 读取结果投影文档，禁止循环内回退单篇查询。"""
     """基于批量读取结果投影文档，禁止在循环中回退到单篇 Mongo 查询。"""
 
     documents = []

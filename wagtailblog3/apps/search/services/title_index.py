@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from search.services.content_index import validate_content_index_name
 from search.services.elasticsearch import (
@@ -14,16 +15,21 @@ from search.services.elasticsearch import (
 
 @dataclass(frozen=True)
 class TitleSuggestionIndexCreateResult:
+    """标题建议索引创建结果；只报告是否新建，不包含 ES 响应正文。"""
     index_created: bool
 
 
-def default_title_suggestion_index_name(index_prefix, version="v001"):
+def default_title_suggestion_index_name(index_prefix: str, version: str = "v001") -> str:
+    """生成并校验带版本的标题建议索引名。"""
     if not isinstance(version, str) or not version.startswith("v") or not version[1:].isdigit():
         raise ValueError("标题建议索引版本无效")
     return validate_content_index_name(f"{index_prefix}-title-{version}", index_prefix)
 
 
-def build_title_suggestion_index_template(index_name, shards=1, replicas=0):
+def build_title_suggestion_index_template(
+    index_name: str, shards: int = 1, replicas: int = 0
+) -> dict[str, Any]:
+    """构造 strict mapping；模板只允许预定义字段，避免动态字段泄漏。"""
     validate_content_index_name(index_name, index_name.rsplit("-title-", 1)[0])
     return {
         "index_patterns": [index_name],
@@ -61,7 +67,13 @@ def build_title_suggestion_index_template(index_name, shards=1, replicas=0):
     }
 
 
-def create_title_suggestion_index(connection_name, index_name):
+def create_title_suggestion_index(
+    connection_name: str, index_name: str
+) -> TitleSuggestionIndexCreateResult:
+    """创建标题建议索引并立即校验 mapping；已存在或不匹配时失败。
+
+    该函数具有外部 ES 写入副作用，生产调用必须由管理命令的确认门禁控制。
+    """
     client = get_content_search_client_for_connection(connection_name)
     template_name = f"{index_name}-template"
     definition = build_title_suggestion_index_template(index_name)

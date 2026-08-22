@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any, Iterable, Iterator, Sequence
 
 from django.conf import settings
 from django.core import signing
@@ -22,12 +23,21 @@ class FederatedSearchUnavailable(ContentSearchQueryUnavailable):
     """联邦搜索任一必需来源不可用时使用的稳定错误。"""
 
 
-def _public_pages_queryset(start_date=None, end_date=None, order_by=None):
+def _public_pages_queryset(
+    start_date: Any = None,
+    end_date: Any = None,
+    order_by: str | None = None,
+) -> Any:
     """构造唯一的 Pages 流，`pages` 和 `all` 必须共用相同公开边界。"""
     return build_public_pages_queryset(start_date, end_date, order_by)
 
 
-def _build_pages_search_results(query_string, start_date=None, end_date=None, order_by=None):
+def _build_pages_search_results(
+    query_string: str,
+    start_date: Any = None,
+    end_date: Any = None,
+    order_by: str | None = None,
+) -> Any:
     """通过现有 Wagtail 查询编译器执行 Pages 流，避免复制搜索 DSL。"""
     from search.core import _build_search_results_for_queryset
 
@@ -41,12 +51,12 @@ def _build_pages_search_results(query_string, start_date=None, end_date=None, or
     )
 
 
-def _ranked_candidates(results, limit):
+def _ranked_candidates(results: Any, limit: int) -> list[tuple[Any, int]]:
     items = list(results[:limit])
     return [(page, position + 1) for position, page in enumerate(items)]
 
 
-def _date_key(page, reverse=False):
+def _date_key(page: Any, reverse: bool = False) -> tuple[int, Any, int]:
     value = getattr(page, "date", None)
     if value is None:
         value = getattr(page, "first_published_at", None)
@@ -64,7 +74,7 @@ class FederatedSearchResults:
     pages_results: object
     order_by: str | None = None
 
-    def count(self):
+    def count(self) -> int:
         # 两个来源必须按公开页面主键去重后计数，避免同一页面同时落入两条流时总数虚高。
         blog_ids = {page.pk for page in self.blog_results[:FEDERATED_CANDIDATE_LIMIT]}
         page_ids = {page.pk for page in self.pages_results[:FEDERATED_CANDIDATE_LIMIT]}
@@ -72,13 +82,13 @@ class FederatedSearchResults:
             return self.blog_results.count() + self.pages_results.count() - len(blog_ids & page_ids)
         return len(blog_ids | page_ids)
 
-    def __len__(self):
+    def __len__(self) -> int:
         return min(self.count(), 10000)
 
-    def __bool__(self):
+    def __bool__(self) -> bool:
         return self.count() > 0
 
-    def __getitem__(self, key):
+    def __getitem__(self, key: int | slice) -> Any:
         if not isinstance(key, slice):
             items = self._fetch(key, 1)
             if not items:
@@ -88,7 +98,7 @@ class FederatedSearchResults:
         stop = key.stop if key.stop is not None else start + 20
         return self._fetch(start, max(stop - start, 0))
 
-    def _sort_key(self, page, rank):
+    def _sort_key(self, page: Any, rank: int) -> tuple[Any, ...]:
         if self.order_by == "date":
             return _date_key(page)
         if self.order_by == "-date":
@@ -96,7 +106,13 @@ class FederatedSearchResults:
             return (date_key[0], -date_key[1], page.pk)
         return (-(1 / (RRF_K + rank)), page.pk)
 
-    def _merge_items(self, blog_items, pages_items, size, start=0):
+    def _merge_items(
+        self,
+        blog_items: Sequence[Any],
+        pages_items: Sequence[Any],
+        size: int,
+        start: int = 0,
+    ) -> list[Any]:
         merged = []
         seen = set()
         for rank, page in enumerate(blog_items, 1):
@@ -110,7 +126,7 @@ class FederatedSearchResults:
         merged.sort(key=lambda item: item[0])
         return [page for _, page in merged[start:start + size]]
 
-    def _fetch(self, start, size):
+    def _fetch(self, start: int, size: int) -> list[Any]:
         if size <= 0:
             return []
         limit = min(FEDERATED_CANDIDATE_LIMIT, start + size)
@@ -121,7 +137,13 @@ class FederatedSearchResults:
             start,
         )
 
-    def cursor_page(self, token, page_size, search_type="all", locale=""):
+    def cursor_page(
+        self,
+        token: str | None,
+        page_size: int,
+        search_type: str = "all",
+        locale: str = "",
+    ) -> "FederatedCursorPage":
         """签名绑定查询条件，并分别保存 Blog 游标和 Pages 来源偏移。"""
         page_size = max(1, min(int(page_size), FEDERATED_CANDIDATE_LIMIT))
         query_string = getattr(self.blog_results, "query_string", "")
@@ -159,32 +181,41 @@ class FederatedSearchResults:
 class FederatedCursorPage:
     cursor_mode = True
 
-    def __init__(self, object_list, total, next_cursor=None, has_previous=False):
+    def __init__(
+        self,
+        object_list: Sequence[Any],
+        total: int,
+        next_cursor: str | None = None,
+        has_previous: bool = False,
+    ) -> None:
         self.object_list = object_list
         self.paginator = type("Paginator", (), {"count": total})()
         self.previous_cursor = None
         self.next_cursor = next_cursor
         self._has_previous = has_previous
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[Any]:
         return iter(self.object_list)
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.object_list)
 
-    def has_previous(self):
+    def has_previous(self) -> bool:
         return self._has_previous
 
-    def has_next(self):
+    def has_next(self) -> bool:
         return bool(self.next_cursor)
 
 
-def _encode_federated_cursor(state, query_hash):
+def _encode_federated_cursor(state: dict[str, Any], query_hash: str) -> str:
     payload = {"v": FEDERATED_CURSOR_VERSION, "q": query_hash, **state}
     return signing.dumps(payload, salt=FEDERATED_CURSOR_SALT, compress=True)
 
 
-def _decode_federated_cursor(token, query_hash):
+def _decode_federated_cursor(
+    token: str | None,
+    query_hash: str,
+) -> dict[str, Any] | None:
     if not token:
         return None
     try:
@@ -210,7 +241,12 @@ def _decode_federated_cursor(token, query_hash):
     return {"blog_cursor": payload.get("blog_cursor"), "pages_offset": pages_offset}
 
 
-def build_federated_search_results(query_string, start_date=None, end_date=None, order_by=None):
+def build_federated_search_results(
+    query_string: str,
+    start_date: Any = None,
+    end_date: Any = None,
+    order_by: str | None = None,
+) -> FederatedSearchResults:
     """构造联邦结果；任一必需来源失败都向上抛出，不返回部分结果。"""
     try:
         blog_results = build_content_search_results(

@@ -991,8 +991,38 @@ class BlogPage(Page):
 		context = super().get_context(request, *args, **kwargs)
 		# 注入标签索引页，供模板生成标签跳转链接
 		context['blog_tag_index_page'] = BlogTagIndexPage.objects.live().first()
+		# 模板只消费一次查询结果，避免文章页为同一组导航重复访问数据库。
+		context['related_posts'] = self.get_related_posts_by_tags()
+		context['prev_post'] = self.get_prev_post()
+		context['next_post'] = self.get_next_post()
+		context['is_article_page'] = True
+		article_url = request.build_absolute_uri(self.url) if self.url else request.build_absolute_uri()
+		context['article_structured_data'] = {
+			'@context': 'https://schema.org',
+			'@type': 'Article',
+			'headline': self.title,
+			'description': self.search_description or strip_tags(str(self.intro or ''))[:180],
+			'url': article_url,
+			'datePublished': self.first_published_at.isoformat() if self.first_published_at else self.date.isoformat(),
+			'dateModified': self.last_published_at.isoformat() if self.last_published_at else self.date.isoformat(),
+		}
 		context.update(getattr(self, '_frontend_resource_features', {}))
 		return context
+
+	def get_publish_quality_issues(self) -> list[str]:
+		"""返回发布前可人工处理的内容质量问题，不阻断既有草稿保存流程。"""
+		issues: list[str] = []
+		if not self.title.strip():
+			issues.append('缺少文章标题')
+		if not strip_tags(str(self.intro or '')).strip():
+			issues.append('缺少文章摘要')
+		if not self.body:
+			issues.append('正文为空')
+		if not (self.search_description or '').strip():
+			issues.append('未设置搜索摘要，将使用文章摘要作为 SEO 描述')
+		if self.featured_image and not self.featured_image.default_alt_text.strip():
+			issues.append('封面图缺少替代文本')
+		return issues
 
 	def serve(self, request: Any) -> Any:
 		"""读取一次 Mongo 正文、计算资源开关并交给 Wagtail 渲染。"""

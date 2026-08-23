@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 {% load wagtailcore_tags wagtailimages_tags static blog_tags comment_tags %}
-{% block title %}{{ page.title|inline_title_text }}{% endblock %}
+{% block title %}{{ page.seo_title|default:page.title|inline_title_text }}{% endblock %}
 
 {% block extra_css %}
     {{ block.super }}
-    <link rel="stylesheet" href="{% static 'blog/css/blog.css' %}?v=20260808-2">
+    <link rel="stylesheet" href="{% static 'blog/css/blog.css' %}?v=20260823-5">
     <link rel="stylesheet" href="{% static 'blog/css/blog-resize.css' %}">
     <link rel="stylesheet" href="{% static 'blog/css/adaptive-scroll.css' %}?v=20260730-2127">
     {% include "includes/content/article_reading_css.html" %}
@@ -34,6 +34,7 @@
 {% endblock %}
 
 {% block content %}
+{{ article_structured_data|json_script:"article-structured-data" }}
 <div class="blog-page-wrapper">
     <section class="blog-hero {% if page.featured_image %}blog-hero--with-image{% else %}blog-hero--default{% endif %}">
         {% if page.featured_image %}
@@ -194,8 +195,7 @@
                         {% include 'blog/reactions_block.html' %}
                     </div>
 
-                    {% with related_posts=page.get_related_posts_by_tags %}
-                        {% if related_posts %}
+                    {% if related_posts %}
                             <div class="sidebar-widget related-widget">
                                 <div class="widget-title">相关推荐</div>
                                 <div class="related-list">
@@ -217,10 +217,7 @@
                                 </div>
                             </div>
                         {% endif %}
-                    {% endwith %}
-
-                    {% with prev_post=page.get_prev_post next_post=page.get_next_post %}
-                        {% if prev_post or next_post %}
+                    {% if prev_post or next_post %}
                             <div class="sidebar-widget nav-widget">
                                 {% if prev_post %}
                                     <a href="{{ prev_post.url }}" class="nav-btn prev">
@@ -236,7 +233,6 @@
                                 {% endif %}
                             </div>
                         {% endif %}
-                    {% endwith %}
                 </div>
             </aside>
 

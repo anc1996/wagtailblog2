@@ -25,7 +25,9 @@
                     <div class="sidebar-widget search-box">
                         <form method="get" action="{% url 'blog:author_list' %}">
                             <div class="form-group">
-                                <input type="search" name="q" value="{{ search_query|default:'' }}" placeholder="{% translate 'Search Authors...' %}">
+                                <label class="sr-only" for="author-list-search">{% translate 'Search Authors' %}</label>
+                                <input type="search" name="q" id="author-list-search" value="{{ search_query|default:'' }}"
+                                       placeholder="{% translate 'Search Authors...' %}" aria-label="{% translate 'Search Authors' %}">
                                 <button type="submit" aria-label="{% translate 'Search Authors' %}"><span class="icon fa fa-search" aria-hidden="true"></span></button>
                             </div>
                         </form>
@@ -71,10 +73,13 @@
                                         <a href="{% url 'blog:author_detail' pk=author.pk %}">
                                             {% if author.author_image %}
                                                 {% image author.author_image fill-200x200 as author_img %}
-                                                <img src="{{ author_img.url }}" alt="{{ author.name }}" style="border-radius: 50%;">
+                                                <img src="{{ author_img.url }}" alt="{{ author.name }}"
+                                                     width="{{ author_img.width }}" height="{{ author_img.height }}"
+                                                     loading="lazy" decoding="async" style="border-radius: 50%;">
                                             {% else %}
                                                 {# 提供一个备用的占位图 #}
-                                                <img src="{% static 'gretzia/images/resource/author-1.jpg' %}" alt="{{ author.name }}" style="border-radius: 50%;">
+                                                <img src="{% static 'gretzia/images/resource/author-1.jpg' %}" alt="{{ author.name }}"
+                                                     width="200" height="200" loading="lazy" decoding="async" style="border-radius: 50%;">
                                             {% endif %}
                                         </a>
                                     </div>
@@ -106,19 +111,21 @@
                         {% if is_paginated %}
                         <ul class="styled-pagination text-center">
                             {% if page_obj.has_previous %}
-                                <li><a href="?page={{ page_obj.previous_page_number }}{% if search_query %}&q={{ search_query }}{% endif %}"><span class="fa fa-angle-left"></span></a></li>
+                                <li><a href="?page={{ page_obj.previous_page_number }}{% if search_query %}&q={{ search_query }}{% endif %}"
+                                       aria-label="上一页"><span class="fa fa-angle-left" aria-hidden="true"></span></a></li>
                             {% endif %}
 
                             {% for num in paginator.page_range %}
                                 {% if page_obj.number == num %}
-                                    <li class="active"><a href="#">{{ num }}</a></li>
+                                    <li class="active"><a href="#" aria-current="page" aria-label="第{{ num }}页">{{ num }}</a></li>
                                 {% elif num > page_obj.number|add:'-3' and num < page_obj.number|add:'3' %}
-                                    <li><a href="?page={{ num }}{% if search_query %}&q={{ search_query }}{% endif %}">{{ num }}</a></li>
+                                    <li><a href="?page={{ num }}{% if search_query %}&q={{ search_query }}{% endif %}" aria-label="第{{ num }}页">{{ num }}</a></li>
                                 {% endif %}
                             {% endfor %}
 
                             {% if page_obj.has_next %}
-                                <li><a href="?page={{ page_obj.next_page_number }}{% if search_query %}&q={{ search_query }}{% endif %}"><span class="fa fa-angle-right"></span></a></li>
+                                <li><a href="?page={{ page_obj.next_page_number }}{% if search_query %}&q={{ search_query }}{% endif %}"
+                                       aria-label="下一页"><span class="fa fa-angle-right" aria-hidden="true"></span></a></li>
                             {% endif %}
                         </ul>
                         {% endif %}

@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from django.conf import settings
 from django.urls import reverse
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, TestCase
 
 from blog.blocks import (
     MERMAID_RENDERER_LEGACY,
@@ -41,6 +41,7 @@ $$E = mc^2$$
             MongoDBStreamFieldAdapter._process_block_value(block), self.markdown
         )
 
+
     def test_legacy_markdown_dictionary_is_normalized_to_string(self):
         stream_block = BlogPage.body.field.stream_block
         payload = [
@@ -65,6 +66,23 @@ $$E = mc^2$$
 
     def test_multipart_file_limit_covers_large_markdown_imports(self):
         self.assertEqual(settings.DATA_UPLOAD_MAX_NUMBER_FILES, 256)
+
+
+class BlogPageRevisionStorageTests(TestCase):
+    @patch("blog.models.MongoManager")
+    def test_revision_body_is_empty_only_after_mongo_draft_is_written(self, manager_cls):
+        """Revision 只保存指针，不能把正文误认为已丢失。"""
+        manager_cls.return_value.save_blog_revision_body.return_value = "draft-pointer"
+        page = BlogPage(
+            title="临时文章",
+            body=[{"type": "markdown_block", "value": "浏览器编辑后的正文"}],
+        )
+
+        data = page.serializable_data()
+
+        self.assertEqual(data["body"], "[]")
+        self.assertEqual(data["mongo_draft_pointer"], "draft-pointer")
+        manager_cls.return_value.save_blog_revision_body.assert_called_once()
 
 
 class MermaidRendererCompatibilityTests(SimpleTestCase):
@@ -242,6 +260,9 @@ class VditorWidgetCompatibilityTests(SimpleTestCase):
         self.assertIn("restoreMarkdownTableImages", script)
         self.assertIn("encodeMarkdownTableImageEmbedsForEditor", script)
         self.assertIn("decodeMarkdownTableImageEmbedsFromEditor", script)
+        # Telepath 草稿保存可能直接读取 getState，必须覆盖编辑器尚未触发 input 事件的路径。
+        self.assertIn("getSerializedValue()", script)
+        self.assertIn("return this.getSerializedValue();", script)
         self.assertIn("TABLE_IMAGE_EMBED_PATTERN", script)
         self.assertIn("isSafePreviewImageSource", script)
         self.assertIn("data-blog-inline-image-id", script)

@@ -1725,11 +1725,21 @@
         }
 
         getValue() {
-            return this.input.value;
+            return this.getSerializedValue();
         }
 
         getState() {
-            return this.input.value;
+            // Wagtail Telepath 可能绕过 submit 事件直接读取 getState；此处必须从编辑器即时取值。
+            return this.getSerializedValue();
+        }
+
+        getSerializedValue() {
+            if (this.editor && this.initialized) {
+                return decodeMarkdownTableImageEmbedsFromEditor(
+                    this.editor.getValue()
+                ).replace(IMAGE_UPLOAD_TOKEN_PATTERN, "");
+            }
+            return this.input.value || "";
         }
 
         setState(value) {

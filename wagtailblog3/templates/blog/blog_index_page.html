@@ -30,11 +30,14 @@
                         {% if page.featured_image %}
                             <figure class="page-intro-image wow fadeInRight" data-wow-delay="0ms" data-wow-duration="1000ms">
                                 {% image page.featured_image width-800 as feat_img %}
-                                <img src="{{ feat_img.url }}" alt="{{ feat_img.alt|default:page.title }}" />
+                                <img src="{{ feat_img.url }}" alt="{{ feat_img.alt|default:page.title }}"
+                                     width="{{ feat_img.width }}" height="{{ feat_img.height }}"
+                                     loading="eager" fetchpriority="high" decoding="async" />
                             </figure>
                         {% else %}
                             <figure class="page-intro-image page-intro-image--fallback">
-                                <img src="{% static 'gretzia/images/resource/news-24.jpg' %}" alt="{{ page.title }}" />
+                                <img src="{% static 'gretzia/images/resource/news-24.jpg' %}" alt="{{ page.title }}"
+                                     width="800" height="450" loading="eager" fetchpriority="high" decoding="async" />
                             </figure>
                         {% endif %}
 

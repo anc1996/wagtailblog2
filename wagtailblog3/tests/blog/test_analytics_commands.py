@@ -4,6 +4,7 @@ from datetime import timedelta
 from io import StringIO
 from uuid import uuid4
 
+from django.conf import settings
 from django.core.management import call_command
 from django.test import TestCase
 from django.utils import timezone
@@ -14,8 +15,10 @@ from blog.models import ArticleEngagementSession, FeedClientDaily, PageView
 
 class AnalyticsCleanupCommandTests(TestCase):
     def setUp(self):
+        self.locale, _ = Locale.objects.get_or_create(language_code=settings.LANGUAGE_CODE)
         self.page = Page.get_first_root_node()
-        self.locale = Locale.get_default()
+        if self.page is None:
+            self.page = Page.add_root(title="Analytics test root", slug="analytics-test-root")
         self.site = Site.objects.filter(is_default_site=True).first() or Site.objects.create(
             hostname="testserver", port=80, root_page=self.page, is_default_site=True
         )

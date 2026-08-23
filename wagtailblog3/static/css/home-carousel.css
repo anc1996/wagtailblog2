@@ -138,6 +138,14 @@
     background: linear-gradient(90deg, rgba(38, 28, 22, 0.72), rgba(38, 28, 22, 0.28));
 }
 
+/* 轮播标题过长时限制行数，避免表格垂直居中内容溢出图片区域。 */
+.home-page .home-featured-carousel .slide .overlay-box .content h2 {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+}
+
 .home-page .sidebar-page-container {
     padding-top: 64px;
 }
@@ -309,5 +317,15 @@
 
     .home-page .news-block-two .inner-box .lower-content {
         padding: 22px 18px 20px;
+    }
+
+    .home-page .home-featured-carousel .slide .overlay-inner {
+        padding: 18px 14px;
+    }
+
+    .home-page .home-featured-carousel .slide .overlay-box .content h2 {
+        margin-bottom: 8px;
+        font-size: 22px;
+        line-height: 1.3;
     }
 }

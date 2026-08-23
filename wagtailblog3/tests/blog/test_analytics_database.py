@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from django.contrib.auth.models import AnonymousUser
 from django.http import HttpResponse
+from django.conf import settings
 from django.test import RequestFactory, TestCase, override_settings
 from django.utils import timezone
 from wagtail.models import Locale, Page, Site
@@ -24,8 +25,10 @@ from blog.services.content_analytics import ContentAnalyticsFilters, ContentAnal
 class AnalyticsDatabaseTests(TestCase):
     def setUp(self):
         self.factory = RequestFactory()
+        self.locale, _ = Locale.objects.get_or_create(language_code=settings.LANGUAGE_CODE)
         self.page = Page.get_first_root_node()
-        self.locale = Locale.get_default()
+        if self.page is None:
+            self.page = Page.add_root(title="Analytics test root", slug="analytics-test-root")
         self.site = Site.objects.filter(is_default_site=True).first()
         if self.site is None:
             self.site = Site.objects.create(

@@ -6,11 +6,12 @@
 .blog-hero {
     position: relative;
     isolation: isolate;
-    min-height: 390px;
+    min-height: 0;
     display: flex;
-    align-items: center;
-    padding: clamp(4.2rem, 7vw, 6.8rem) 0 clamp(4.6rem, 7vw, 6.4rem);
-    margin-bottom: 2.4rem;
+    align-items: flex-start;
+    /* 文章首屏优先展示标题和正文，减少上下留白但保留背景层次。 */
+    padding: clamp(2.4rem, 4vw, 3.8rem) 0 clamp(2.8rem, 4.5vw, 4.2rem);
+    margin-bottom: 1.5rem;
     color: #fffaf3;
     background:
         radial-gradient(circle at 78% 22%, rgba(210, 151, 83, 0.22), transparent 33%),
@@ -39,7 +40,7 @@
     bottom: -1px;
     left: 0;
     z-index: 1;
-    height: 56px;
+    height: 36px;
     pointer-events: none;
     background: linear-gradient(to bottom, transparent, rgba(255, 255, 255, 0.92));
 }
@@ -65,7 +66,7 @@
     align-items: center;
     flex-wrap: wrap;
     gap: 0.42rem;
-    margin-bottom: 1rem;
+    margin-bottom: 0.7rem;
     color: #e8c596;
     font-size: 0.82rem;
     font-weight: 650;
@@ -106,7 +107,7 @@
     max-width: 18em;
     margin: 0 0 1.25rem;
     color: #fffdf9;
-    font-size: clamp(2.45rem, 2rem + 2.1vw, 4.15rem);
+    font-size: clamp(2.15rem, 1.8rem + 1.55vw, 3.55rem);
     font-weight: 750;
     line-height: 1.16;
     letter-spacing: -0.025em;
@@ -121,13 +122,13 @@
 /* Long Chinese titles need a denser editorial scale instead of oversized wrapping. */
 .blog-title--medium {
     max-width: 100%;
-    font-size: clamp(2.3rem, 1.95rem + 1.65vw, 3.55rem);
+    font-size: clamp(2.05rem, 1.75rem + 1.35vw, 3.1rem);
     line-height: 1.18;
 }
 
 .blog-title--long {
     max-width: 100%;
-    font-size: clamp(1.95rem, 1.7rem + 1.25vw, 3rem);
+    font-size: clamp(1.8rem, 1.55rem + 1.05vw, 2.7rem);
     line-height: 1.24;
     letter-spacing: -0.018em;
 }
@@ -138,7 +139,7 @@
     align-items: center;
     flex-wrap: wrap;
     gap: 0.7rem;
-    margin-top: 1.45rem;
+    margin-top: 1rem;
     font-size: 0.94rem;
     opacity: 1;
 }
@@ -209,7 +210,7 @@
     align-items: center;
     flex-wrap: wrap;
     gap: 0.62rem;
-    margin-top: 0.9rem;
+    margin-top: 0.65rem;
     color: #e9dfd2;
     font-size: 0.84rem;
 }
@@ -877,7 +878,8 @@
         min-height: 0;
         max-height: 100% !important;
         overflow-y: auto;
-        padding: 40px 50px;
+        /* 缩短正文与两侧栏的视觉距离，为代码和长行内容留出更多宽度。 */
+        padding: 28px 30px;
         scrollbar-width: thin;
         scrollbar-color: var(--blog-scroll-thumb) var(--blog-scroll-track);
         scrollbar-gutter: stable;
@@ -1254,8 +1256,79 @@
     }
 
     .blog-meta-item {
-        width: 100%;
-        border-radius: 9px;
+        /* 元信息允许自然换行，避免每项独占一整行拉高移动端 Hero。 */
+        width: auto;
+        max-width: 100%;
+        border-radius: 999px;
+    }
+}
+
+/* 主题层使用更高特异性设置了 Hero 最小高度，这里限定文章页避免首屏被空白占满。 */
+.blog-page-wrapper .blog-hero {
+    /* 主题层在页面专用样式之后加载，必须保留该覆盖以避免恢复大块空白。 */
+    min-height: 0 !important;
+}
+
+@media (max-width: 767px) {
+    .blog-page-wrapper .blog-hero {
+        /* 移动端信息密度较高，减少上下留白避免 Hero 挤占正文首屏。 */
+        padding: 1.45rem 0 1.9rem;
+    }
+
+    .blog-page-wrapper .blog-hero-eyebrow {
+        margin-bottom: 0.55rem;
+    }
+
+    .blog-page-wrapper .blog-title {
+        margin-bottom: 0.7rem;
+    }
+
+    .blog-page-wrapper .blog-intro {
+        --blog-intro-collapsed-lines: 3;
+        margin: 0.7rem 0 0.9rem;
+    }
+
+    .blog-page-wrapper .blog-meta {
+        margin-top: 0.75rem;
+        gap: 0.42rem;
+    }
+}
+
+@media (min-width: 1280px) {
+    /* 桌面文章页缩短栏间留白，让正文获得更多连续阅读宽度。 */
+    .blog-page-wrapper .blog-layout-container,
+    .blog-page-wrapper .blog-layout-container.hide-sidebar-left,
+    .blog-page-wrapper .blog-layout-container.hide-sidebar-right,
+    .blog-page-wrapper .blog-layout-container.hide-sidebar-left.hide-sidebar-right {
+        /* 主题层后加载且声明了 26px，使用重要性锁定本页阅读密度。 */
+        gap: 10px !important;
+    }
+}
+
+@media (min-width: 1441px) {
+    /* 宽屏使用更宽的居中轨道，让 Hero 标题左右留白保持对称。 */
+    .blog-page-wrapper .hero-container {
+        max-width: 1680px;
+    }
+
+    .blog-page-wrapper .blog-hero-content {
+        max-width: 100%;
+    }
+
+    .blog-page-wrapper .blog-title,
+    .blog-page-wrapper .blog-intro {
+        max-width: 100%;
+    }
+}
+
+@media (min-width: 1280px) {
+    /* 两层容器的内边距会叠加挤压正文，桌面端收紧到可读且连续的宽度。 */
+    .blog-page-wrapper .article-scroll-container {
+        padding-inline: 18px !important;
+    }
+
+    .blog-page-wrapper .article-body-content {
+        padding-inline: clamp(28px, 3vw, 36px) !important;
     }
 }
 

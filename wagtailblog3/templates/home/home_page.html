@@ -9,7 +9,7 @@
     <link href="{% static 'gretzia/css/owl.css' %}" rel="stylesheet">
     <link rel="stylesheet" href="{% static 'archive/css/archive.css' %}?v=20260726-4">
     <link rel="stylesheet" href="{% static 'css/sidebar-card-theme.css' %}?v=20260727-1">
-    <link rel="stylesheet" href="{% static 'css/home-carousel.css' %}?v=20260727-2">
+    <link rel="stylesheet" href="{% static 'css/home-carousel.css' %}?v=20260823-1">
 {% endblock %}
 
 {% block page_vendor_js %}
@@ -38,12 +38,16 @@
                             <img src="{{ slide_img.url }}"
                                  alt="{{ blog_index.title }}"
                                  width="{{ slide_img.width }}"
-                                 height="{{ slide_img.height }}" />
+                                 height="{{ slide_img.height }}"
+                                 decoding="async"
+                                 {% if forloop.first %}fetchpriority="high"{% else %}loading="lazy"{% endif %} />
                         {% else %}
                             <img src="{% static 'gretzia/images/resource/slide-1.jpg' %}"
                                  alt="{{ blog_index.title }}"
                                  width="1170"
-                                 height="648" />
+                                 height="648"
+                                 decoding="async"
+                                 {% if forloop.first %}fetchpriority="high"{% else %}loading="lazy"{% endif %} />
                         {% endif %}
                     </figure>
                     <div class="overlay-box">
@@ -97,9 +101,12 @@
                                     {% if page.banner_image %}
                                         {# 性能优化: 使用 webp #}
                                         {% image page.banner_image fill-1200x400 format-webp as banner_img %}
-                                        <img src="{{ banner_img.url }}" alt="{{ page.title }}" class="img-fluid rounded" />
+                                        <img src="{{ banner_img.url }}" alt="{{ page.title }}" class="img-fluid rounded"
+                                             width="{{ banner_img.width }}" height="{{ banner_img.height }}"
+                                             loading="lazy" decoding="async" />
                                     {% else %}
-                                        <img src="{% static 'gretzia/images/resource/news-6.jpg' %}" alt="{{ page.title }}" class="img-fluid rounded" />
+                                        <img src="{% static 'gretzia/images/resource/news-6.jpg' %}" alt="{{ page.title }}" class="img-fluid rounded"
+                                             width="1200" height="400" loading="lazy" decoding="async" />
                                     {% endif %}
                                 </div>
                             </div>
@@ -147,9 +154,11 @@
                                              loading="lazy"
                                              width="{{ post_img.width }}"
                                              height="{{ post_img.height }}"
+                                             decoding="async"
                                              class="transition-image" />
                                     {% else %}
-                                        <img src="{% static 'gretzia/images/resource/news-7.jpg' %}" alt="{{ post.title|inline_title_text }}" loading="lazy" />
+                                        <img src="{% static 'gretzia/images/resource/news-7.jpg' %}" alt="{{ post.title|inline_title_text }}"
+                                             loading="lazy" decoding="async" width="400" height="300" />
                                     {% endif %}
                                 </div>
                                 <div class="lower-content">

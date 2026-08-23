@@ -68,7 +68,12 @@
 
             {% if post.featured_image %}
                 <a href="{% pageurl post %}" class="featured-image-link">
-                    {% image post.featured_image fill-300x200 class="thumbnail" %}
+                    {# 显式输出 rendition 尺寸，避免归档列表图片加载后推动正文。 #}
+                    {% image post.featured_image fill-300x200 as archive_image %}
+                    <img src="{{ archive_image.url }}"
+                         alt="{{ post.title|inline_title_text }}"
+                         width="{{ archive_image.width }}" height="{{ archive_image.height }}"
+                         loading="lazy" decoding="async" class="thumbnail">
                 </a>
             {% endif %}
 

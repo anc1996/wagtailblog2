@@ -10,7 +10,7 @@
 
 ## 24. 实施记录
 
-### 2026-08-24：迁移到 Tampermonkey，移除 AdGuard 专用探针（已实现，未发布）
+### 2026-08-24：迁移到 Tampermonkey，移除 AdGuard 专用探针（已实现并发布）
 
 #### 背景与决策
 - 用户实际通过浏览器 Tampermonkey 管理 userscript，不再使用 AdGuard 管理脚本。
@@ -33,7 +33,8 @@
 - 只读核查使用 `gpt-5.6-luna + 中`；若需改动跨源认证、CORS 或图片权限边界，才升级 `gpt-5.6-sol + 高`。
 
 #### 实施记录
-- 2026-08-24：已完成代码修改，待执行 Node、Django 定向测试和 TEST 副本构建；未提交、未推送、未同步生产。
+- 2026-08-24：已完成正式脚本 `0.3.19`、TEST 副本 `0.3.19-test.1` 构建；两份脚本通过 `node --check`，Django 定向测试 19/19、`manage.py check`、迁移检查、`compileall` 和 `git diff --check` 通过。已提交并推送 `676d336650bbd5a61eb7c8a5d9fbb65184869193`。
+- 生产发布：生产仓库 fast-forward 到同一 SHA；`manage.py check` 通过，`makemigrations --check --dry-run` 无变更，`migrate --plan` 无待执行迁移，`collectstatic --noinput` 完成；仅重启 `wagtailblog3.service`。四个应用服务均 `active/enabled`，失败 unit 为空，后台登录 HTTP 200，生产脚本版本 `0.3.19`，`jhsjk.people.cn` 与人民网来源的 CORS/PNA 预检均返回 200 和精确 `Access-Control-Allow-Origin`。
 - 回滚点：恢复本节涉及文件即可回到 `0.3.18`；不涉及数据库回滚。
 - 残余风险：Tampermonkey 实机仍需人工确认脚本安装、旧副本停用、记住 Token 和勾选远程图片两条路径；`@connect *` 仍为兼容多来源图片的通配权限，博客 API Bearer 不经过该 GM 桥接层。
 

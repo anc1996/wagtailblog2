@@ -714,7 +714,7 @@ Markdown 导入脚本属于跨站点浏览器入口，新增网站不能只修�
 - 当前已登记的人民数据库页面包括 `https://jhsjk.people.cn/article/<id>`；其正文容器为 `.d2txt_con.clearfix`，标题使用 `.d2txt > h1`，页面标题不能作为文章标题回退值。
 - 先在 WSL2 `wagtailblog-test` 环境运行 Django 定向测试、`manage.py check`、迁移检查和两个 userscript 的 `node --check`，再提交和发布。浏览器验收必须确认入口、标题、正文、OPTIONS 和实际响应；不得用 401/Token 错误误判为 CORS 失败。
 
-该类改动会影响 Django/uWSGI 的 CORS 配置，生产同步后必须重启 `wagtailblog3.service`；只有实际涉及任务代码或服务配置时才按本文件既有顺序重启 maintenance Worker、Beat、Filebeat。userscript 版本必须递增，旧 AdGuard 副本需停用，避免同一页面运行多个版本。生产发布不创建草稿、session、媒体或 revision，除非另有明确授权。
+该类改动会影响 Django/uWSGI 的 CORS 配置，生产同步后必须重启 `wagtailblog3.service`；只有实际涉及任务代码或服务配置时才按本文件既有顺序重启 maintenance Worker、Beat、Filebeat。userscript 版本必须递增，在 Tampermonkey 等用户脚本管理器中停用旧副本，避免同一页面运行多个版本。生产发布不创建草稿、session、媒体或 revision，除非另有明确授权。
 
 当前测试和生产目录都按 Git 工作树维护，并使用 `main` 分支。每次部署仍必须先重新
 确认生产目录确实是干净且安全的 Git 工作树、远程地址正确，并确定测试通过的精确

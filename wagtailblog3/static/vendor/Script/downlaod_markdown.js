@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         下载文章为 Markdown 并预检导入博客
 // @namespace    https://wagtailblog.local/userscript
-// @version      0.3.18
+// @version      0.3.19
 // @description  将支持网站的正文转换为 Markdown，可预检后创建未发布博客草稿；请尊重原文版权。
 // @author       waahah
 // @match        *://blog.csdn.net/*
@@ -47,7 +47,6 @@
 // @icon         data:image/svg+xml,%3Csvg t='1691941995383' class='icon' viewBox='0 0 1024 1024' version='1.1' xmlns='http://www.w3.org/2000/svg' p-id='1514' width='200' height='200'%3E%3Cpath d='M320 864 320 0l480 0 0 192 0 32L1024 224l0 640L320 864zM928 320l-512 0 0 32 512 0L928 320zM928 448l-512 0 0 32 512 0L928 448zM928 576l-512 0 0 32 512 0L928 576zM928 704l-512 0 0 32 512 0L928 704zM832 0l19.2 0L1024 160 1024 192l-192 0L832 0zM288 896l320 0L704 896l0 128L0 1024 0 160l288 0 0 320-192 0L96 512l192 0 0 96-192 0L96 640l192 0 0 96-192 0L96 768l192 0 0 96-192 0L96 896 288 896z' p-id='1515'%3E%3C/path%3E%3C/svg%3E
 // @grant        GM_getValue
 // @grant        GM_setValue
-// @grant        GM_deleteValue
 // @grant        GM_xmlhttpRequest
 // @connect      *
 // @run-at       document-idle
@@ -1255,7 +1254,7 @@ var TurndownService = (function () {
 
     {
         const blogConfigKey = 'zuihuitao.blogImport.v1';
-        const blogImportVersion = '0.3.18';
+        const blogImportVersion = '0.3.19';
         const defaultBlogConfig = {
             siteUrl: '',
             token: '',
@@ -1292,23 +1291,6 @@ var TurndownService = (function () {
             writeBlogConfig(config);
         }
 
-        function verifyGmCapabilities() {
-            if (typeof GM_getValue !== 'function' || typeof GM_setValue !== 'function' || typeof GM_deleteValue !== 'function') {
-                throw new Error('当前 AdGuard 未提供完整的 GM 隔离存储能力');
-            }
-            if (typeof GM_xmlhttpRequest !== 'function') {
-                throw new Error('当前 AdGuard 未提供 GM_xmlhttpRequest');
-            }
-            const probeKey = `${blogConfigKey}.probe`;
-            const probeValue = `probe-${Date.now()}`;
-            GM_setValue(probeKey, probeValue);
-            const storedValue = GM_getValue(probeKey, '');
-            GM_deleteValue(probeKey);
-            if (storedValue !== probeValue || GM_getValue(probeKey, null) !== null) {
-                throw new Error('GM 隔离存储读写或清理校验失败');
-            }
-        }
-
         function normalizeBlogOrigin(value) {
             const raw = String(value || '').trim();
             if (!raw) throw new Error('博客地址不能为空');
@@ -1340,7 +1322,7 @@ var TurndownService = (function () {
         }
 
         function gmRequest({ url, method = 'GET', headers = {}, data, responseType = 'text' }) {
-            if (typeof GM_xmlhttpRequest !== 'function') throw new Error('当前 AdGuard 未提供 GM_xmlhttpRequest');
+            if (typeof GM_xmlhttpRequest !== 'function') throw new Error('当前 userscript 管理器未提供 GM_xmlhttpRequest');
             return new Promise((resolve, reject) => {
                 const request = {
                     method,
@@ -1352,7 +1334,7 @@ var TurndownService = (function () {
                     onerror: () => reject(new Error('网络请求失败')),
                     ontimeout: () => reject(new Error('网络请求超时')),
                 };
-                // AdGuard 的文本请求省略 responseType 才能稳定提供 responseText；二进制请求仍显式声明。
+                // 不同 userscript 管理器对文本响应的兼容性不同，文本省略 responseType，二进制请求显式声明。
                 if (responseType !== 'text') request.responseType = responseType;
                 GM_xmlhttpRequest(request);
             });
@@ -1365,7 +1347,7 @@ var TurndownService = (function () {
             const controller = new AbortController();
             const timeout = setTimeout(() => controller.abort(), 15000);
             try {
-                // Bearer 只能由原生 fetch 发往校验后的博客 origin，避免经过 AdGuard GM 桥接层。
+                // Bearer 只能由原生 fetch 发往校验后的博客 origin，避免经过 userscript 管理器跨域桥接层。
                 const response = await fetch(target.url, {
                     method: options.method || 'GET',
                     headers: {
@@ -1545,7 +1527,7 @@ var TurndownService = (function () {
         }
 
         function renderBootstrapError(error) {
-            // 启动失败时不能只依赖 AdGuard 控制台，否则用户无法区分脚本未注入与页面适配失败。
+            // 启动失败时不能只依赖浏览器控制台，否则用户无法区分脚本未注入与页面适配失败。
             const message = String(error && error.message ? error.message : '未知启动错误').slice(0, 200);
             const notice = createElement('div', {
                 id: 'zuihuitao-blog-import-bootstrap-error',
@@ -1595,11 +1577,9 @@ var TurndownService = (function () {
             close.textContent = '关闭';
             const clear = createElement('button', { type: 'button' }, actions);
             clear.textContent = '清除 Token';
-            const probe = createElement('button', { type: 'button' }, actions);
-            probe.textContent = '检查 AdGuard 能力';
             const download = createElement('button', { type: 'button' }, actions);
             download.textContent = '下载 Markdown';
-            // AdGuard 实机中 dialog 表单的 submit 未稳定触发，预检改为显式按钮事件，避免被 method=dialog 默认行为吞掉。
+            // 不同 userscript 管理器中 dialog 表单的 submit 行为不一致，预检使用显式按钮事件。
             const prepare = createElement('button', { type: 'button' }, actions);
             prepare.textContent = '连接并预检';
             const createDraft = createElement('button', { type: 'button', className: 'create-draft', disabled: 'disabled' }, actions);
@@ -1731,10 +1711,6 @@ var TurndownService = (function () {
             });
             close.addEventListener('click', () => dialog.close());
             clear.addEventListener('click', () => { clearBlogToken(); tokenInput.value = ''; remember.checked = false; setStatus('Token 已清除'); });
-            probe.addEventListener('click', () => {
-                try { verifyGmCapabilities(); setStatus('GM 隔离存储和跨域请求能力可用；跨域与重定向实测留待 AdGuard 验收。'); }
-                catch (cause) { setError(cause.message); }
-            });
             download.addEventListener('click', () => { try { currentData = articleData(); currentMarkdown = buildMarkdown(currentData, true); downloadMarkdown(currentMarkdown, currentData.title); setStatus('Markdown 下载已开始'); } catch (cause) { setError(cause.message); } });
             [siteInput, tokenInput, remoteImages, titleInput, introInput, dateInput, tagsInput].forEach((input) => {
                 input.addEventListener('input', clearPreparedImport);

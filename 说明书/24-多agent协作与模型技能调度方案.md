@@ -32,7 +32,7 @@
 |---|---|---|---|
 | 产品经理/需求分析师 | `pm` | 目标、场景、验收标准、非目标和待确认事项 | 需求摘要、验收清单 |
 | 架构规划师 | `arch` | 现状核查、数据流、接口、兼容性、异常和回滚设计 | 技术方案、影响清单 |
-| 后端开发工程师 | `backend` | Django/Wagtail、模型、API、任务和服务端测试 | 代码、迁移检查、测试 |
+| 后端开发工程师 | `backend` | Django/Wagtail、模型、API、任务和服务端测试；严格执行“员工角色统一开发契约”和第 22 号运行时代码注释方案 | 代码、中文注释与类型说明、迁移检查、测试、未解决风险 |
 | 前端开发工程师 | `frontend` | 模板、CSS、JavaScript、响应式和可访问性 | UI 代码、浏览器验收证据 |
 | 测试与质量工程师 | `qa` | 单元、集成、回归、Playwright 和配置检查 | 测试结果、缺陷清单 |
 | 代码审查与安全工程师 | `review` | diff、权限、数据保护、并发、敏感信息和回滚风险 | 按严重性排序的审查发现 |
@@ -40,6 +40,19 @@
 | 数据与集成工程师 | `data` | MongoDB、MySQL、Redis、Elasticsearch、MinIO、队列和跨服务一致性 | 数据影响、索引/补偿方案 |
 
 主 agent 是技术负责人和交付编排者，负责拆解任务、分派 agent、处理冲突、集成结果、执行最终门禁和向用户交付；子 agent 不单独决定生产操作。
+
+### 员工角色统一开发契约
+
+本方案中的“员工”不是替代 `backend`、`frontend`、`qa` 等专业别名的新增执行角色，而是对所有实际修改仓库文件的 agent 的统一要求。凡承担开发、修复或重构工作的员工，必须在开始编码前阅读与任务相关的方案；涉及 Django/Wagtail 运行时代码时，必须同时阅读 [`说明书/22-运行时代码注释与类型标注方案.md`](22-运行时代码注释与类型标注方案.md)。
+
+员工交付代码时必须遵守以下门禁：
+
+1. 新增或修改的注释、docstring 使用中文，并解释业务规则、数据边界、异常补偿、并发约束或安全原因；不为显而易见的赋值、框架调用和分支逐行复述代码。
+2. 函数参数和返回值在能由调用点确认时补充准确类型标注；无法确认时保留接口并在中文 docstring 说明约束，不用 `Any` 隐藏未知契约。
+3. 修改既有逻辑时同步核对相关注释，确保注释与实际行为一致；注释和类型标注不得改变事务、查询、保存顺序、错误码、日志字段、返回结构或外部副作用。
+4. 交付说明必须列出本次补充的注释/类型契约、未覆盖的复杂边界、执行的 `compileall`/测试/`git diff --check` 结果，以及未执行项和残余风险。
+
+主 agent 和 `review` 在合并前检查该契约；缺少中文说明、类型依据或验证证据时，批次视为未完成并退回修改。
 
 ## 5. 对话快捷指令
 
@@ -92,7 +105,7 @@
 |---|---|---|
 | `pm` | `karpathy-guidelines`；需要检索项目文档时使用 `mineru-document-explorer` | 必要时使用只读 `fetch`；不发送凭据、正文或个人数据 |
 | `arch` | `karpathy-guidelines`、`django-wagtail-development` | Django/Wagtail/Celery 版本 API 优先 `context7`；官方 URL 使用 `fetch` |
-| `backend` | `django-wagtail-development`、`karpathy-guidelines` | `context7` 核对版本 API；数据库只读核验按项目允许的工具执行 |
+| `backend` | `django-wagtail-development`、`karpathy-guidelines`、第 22 号运行时代码注释与类型标注方案 | 开始编码前阅读第 22 号方案；`context7` 核对版本 API；数据库只读核验按项目允许的工具执行 |
 | `frontend` | `ui-ux-pro-max`、`playwright`、`karpathy-guidelines` | 页面交互使用 Playwright；登录浏览器自动化仅在 `browser-skill` 可用且获授权时使用；位图素材需求才使用 `imagegen` |
 | `qa` | `playwright`、`django-wagtail-development`、`karpathy-guidelines` | Playwright MCP/CLI；产物统一写入 `output/playwright/` |
 | `review` | `karpathy-guidelines`、`django-wagtail-development`；涉及 UI 时使用 `ui-ux-pro-max` | GitHub 仓库、PR 和 CI 状态优先 GitHub MCP；不把审查工具当作生产授权 |
@@ -128,3 +141,13 @@
 - 回滚点：删除本方案文件并回退 `AGENTS.md` 追加章节即可恢复原协作规则。
 - 残余风险：不同会话暴露的 Skill/MCP 可能不同，主 agent 必须以当前会话实际工具声明为准。
 - 实际模型使用：当前会话由主 agent 完成文档调研与编写；未调用外部模型或生产工具。
+
+### 2026-08-24：将运行时代码注释要求绑定到员工与后端角色
+
+- 状态：完成，未修改业务代码、数据库、服务或生产环境。
+- 实际修改文件：`说明书/24-多agent协作与模型技能调度方案.md`、`说明书/22-运行时代码注释与类型标注方案.md`、`AGENTS.md`。
+- 修改内容：定义所有实际写入仓库的 agent 均属于“员工”并受统一中文注释、准确类型标注、行为不变和验证证据门禁约束；将后端角色明确绑定第 22 号方案；增加合并前退回条件和交付报告字段。
+- 验证：文档 UTF-8 读取、关键条款检索和 `git diff --check` 通过；未运行 Django、浏览器或生产服务测试，因为本批次仅修改协作规范。
+- 数据/服务影响：无数据库、MongoDB、Elasticsearch、Redis、媒体、队列、systemd 或生产数据操作；`systemctl.md` 无需更新。
+- 回滚点：恢复上述三份文档本批新增段落即可回滚，不影响既有业务代码和未提交批次。
+- 模型/推理强度实际使用：当前会话按 R0 文档规范任务使用现有模型完成事实核对与最小修改；未调用外部模型或发送源码、凭据、生产数据。

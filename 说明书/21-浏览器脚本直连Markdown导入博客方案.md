@@ -10,6 +10,33 @@
 
 ## 24. 实施记录
 
+### 2026-08-24：迁移到 Tampermonkey，移除 AdGuard 专用探针（已实现，未发布）
+
+#### 背景与决策
+- 用户实际通过浏览器 Tampermonkey 管理 userscript，不再使用 AdGuard 管理脚本。
+- `GM_getValue`/`GM_setValue` 用于隔离保存站点、目标索引页和用户选择记住的 Token；`GM_xmlhttpRequest` 只用于勾选远程图片时下载图片。两者属于 userscript 管理器通用能力，不能删除。
+- “检查 AdGuard 能力”按钮、`verifyGmCapabilities()` 临时写读删探针和 `GM_deleteValue` 授权只服务于历史兼容性诊断，不参与导入流程，现已移除。
+
+#### 目标、非目标与影响
+- 目标：让脚本界面不再暴露 AdGuard 专用按钮和文案，保留 Tampermonkey 导入所需的最小 GM 能力，并递增正式/TEST 版本。
+- 非目标：不改变博客 API、精确 CORS、Token 传输边界、远程图片组装、Worker/Beat 或任何生产数据。
+- 数据与服务影响：仅改变浏览器 userscript 和静态回归测试；不创建 session、草稿、revision、媒体或 MongoDB 正文，不需要重启服务。
+
+#### 实际修改文件
+- `wagtailblog3/static/vendor/Script/downlaod_markdown.js`：版本升至 `0.3.19`，移除 AdGuard 探针按钮/函数和 `GM_deleteValue`，将兼容性文案改为通用 userscript 管理器表述。
+- `tools/build_userscript_blog_import_test.ps1`：TEST 默认版本升至 `0.3.19-test.1`。
+- `wagtailblog3/apps/blog/test_markdown_import_cors.py`：更新版本断言并增加“保留 Tampermonkey 能力、无 AdGuard 探针”回归测试。
+- `systemctl.md`：维护指引改为在 Tampermonkey 等用户脚本管理器中停用旧副本。
+
+#### 模型/推理强度建议与实际使用
+- 实现使用 `gpt-5.6-terra + 中`：范围局限于 userscript UI、元数据和回归测试，复用现有请求与存储契约。
+- 只读核查使用 `gpt-5.6-luna + 中`；若需改动跨源认证、CORS 或图片权限边界，才升级 `gpt-5.6-sol + 高`。
+
+#### 实施记录
+- 2026-08-24：已完成代码修改，待执行 Node、Django 定向测试和 TEST 副本构建；未提交、未推送、未同步生产。
+- 回滚点：恢复本节涉及文件即可回到 `0.3.18`；不涉及数据库回滚。
+- 残余风险：Tampermonkey 实机仍需人工确认脚本安装、旧副本停用、记住 Token 和勾选远程图片两条路径；`@connect *` 仍为兼容多来源图片的通配权限，博客 API Bearer 不经过该 GM 桥接层。
+
 ### 2026-08-24：未发布草稿成功后进入 Wagtail 编辑页（方案与实施中）
 
 #### 背景与现状证据
@@ -49,7 +76,7 @@
 - 验证：正式脚本和 TEST 副本 `node --check` 通过；`blog.test_markdown_import_cors --keepdb` 18/18 通过；`manage.py check`、`compileall`、`makemigrations --check --dry-run` 和 `git diff --check` 通过。后端只读复核确认 Wagtail 编辑 URL 为 `/admin/pages/628/edit/` 形式。
 - 数据/服务影响：未调用导入写接口，未创建新的 session、BlogPage、revision 或媒体；实现阶段未操作生产环境，生产发布动作见下方记录。
 - 回滚点：恢复 userscript、TEST 构建脚本、静态断言和本节文档差异即可；不涉及数据回滚。
-- 残余风险：本次未使用真实 Token 执行第二次浏览器写入验收；AdGuard 安装后需停用旧版本并刷新页面，后台编辑页仍要求用户已有 Wagtail 登录状态。
+- 残余风险：本次未使用真实 Token 执行第二次浏览器写入验收；Tampermonkey 中需停用旧版本并刷新页面，后台编辑页仍要求用户已有 Wagtail 登录状态。
 
 #### 生产发布记录（2026-08-24）
 

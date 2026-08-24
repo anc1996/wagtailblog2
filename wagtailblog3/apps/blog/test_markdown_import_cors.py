@@ -159,9 +159,21 @@ class MarkdownImportCorsTests(SimpleTestCase):
         script_path = Path(__file__).resolve().parents[2] / "static/vendor/Script/downlaod_markdown.js"
         source = script_path.read_text(encoding="utf-8")
 
-        self.assertIn("// @version      0.3.18", source)
-        self.assertIn("const blogImportVersion = '0.3.18';", source)
+        self.assertIn("// @version      0.3.19", source)
+        self.assertIn("const blogImportVersion = '0.3.19';", source)
         self.assertIn("#zuihuitao-blog-import form{display:block!important}", source)
+
+    def test_userscript_keeps_tampermonkey_capabilities_without_adguard_probe(self):
+        script_path = Path(__file__).resolve().parents[2] / "static/vendor/Script/downlaod_markdown.js"
+        source = script_path.read_text(encoding="utf-8")
+
+        self.assertIn("// @grant        GM_getValue", source)
+        self.assertIn("// @grant        GM_setValue", source)
+        self.assertIn("// @grant        GM_xmlhttpRequest", source)
+        self.assertNotIn("GM_deleteValue", source)
+        self.assertNotIn("verifyGmCapabilities", source)
+        self.assertNotIn("检查 AdGuard 能力", source)
+        self.assertIn("当前 userscript 管理器未提供 GM_xmlhttpRequest", source)
 
     def test_userscript_supports_the_three_new_article_containers(self):
         script_path = Path(__file__).resolve().parents[2] / "static/vendor/Script/downlaod_markdown.js"

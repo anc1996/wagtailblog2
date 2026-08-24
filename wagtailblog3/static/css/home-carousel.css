@@ -8,6 +8,7 @@
 }
 
 .home-featured-carousel .slide {
+    box-sizing: border-box;
     aspect-ratio: 16 / 5;
     overflow: hidden;
     background: #111;
@@ -142,8 +143,14 @@
 .home-page .home-featured-carousel .slide .overlay-box .content h2 {
     display: -webkit-box;
     overflow: hidden;
+    overflow-wrap: anywhere;
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 2;
+}
+
+.home-page .home-featured-carousel .slide .overlay-box .content {
+    max-width: 100%;
+    overflow-wrap: anywhere;
 }
 
 .home-page .sidebar-page-container {
@@ -327,5 +334,12 @@
         margin-bottom: 8px;
         font-size: 22px;
         line-height: 1.3;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .home-page .home-featured-carousel .slide .overlay-box,
+    .home-page .home-featured-carousel .slide .overlay-box .content a {
+        transition: none;
     }
 }

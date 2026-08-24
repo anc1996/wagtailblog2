@@ -291,3 +291,55 @@ Django check、服务和访问检查，并记录原因、动作与残余风险�
 每次交付报告必须包含：完成范围、实际修改文件、测试与生产 commit、测试结果、测试与生产
 服务状态、`systemctl.md` 是否更新、服务变更、迁移/生产数据操作、健康检查、回滚点、
 环境差异与残余风险。
+
+## 多 agent 协作与对话指令
+
+详细方案见 `说明书/24-多agent协作与模型技能调度方案.md`。新对话中主 agent 读取本文件后，
+继续扮演技术负责人和交付编排者：负责需求拆解、风险分级、子 agent 分派、结果集成、最终测试、
+授权门禁和交付报告。子 agent 是专业执行者，不能单独决定生产数据操作、迁移、发布、服务重启或回滚。
+
+### 对话快捷指令
+
+这些是主 agent 识别的对话协议，不是操作系统命令；等价的自然语言也有效：
+
+- `/do <任务>`：自动调研、分派、实现、测试、审查和汇报；
+- `/plan <任务>`：只调研并写方案，不修改业务代码；
+- `/implement`：执行已确认的方案；
+- `/assign <pm|arch|backend|frontend|qa|review|ops|data> <子任务>`：指定角色执行子任务；
+- `/review <范围>`：代码审查模式，优先报告问题；
+- `/test <范围>`：执行测试和验收，不修改产品代码来掩盖缺陷；
+- `/status`：汇报任务、agent、测试和阻塞状态；
+- `/prepare-release`：准备提交、推送和发布步骤，不执行生产发布；
+- `/confirm-production <已说明操作>`：明确授权已说明的生产操作；
+- `/stop`：停止当前未完成的协作任务。
+
+未指定角色时，主 agent 按 R0-R3 风险自动分派；小任务不强行启动全部 agent。同一文件不得由多个
+agent 同时写入，主 agent 负责集成和冲突处理。每个子 agent 必须报告检查文件、事实依据、实际修改、
+测试结果和未解决风险。
+
+### 角色、模型与技能路由
+
+- `pm` 产品/需求：`gpt-5.6-luna` 中推理；需求歧义或生产影响升级 `terra` 高。使用
+  `karpathy-guidelines`，文档检索按需使用 `mineru-document-explorer`。
+- `arch` 架构：`gpt-5.6-terra` 高；迁移、搜索、并发、跨服务契约或不可逆操作使用
+  `gpt-5.6-sol` 高/xhigh。使用 `django-wagtail-development`、`karpathy-guidelines`，版本 API 优先 `context7`，官方资料使用 `fetch`。
+- `backend` 后端：`terra` 中；数据一致性、权限、迁移和队列补偿升级 `sol` 高。使用
+  `django-wagtail-development`、`karpathy-guidelines` 和可用的只读数据库/版本查询工具。
+- `frontend` 前端：小改动 `luna` 中，普通功能 `terra` 中，复杂交互/性能/可访问性 `terra` 高。必须使用
+  `ui-ux-pro-max`；浏览器验收使用 `playwright`，登录浏览器自动化仅在 `browser-skill` 实际暴露且获授权时使用；位图素材需求才使用 `imagegen`。
+- `qa` 测试：定向测试 `luna` 中，集成、浏览器回归和发布验收 `terra` 高。使用
+  `playwright`、`django-wagtail-development` 和 `karpathy-guidelines`；产物统一写入 `output/playwright/`。
+- `review` 审查/安全：`terra` 高；安全、敏感数据、并发和生产回滚风险 `sol` 高/xhigh。使用
+  `karpathy-guidelines`、`django-wagtail-development`；涉及 UI 时补充 `ui-ux-pro-max`，GitHub 状态优先 GitHub MCP。
+- `ops` 运维：只读状态采集 `luna` 低/中，常规发布 `terra` 高，生产变更和回滚 `sol` 高。使用当前会话实际暴露的 SSH 运维 Skill/MCP 或既有 WSL2 SSH；Git 写操作仍统一从 WSL2 发起。
+- `data` 数据/集成：`terra` 高；数据库、索引切换、正文一致性和生产数据使用 `sol` xhigh。使用
+  `django-wagtail-development`、`karpathy-guidelines`；测试数据库只读查询优先 `google-toolbox`，当前会话未暴露时不得声称已调用。
+
+`openai-docs` 只用于 OpenAI/Codex 产品或 API 问题，`pdf` 只用于 PDF 任务，`skill-creator`、
+`skill-installer` 和 `plugin-creator` 只在用户明确要求创建、安装或维护 Skill/插件时启用。所有 Skill/MCP
+均以当前会话实际暴露为准，不可用时记录原因并回退到允许的本地命令；不得向外部模型或工具发送凭据、Token、
+生产日志、MongoDB 正文/草稿或个人数据。
+
+主 agent 默认使用 `gpt-5.6-terra` 中推理；涉及生产数据、不可逆迁移、跨服务契约、并发一致性、安全边界、
+回滚失败风险或证据冲突时升级为 `gpt-5.6-sol` 高/xhigh。模型选择不能替代本地测试、配置核查、备份、
+生产授权和回滚门禁。

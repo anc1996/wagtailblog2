@@ -9,7 +9,10 @@
     <link href="{% static 'gretzia/css/owl.css' %}" rel="stylesheet">
     <link rel="stylesheet" href="{% static 'archive/css/archive.css' %}?v=20260726-4">
     <link rel="stylesheet" href="{% static 'css/sidebar-card-theme.css' %}?v=20260727-1">
-    <link rel="stylesheet" href="{% static 'css/home-carousel.css' %}?v=20260823-1">
+{% endblock %}
+
+{% block extra_css_after_site_theme %}
+    <link rel="stylesheet" href="{% static 'css/home-carousel.css' %}?v=20260824-1">
 {% endblock %}
 
 {% block page_vendor_js %}

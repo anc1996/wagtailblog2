@@ -145,6 +145,8 @@ def build_formal_content_documents(
     for page in pages:
         mongo_content_id = getattr(page, "mongo_content_id", None)
         formal_content = formal_contents.get(str(mongo_content_id))
+        if formal_content is None:
+            formal_content = formal_contents.get(f"page:{page.pk}")
         document = build_formal_content_document(
             page,
             content_versions[page.pk],

@@ -749,7 +749,10 @@ class BlogPage(Page):
 		
 		if is_body_empty and self.mongo_content_id:
 			mongo_manager = MongoManager()
-			content = mongo_manager.get_blog_content(self.mongo_content_id)
+			content = mongo_manager.get_blog_content_compatible(
+				self.mongo_content_id,
+				page_id=self.pk,
+			)
 			if content and 'body' in content:
 				obj.body = self._hydrate_streamfield_from_mongo(content['body'])
 		

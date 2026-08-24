@@ -286,7 +286,7 @@ def rebuild_content_search_batch(target_id: str, batch_size: int, max_batch_byte
 
     mongo_ids = [getattr(page, "mongo_content_id", None) for page in pages]
     try:
-        formal_contents = read_formal_contents_by_id(mongo_ids)
+        formal_contents = read_formal_contents_by_id(mongo_ids, page_ids=page_ids)
         versions = {page_id: states[page_id].content_version for page_id in page_ids}
         formal_documents, missing_page_ids = build_formal_content_documents(
             pages,

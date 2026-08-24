@@ -272,19 +272,23 @@ class MongoManager:
 			return False
 	
 	def get_blog_content(self, content_id):
-		if not content_id:
-			return None
+		return self.get_blog_content_compatible(content_id)
+
+	def get_blog_content_compatible(self, content_id=None, page_id=None):
+		"""优先按标准 ObjectId 读取，历史 pointer 失配时按唯一 page_id 兼容读取。"""
+		content = None
 		try:
-			mongo_id = ObjectId(content_id)
-			content = self.blog_content.find_one({'_id': mongo_id})
+			if content_id and ObjectId.is_valid(str(content_id)):
+				content = self.blog_content.find_one({'_id': ObjectId(str(content_id))})
+			if content is None and page_id is not None:
+				content = self.blog_content.find_one({'page_id': page_id})
 			if content:
 				content['_id'] = str(content['_id'])
-				return content
-			return None
+			return content
 		except Exception as e:
-			logger.error(f"MongoDB获取内容错误: {e}", exc_info=True)
+			logger.error(f"MongoDB读取正文错误: {e}", exc_info=True)
 			return None
-	
+
 	def delete_blog_content(self, content_id):
 		if not content_id:
 			return False

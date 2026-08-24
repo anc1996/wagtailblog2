@@ -30,6 +30,7 @@ from search.services.elasticsearch import (
     create_content_search_index,
 )
 from search.services.mongo import read_formal_contents_by_id
+from wagtailblog3.mongo import MongoManager
 
 
 PRODUCTION_INDEX_SETTINGS = {
@@ -200,6 +201,47 @@ class ContentIndexDefinitionTests(SimpleTestCase):
         collection.find.assert_called_once_with(
             {"_id": {"$in": [ObjectId(first_id), ObjectId(second_id)]}},
             {"_id": 1, "body": 1},
+        )
+
+    def test_batch_reader_falls_back_to_page_id_for_legacy_pointer(self):
+        collection = Mock()
+        collection.find.side_effect = [
+            [],
+            [{"_id": ObjectId("64e7b6ef1d86d3f4b6e4e009"), "page_id": 73009,
+              "body": [{"type": "markdown_block"}]}],
+        ]
+        manager = SimpleNamespace(blog_content=collection)
+
+        contents = read_formal_contents_by_id(
+            ["64e7b6ef1d86d3f4b6e4e099"],
+            mongo_manager=manager,
+            page_ids=[73009],
+        )
+
+        self.assertIn("page:73009", contents)
+        self.assertIn("64e7b6ef1d86d3f4b6e4e009", contents)
+        self.assertEqual(collection.find.call_count, 2)
+        self.assertEqual(
+            collection.find.call_args_list[1].args[0],
+            {"page_id": {"$in": [73009]}},
+        )
+
+    def test_single_reader_falls_back_to_page_id(self):
+        manager = MongoManager.__new__(MongoManager)
+        manager.blog_content = Mock()
+        manager.blog_content.find_one.side_effect = [
+            None,
+            {"_id": ObjectId("64e7b6ef1d86d3f4b6e4e010"), "page_id": 73010,
+             "body": [{"type": "markdown_block"}]},
+        ]
+
+        content = manager.get_blog_content_compatible("64e7b6ef1d86d3f4b6e4e099", page_id=73010)
+
+        self.assertEqual(content["page_id"], 73010)
+        self.assertEqual(manager.blog_content.find_one.call_count, 2)
+        self.assertEqual(
+            manager.blog_content.find_one.call_args_list[1].args[0],
+            {"page_id": 73010},
         )
 
 

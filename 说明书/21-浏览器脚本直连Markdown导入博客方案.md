@@ -44,12 +44,19 @@
 
 #### 实施记录（2026-08-24）
 
-- 状态：已实现，未提交、未发布。
+- 状态：已实现，已提交并部署。
 - 实际修改：正式 userscript 增加隐藏的“进入博客编辑”链接；成功或部分成功后按本次 `page_id` 构造 `/admin/pages/<page_id>/edit/`，新一轮预检、目标索引页变化、输入变化或不同文章 URL 会清除旧链接；异步组装使用本次导入快照，避免状态竞态。版本递增为 `0.3.18` / `0.3.18-test.1`。
 - 验证：正式脚本和 TEST 副本 `node --check` 通过；`blog.test_markdown_import_cors --keepdb` 18/18 通过；`manage.py check`、`compileall`、`makemigrations --check --dry-run` 和 `git diff --check` 通过。后端只读复核确认 Wagtail 编辑 URL 为 `/admin/pages/628/edit/` 形式。
-- 数据/服务影响：未调用导入写接口，未创建新的 session、BlogPage、revision 或媒体，不需要 Worker/Beat 重启；未操作生产环境。
+- 数据/服务影响：未调用导入写接口，未创建新的 session、BlogPage、revision 或媒体；实现阶段未操作生产环境，生产发布动作见下方记录。
 - 回滚点：恢复 userscript、TEST 构建脚本、静态断言和本节文档差异即可；不涉及数据回滚。
 - 残余风险：本次未使用真实 Token 执行第二次浏览器写入验收；AdGuard 安装后需停用旧版本并刷新页面，后台编辑页仍要求用户已有 Wagtail 登录状态。
+
+#### 生产发布记录（2026-08-24）
+
+- Git：在 WSL2 提交并推送 `c1ff99b1c24427807c607c52c58c204fd2975031`；生产仓库已通过 `fetch`、差异清单和 `merge --ff-only` 同步到同一 SHA。
+- 发布动作：生产 `manage.py check` 通过；`makemigrations --check --dry-run` 无变更；`migrate --plan` 无待执行迁移；`collectstatic --noinput` 完成（1 copied、1492 unmodified、842 post-processed）；仅重启 `wagtailblog3.service`。
+- 生产验收：四个项目服务均 `active/enabled`，失败 unit 为空；后台 `/admin/login/` 返回 HTTP 200；`https://jhsjk.people.cn` 的 prepare OPTIONS 返回 HTTP 200、精确 allow-origin、POST/Authorization 和私有网络响应头；生产静态 userscript 返回版本 `0.3.18` 与 jhsjk `@match`。
+- 数据/回滚：未执行迁移、session、artifact、BlogPage、revision、媒体或 MongoDB 正文写入；Worker、Beat、Filebeat 未重启。回滚点为上一个已验证生产 commit `036dc4ee4254a8509a451edeb2f8ea458479d07a`，回滚后需重新收集静态文件并重启 `wagtailblog3.service`。
 
 ### 2026-08-24：扩展习近平系列重要讲话数据库文章导入（进行中，未提交）
 

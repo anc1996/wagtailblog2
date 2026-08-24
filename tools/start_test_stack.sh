@@ -24,8 +24,9 @@ nohup "$python_bin" manage.py runserver 192.168.20.5:8080 --noreload \
     > output/test-runserver-8080.log 2>&1 < /dev/null &
 echo $! > output/test-runserver-8080.pid
 
-nohup "$python_bin" -m celery -A wagtailblog3 worker \
-    -Q "$CELERY_MAINTENANCE_QUEUE" --loglevel=INFO \
+# 显式创建独立 session，避免启动终端退出时的 SIGHUP 触发 Celery 自重启路径。
+setsid "$python_bin" -m celery -A wagtailblog3 worker \
+    -Q "$CELERY_MAINTENANCE_QUEUE" --pool=solo --without-gossip --without-mingle --without-heartbeat --loglevel=INFO \
     --hostname=markdown-test-isolated@%h \
     > output/test-worker-markdown.log 2>&1 < /dev/null &
 echo $! > output/test-worker-markdown.pid

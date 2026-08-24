@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         下载文章为 Markdown 并预检导入博客
 // @namespace    https://wagtailblog.local/userscript
-// @version      0.3.16
+// @version      0.3.18
 // @description  将支持网站的正文转换为 Markdown，可预检后创建未发布博客草稿；请尊重原文版权。
 // @author       waahah
 // @match        *://blog.csdn.net/*
@@ -42,6 +42,7 @@
 // @match        *://www.rmlt.com.cn/*
 // @match        *://www.banyuetan.org/*
 // @match        *://www.dangjian.cn/*
+// @match        *://jhsjk.people.cn/article/*
 // @license      Apache-2.0
 // @icon         data:image/svg+xml,%3Csvg t='1691941995383' class='icon' viewBox='0 0 1024 1024' version='1.1' xmlns='http://www.w3.org/2000/svg' p-id='1514' width='200' height='200'%3E%3Cpath d='M320 864 320 0l480 0 0 192 0 32L1024 224l0 640L320 864zM928 320l-512 0 0 32 512 0L928 320zM928 448l-512 0 0 32 512 0L928 448zM928 576l-512 0 0 32 512 0L928 576zM928 704l-512 0 0 32 512 0L928 704zM832 0l19.2 0L1024 160 1024 192l-192 0L832 0zM288 896l320 0L704 896l0 128L0 1024 0 160l288 0 0 320-192 0L96 512l192 0 0 96-192 0L96 640l192 0 0 96-192 0L96 768l192 0 0 96-192 0L96 896 288 896z' p-id='1515'%3E%3C/path%3E%3C/svg%3E
 // @grant        GM_getValue
@@ -1247,13 +1248,14 @@ var TurndownService = (function () {
         { "host": "www.xuexi.cn", "el": ".render-detail-article-content", "title_el": ".render-detail-title", "cut_str": "" },
         { "host": "www.rmlt.com.cn", "el": ".article-content", "cut_str": "_" },
         { "host": "www.banyuetan.org", "el": "#detail_content", "cut_str": "-半月谈" },
-        { "host": "www.dangjian.cn", "el": "#tex.article", "cut_str": "" }
+        { "host": "www.dangjian.cn", "el": "#tex.article", "cut_str": "" },
+        { "host": "jhsjk.people.cn", "el": ".d2txt_con.clearfix", "title_el": ".d2txt > h1", "cut_str": "" }
 
     ]
 
     {
         const blogConfigKey = 'zuihuitao.blogImport.v1';
-        const blogImportVersion = '0.3.16';
+        const blogImportVersion = '0.3.18';
         const defaultBlogConfig = {
             siteUrl: '',
             token: '',
@@ -1326,6 +1328,15 @@ var TurndownService = (function () {
             const url = new URL(`/zh-hans${path}`, `${origin}/`);
             if (url.origin !== origin) throw new Error('博客请求地址跨域');
             return { origin, url: url.href };
+        }
+
+        function blogAdminEditUrl(config, pageId) {
+            const numericPageId = Number(pageId);
+            if (!Number.isSafeInteger(numericPageId) || numericPageId <= 0) {
+                throw new Error('博客页面 ID 无效');
+            }
+            const origin = normalizeBlogOrigin(config.siteUrl);
+            return new URL(`/admin/pages/${numericPageId}/edit/`, `${origin}/`).href;
         }
 
         function gmRequest({ url, method = 'GET', headers = {}, data, responseType = 'text' }) {
@@ -1461,7 +1472,9 @@ var TurndownService = (function () {
 
         function articleIntro(element) {
             const description = document.querySelector('meta[name="description"]')?.content?.trim();
-            const firstParagraph = element.querySelector('p')?.textContent?.trim();
+            const firstParagraph = [...element.querySelectorAll('p')]
+                .map((paragraph) => paragraph.textContent.trim())
+                .find(Boolean);
             return String(description || firstParagraph || '来源于网页正文的 Markdown 导入').slice(0, 5000);
         }
 
@@ -1591,6 +1604,14 @@ var TurndownService = (function () {
             prepare.textContent = '连接并预检';
             const createDraft = createElement('button', { type: 'button', className: 'create-draft', disabled: 'disabled' }, actions);
             createDraft.textContent = '创建未发布草稿';
+            const editDraft = createElement('a', {
+                className: 'edit-draft',
+                hidden: 'hidden',
+                target: '_blank',
+                rel: 'noopener noreferrer',
+            }, actions);
+            editDraft.textContent = '进入博客编辑';
+            editDraft.style.cssText = 'display:inline-flex;align-items:center;min-height:44px;padding:8px 14px;border:1px solid #334155;border-radius:6px;background:#0369a1;color:#fff;cursor:pointer;text-decoration:none';
 
             const config = readBlogConfig();
             siteInput.value = config.siteUrl;
@@ -1604,9 +1625,15 @@ var TurndownService = (function () {
 
             function setStatus(value) { status.textContent = value; error.textContent = ''; }
             function setError(value) { error.textContent = value; status.textContent = ''; }
+            function clearCreatedDraftLink() {
+                editDraft.hidden = true;
+                editDraft.style.display = 'none';
+                editDraft.removeAttribute('href');
+            }
             function clearPreparedImport() {
                 preparedImport = null;
                 createDraft.disabled = true;
+                clearCreatedDraftLink();
             }
             function updatePreparedDestination() {
                 if (!preparedImport) return;
@@ -1616,6 +1643,7 @@ var TurndownService = (function () {
                     // 目标页不改变正文或媒体预检，但必须使用新的幂等键避免跨目标复用会话。
                     preparedImport.payload.target_parent_id = targetParentId;
                     preparedImport.idempotencyKey = uuidV4();
+                    clearCreatedDraftLink();
                 }
                 setStatus(`预检内容保持有效，将在“${destination.selectedOptions[0]?.textContent || '所选索引页'}”下创建未发布草稿；创建前会复查同标题风险。`);
             }
@@ -1671,7 +1699,9 @@ var TurndownService = (function () {
                 return waitForDraft(prepared.next, session);
             }
             function loadArticleData() {
-                currentData = articleData();
+                const nextData = articleData();
+                if (preparedImport && preparedImport.sourceUrl !== nextData.sourceUrl) clearPreparedImport();
+                currentData = nextData;
                 titleInput.value = currentData.title;
                 introInput.value = articleIntro(currentData.element);
                 return currentData;
@@ -1739,6 +1769,7 @@ var TurndownService = (function () {
                     preparedImport = {
                         next,
                         idempotencyKey: uuidV4(),
+                        sourceUrl: currentData.sourceUrl,
                         artifacts,
                         payload: {
                             target_parent_id: Number(destination.value),
@@ -1756,6 +1787,8 @@ var TurndownService = (function () {
             });
             createDraft.addEventListener('click', async () => {
                 if (!preparedImport) return setError('请先完成预检');
+                const activeImport = preparedImport;
+                const activeIdempotencyKey = activeImport.idempotencyKey;
                 if (!window.confirm(`将在“${destination.selectedOptions[0]?.textContent || '所选索引页'}”下创建未发布草稿，不会发布。是否继续？`)) return;
                 createDraft.disabled = true;
                 prepare.disabled = true;
@@ -1764,7 +1797,16 @@ var TurndownService = (function () {
                     const result = await createPreparedDraft();
                     if (!['success', 'partial_success'].includes(result.status)) throw new Error(result.error_code || '草稿创建失败');
                     const missing = result.missing?.length ? `；${result.missing.length} 个媒体未导入，已写入缺失标记` : '';
-                    setStatus(`未发布草稿已创建：页面 ID ${result.page_id}，revision ID ${result.revision_id}${missing}。`);
+                    const isCurrentImport = preparedImport === activeImport && activeImport.idempotencyKey === activeIdempotencyKey;
+                    if (isCurrentImport) {
+                        editDraft.href = blogAdminEditUrl(activeImport.next, result.page_id);
+                        editDraft.hidden = false;
+                        editDraft.style.display = 'inline-flex';
+                    }
+                    const editMessage = isCurrentImport
+                        ? '可点击“进入博客编辑”打开后台！'
+                        : '当前表单已变化，请重新预检后再创建新的草稿。';
+                    setStatus(`未发布草稿已创建：页面 ID ${result.page_id}，revision ID ${result.revision_id}${missing}。${editMessage}`);
                 } catch (cause) {
                     createDraft.disabled = false;
                     setError(cause.message);

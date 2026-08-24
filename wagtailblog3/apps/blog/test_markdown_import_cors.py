@@ -159,8 +159,8 @@ class MarkdownImportCorsTests(SimpleTestCase):
         script_path = Path(__file__).resolve().parents[2] / "static/vendor/Script/downlaod_markdown.js"
         source = script_path.read_text(encoding="utf-8")
 
-        self.assertIn("// @version      0.3.16", source)
-        self.assertIn("const blogImportVersion = '0.3.16';", source)
+        self.assertIn("// @version      0.3.18", source)
+        self.assertIn("const blogImportVersion = '0.3.18';", source)
         self.assertIn("#zuihuitao-blog-import form{display:block!important}", source)
 
     def test_userscript_supports_the_three_new_article_containers(self):
@@ -202,6 +202,7 @@ class MarkdownImportCorsTests(SimpleTestCase):
             "// @match        *://www.rmlt.com.cn/*",
             "// @match        *://www.banyuetan.org/*",
             "// @match        *://www.dangjian.cn/*",
+            "// @match        *://jhsjk.people.cn/article/*",
         )
         expected_interfaces = (
             '{ "host": "opinion.people.com.cn", "el": "#rm_txt_zw", "fallback_els": [".rm_txt_con.cf"], "cut_str": " --" }',
@@ -215,6 +216,7 @@ class MarkdownImportCorsTests(SimpleTestCase):
             '{ "host": "www.rmlt.com.cn", "el": ".article-content", "cut_str": "_" }',
             '{ "host": "www.banyuetan.org", "el": "#detail_content", "cut_str": "-半月谈" }',
             '{ "host": "www.dangjian.cn", "el": "#tex.article", "cut_str": "" }',
+            '{ "host": "jhsjk.people.cn", "el": ".d2txt_con.clearfix", "title_el": ".d2txt > h1", "cut_str": "" }',
         )
 
         for metadata in expected_matches:
@@ -225,7 +227,39 @@ class MarkdownImportCorsTests(SimpleTestCase):
         self.assertIn("titleElement?.textContent || document.title", source)
         self.assertIn("const selectors = [match.el, ...(match.fallback_els || [])].filter(Boolean);", source)
         self.assertIn(".rm_txt_con.cf", source)
+        self.assertIn(".d2txt_con.clearfix", source)
+        self.assertIn(".d2txt > h1", source)
         self.assertNotIn("el: \"body\"", source)
+
+    def test_jhsjk_people_origin_receives_limited_cors_headers(self):
+        response = self.preflight("https://jhsjk.people.cn")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Access-Control-Allow-Origin"], "https://jhsjk.people.cn")
+        self.assertNotIn("Access-Control-Allow-Credentials", response)
+
+    def test_userscript_exposes_edit_link_only_for_the_current_successful_page(self):
+        script_path = Path(__file__).resolve().parents[2] / "static/vendor/Script/downlaod_markdown.js"
+        source = script_path.read_text(encoding="utf-8")
+        start = source.index("async function runModernApp()")
+        app_source = source[start:]
+
+        self.assertIn("className: 'edit-draft'", app_source)
+        self.assertIn("hidden: 'hidden'", app_source)
+        self.assertIn("function blogAdminEditUrl(config, pageId)", source)
+        self.assertIn("/admin/pages/${numericPageId}/edit/", source)
+        self.assertIn("const activeImport = preparedImport;", app_source)
+        self.assertIn("const activeIdempotencyKey = activeImport.idempotencyKey;", app_source)
+        self.assertIn("editDraft.removeAttribute('href');", app_source)
+        self.assertIn("editDraft.style.display = 'none';", app_source)
+        self.assertIn("clearCreatedDraftLink();", app_source)
+        self.assertIn("preparedImport.sourceUrl !== nextData.sourceUrl", app_source)
+        self.assertIn("editDraft.href = blogAdminEditUrl(activeImport.next, result.page_id);", app_source)
+        self.assertIn("preparedImport === activeImport", app_source)
+        self.assertIn("activeImport.idempotencyKey === activeIdempotencyKey", app_source)
+        self.assertIn("editDraft.hidden = false;", app_source)
+        self.assertIn("editDraft.style.display = 'inline-flex';", app_source)
+        self.assertIn("['success', 'partial_success'].includes(result.status)", app_source)
 
     def test_userscript_keeps_preflight_when_only_the_destination_changes(self):
         script_path = Path(__file__).resolve().parents[2] / "static/vendor/Script/downlaod_markdown.js"

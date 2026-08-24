@@ -10,6 +10,109 @@
 
 ## 24. 实施记录
 
+### 2026-08-24：未发布草稿成功后进入 Wagtail 编辑页（方案与实施中）
+
+#### 背景与现状证据
+
+- 导入成功提示已返回 `page_id`、`revision_id`，但 userscript 只显示文字，用户仍需手动在后台查找页面。
+- Wagtail 标准编辑地址由页面 ID 构造为 `/admin/pages/<page_id>/edit/`；`revision_id` 只标识修订版本，不能作为编辑 URL。
+- 同一导入面板可能在一次成功后继续修改标题、目标索引页或正文；旧页面链接不能残留到下一次导入。
+
+#### 目标、非目标与验收标准
+
+- 目标：仅在 `success` 或 `partial_success` 终态显示“进入博客编辑”按钮，打开当前本次导入对应页面的 Wagtail 编辑页；用户可在后台继续修改并保存。
+- 非目标：不自动保存后台表单、不发布页面、不携带 Markdown Token、不改变 session/finalize 或页面数据契约。
+- 验收：按钮在成功前不可见；预检输入变化、重新预检或创建失败后清除旧链接；页面成功或部分成功后链接使用本次 `page_id`；第二次导入不会跳回第一次页面。
+
+#### 设计与实施步骤
+
+1. 在 userscript actions 区增加隐藏的编辑入口，保持现有按钮布局和键盘焦点规则。
+2. 增加严格的页面 ID 校验和按博客 origin 构造编辑 URL的 helper；链接不包含 Token。
+3. 在 `clearPreparedImport()` 和新建草稿流程开始时清理编辑入口；成功终态设置 href 并显示。
+4. 增加静态回归断言，运行 Node 语法检查、Django 定向测试和浏览器/DOM 交互验收。
+
+#### 实际修改与不修改文件
+
+- 计划修改：`wagtailblog3/static/vendor/Script/downlaod_markdown.js`、`wagtailblog3/apps/blog/test_markdown_import_cors.py`、`tools/build_userscript_blog_import_test.ps1`、本方案文档。
+- 不修改：Django API、模型、迁移、Celery 任务、生产配置、Wagtail 后台模板和数据库数据。
+
+#### 数据、服务、回滚与模型/推理强度建议
+
+- 数据/服务影响：仅改变浏览器端显示和导航；不新增数据库字段，不创建额外 session、revision 或媒体，不需要 Worker/Beat 重启。
+- 回滚点：恢复 userscript、TEST 构建版本和静态测试断言即可；不涉及数据回滚。
+- 建议：`gpt-5.6-terra + 中推理` 实现与审查；涉及后台权限或跨服务契约时升级 `gpt-5.6-sol + 高推理`。本次按 `terra` 级别完成，依据现有 Wagtail 路由和返回契约，不调用外部模型。
+
+#### 实施记录（2026-08-24）
+
+- 状态：已实现，未提交、未发布。
+- 实际修改：正式 userscript 增加隐藏的“进入博客编辑”链接；成功或部分成功后按本次 `page_id` 构造 `/admin/pages/<page_id>/edit/`，新一轮预检、目标索引页变化、输入变化或不同文章 URL 会清除旧链接；异步组装使用本次导入快照，避免状态竞态。版本递增为 `0.3.18` / `0.3.18-test.1`。
+- 验证：正式脚本和 TEST 副本 `node --check` 通过；`blog.test_markdown_import_cors --keepdb` 18/18 通过；`manage.py check`、`compileall`、`makemigrations --check --dry-run` 和 `git diff --check` 通过。后端只读复核确认 Wagtail 编辑 URL 为 `/admin/pages/628/edit/` 形式。
+- 数据/服务影响：未调用导入写接口，未创建新的 session、BlogPage、revision 或媒体，不需要 Worker/Beat 重启；未操作生产环境。
+- 回滚点：恢复 userscript、TEST 构建脚本、静态断言和本节文档差异即可；不涉及数据回滚。
+- 残余风险：本次未使用真实 Token 执行第二次浏览器写入验收；AdGuard 安装后需停用旧版本并刷新页面，后台编辑页仍要求用户已有 Wagtail 登录状态。
+
+### 2026-08-24：扩展习近平系列重要讲话数据库文章导入（进行中，未提交）
+
+#### 背景与现状证据
+
+- 用户指定页面：`https://jhsjk.people.cn/article/40781541`、`https://jhsjk.people.cn/article/40763178`。
+- Playwright 实际 DOM 核验显示两个页面均使用 `.d2txt_con.clearfix` 作为正文容器，文章标题位于 `.d2txt > h1`；页面 `document.title` 固定为“习近平系列重要讲话数据库”，不能作为文章标题。
+- 正文容器包含 `table.pci_c`、段落和 `paper.people.com.cn` 图片；现有绝对图片地址处理和服务端 prepare 媒体计划可复用，不需要复制新的导入协议。
+
+#### 目标、非目标与实施
+
+- 目标：让 userscript 在两个指定页面自动注入入口，提取真实文章标题和正文，保留正文图片并通过现有 Markdown 导入博客预检/草稿流程处理。
+- 非目标：不抓取或保存指定页面正文到仓库，不绕过站点验证，不改变 BlogPage、StreamField、MongoDB、媒体、session/finalize 协议，不执行真实 Token、草稿创建或页面发布。
+- 实际修改文件：`wagtailblog3/static/vendor/Script/downlaod_markdown.js`、`wagtailblog3/settings/base.py`、`wagtailblog3/apps/blog/test_markdown_import_cors.py`、`tools/build_userscript_blog_import_test.ps1`、`systemctl.md`。
+- 修改内容：新增精确 `@match` 和 `jhsjk.people.cn` 站点规则；使用 `.d2txt > h1` 提取标题、`.d2txt_con.clearfix` 提取正文；将脚本和 TEST 默认版本递增到 `0.3.17`/`0.3.17-test.1`；增加 HTTPS CORS 来源；摘要改为选取正文第一个非空段落，避免空占位 `<p>` 导致摘要失真。
+
+#### 验收、数据影响与回滚
+
+- 验收门禁：正式脚本与 TEST 副本 `node --check`；WSL2 `wagtailblog-test` 运行 `blog.test_markdown_import_cors`、`manage.py check`、迁移检查；浏览器确认两个页面的入口、标题、正文和图片数量。真实写入接口仍需单独授权。
+- 数据/服务影响：本批不生成迁移，不写入 MySQL、MongoDB、Redis、Elasticsearch、MinIO，不创建 session、artifact、BlogPage 草稿或 revision；由于 CORS 设置变更，生产发布若获授权需按 `systemctl.md` 重启 `wagtailblog3.service`。
+- 回滚点：恢复上述脚本、CORS、测试、构建脚本和维护文档的本批差异；不涉及数据回滚。
+- 残余风险：第三方页面 DOM 可能变化，`paper.people.com.cn` 图片可能出现网络或防盗链失败；真实 AdGuard 注入和博客预检尚待本地测试环境完成，不能宣称生产可用。
+
+#### 模型/推理强度建议与实际使用
+
+- 建议：真实 DOM 采集使用 `gpt-5.6-luna + 中推理`；脚本/CORS/测试实现使用 `gpt-5.6-terra + 中推理`；只有出现跨源认证、图片安全边界或生产写入补偿风险时升级 `gpt-5.6-sol + 高推理`。
+- 实际使用：当前会话按上述分工完成 Django/Wagtail 技能核对、Playwright DOM 证据采集和局部脚本实现；未向外部模型发送源码、Token、正文或个人数据。
+
+#### 2026-08-24 测试服务重启与跨域复核
+
+- 现状：用户实际填写的 `http://192.168.20.2:6050` 是生产 uWSGI 地址；该地址的 OPTIONS 没有返回 `Access-Control-Allow-Origin`，说明生产尚未同步本批 CORS 修改。
+- 实施：按现有 `tools/start_test_stack.sh` 重启 WSL2 测试 runserver 和隔离 maintenance Worker；测试入口仍为 `http://192.168.20.5:8080`，未使用用户提供的 Token。
+- 验证：测试入口 OPTIONS 对 `https://jhsjk.people.cn` 返回 200，包含精确 allow-origin、POST、Authorization 和私有网络响应头；测试服务监听 `192.168.20.5:8080`。
+- 数据/服务影响：仅重启本地测试服务和测试 Worker；未调用 session、上传、finalize、生产数据库或生产服务写操作。
+- 当前阻塞：生产修复需要提交/推送已验证 commit、同步生产仓库、重启 `wagtailblog3.service` 并执行生产 CORS/首页验收，必须先获得用户明确生产授权。
+
+### 2026-08-24：草稿组装停留在异步会话状态（诊断中）
+
+- 现象：用户报告界面停留在“正在组装未发布草稿…”。该提示来自 userscript 轮询，不代表草稿已失败或成功；`finalize` 已提交后，任务由 `blog.tasks.assemble_markdown_import_session` 异步消费。
+- 代码证据：任务通过现有 Celery 路由进入 `maintenance` 队列；会话状态应由 `ready` 变为 `assembling`，终态为 `success`、`partial_success`、`failed` 或 `expired`。失败原因和补偿状态只写入受保护的会话/批次记录。
+- 环境证据：WSL2 测试 runserver 与隔离 Worker 已重启且正常；用户使用的是生产 `192.168.20.2:6050`，当前会话无法通过 SSH 读取生产 Worker/Beat 状态和该会话状态，未执行重投、删除或服务重启。
+- 下一步门禁：先取得生产 maintenance Worker/Beat 的只读状态、任务注册和该 session 的脱敏状态；若确认 Worker 停止或未注册任务，再单独授权按“maintenance Worker → Beat”顺序重启并复核。不得盲目重复点击“创建未发布草稿”，避免幂等键之外的重复操作风险。
+- 残余风险：用户提供的 Markdown 导入 Token 已出现在对话中，不能写入日志或文档；完成诊断后应撤销并重新生成。
+
+### 2026-08-24：测试 Worker 启动入口修复（已验证）
+
+- 根因：测试栈未激活 Conda 时，`/root/anaconda3/envs/wagtailblog-test/bin/celery` 的 `/usr/bin/env python` 解析到 base Python 3.12，日志 formatter 找不到测试环境中的 `colorlog`；改用测试 Python 后，默认 prefork 在 Python 3.13 派生子进程时再次触发 Celery 相对导入错误。
+- 修改：`tools/start_test_stack.sh` 和 `systemctl.md` 均显式使用测试环境 Python，并为隔离测试 Worker 指定 `--pool=solo --without-gossip --without-mingle --without-heartbeat`；不改变队列名、Redis DB、任务路由或生产 unit。这些参数仅用于本地测试，避免解释器派生和控制通道兼容性问题。
+- 验证门禁：2026-08-24 重启测试栈并持续观察 20 秒后，runserver 监听 `192.168.20.5:8080`；Worker 以 Python 3.13 启动，注册 `blog.tasks.assemble_markdown_import_session`，只消费 `markdown-test-maintenance`，`celery inspect ping` 返回 `markdown-test-isolated@ming: OK`。未操作生产服务或生产数据。
+- 回滚点：恢复 `tools/start_test_stack.sh` 和 `systemctl.md` 中的启动命令即可；不删除或重投已有会话。
+- 残余风险：`solo` 为单进程串行测试 Worker，不代表生产并发能力；若测试导入任务耗时较长，需等待当前任务完成后再进行下一次导入。
+
+### 2026-08-24：jhsjk 页面导入与测试栈长期运行复核（已验证，未提交）
+
+- 根因：前一版脚本用 `nohup` 启动 Celery。终端会话退出时触发 Celery 的 `SIGHUP` 处理器；Celery 以 `celery/__main__.py` 自重启，在 Python 3.13 下产生 `attempted relative import with no known parent package`，Worker 随即退出，前端只能持续显示组装状态。
+- 实际修改：`tools/start_test_stack.sh` 改为 `setsid` 启动测试 Worker，并保留测试解释器、`markdown-test-maintenance` 队列、Redis DB 12/13、`solo` 池和禁用 gossip/mingle/heartbeat 参数。`systemctl.md` 增加该启动约束及原因。
+- 服务验收（2026-08-24）：runserver PID `573627` 监听 `192.168.20.5:8080`；Worker PID `573628` 已持续运行超过 9 分钟，注册 `blog.tasks.assemble_markdown_import_session`，`celery inspect ping` 返回 `markdown-test-isolated@ming: OK`；测试 Beat PID `131074` 已运行约 7 小时；`wagtailblog-test-filebeat.service` 为 `active/enabled`。本次没有重复启动 Beat，也未新增默认或 email 队列 Worker。
+- 页面与跨域验收：`/admin/login/` 返回 HTTP 200；Origin `https://jhsjk.people.cn` 的 prepare OPTIONS 返回 HTTP 200、精确 `Access-Control-Allow-Origin`、Authorization/POST 许可和 `Access-Control-Allow-Private-Network: true`。
+- 脚本验收：正式脚本版本 `0.3.17`、TEST 构建版本 `0.3.17-test.1`；两份脚本 `node --check` 通过。jhsjk 页面已通过浏览器实际 DOM 核验，标题 `.d2txt > h1`、正文 `.d2txt_con.clearfix`，正文含 27 个段落和 2 张图片。
+- Django 验收：`manage.py check` 通过；`makemigrations --check --dry-run` 无变更；`blog.test_markdown_import_cors` 使用现有 test database `--keepdb`，17/17 通过（仅保留既有 Wagtail 条件唯一约束警告）。只读查询显示最新会话均为终态，当前没有 `assembling` 会话，因此未盲目重投或创建新草稿。
+- 数据/回滚：未调用真实 Token、未创建新的 session、artifact、BlogPage 草稿或 revision，未操作生产服务；回滚点为恢复 `tools/start_test_stack.sh` 的启动命令及本批文档差异。
+- 残余风险：`solo` 仅适合测试；第三方页面 DOM 或图片防盗链变化仍需按站点规则维护 userscript、精确 CORS、回归测试和版本副本。
+
 ### 2026-08-20 T23.0-T23.3 已完成（未提交）
 
 - 实际修改：新增 userscript 预检接口、媒体引用计划服务和定向测试；扩展现有导入路由与 limits；实现脚本 GM 隔离配置、目标索引页选择、远程图片预检、标题/摘要/日期/标签、重复标题提示；新增 TEST 副本构建脚本。

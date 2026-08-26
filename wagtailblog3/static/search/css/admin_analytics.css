@@ -10,7 +10,7 @@
     content: "\2195"; /* Up-down arrow Unicode */
     font-size: 0.8em;
     margin-left: 6px;
-    color: #aaa;
+    color: var(--w-color-text-meta);
     position: absolute; /* 绝对定位，方便控制 */
     right: 8px;      /* 靠右显示 */
     top: 50%;
@@ -19,12 +19,12 @@
 
 .search-analytics-container .table-sortable th.sorted-asc::after {
     content: "\2191"; /* Up arrow Unicode */
-    color: #333;
+    color: var(--w-color-text-label);
 }
 
 .search-analytics-container .table-sortable th.sorted-desc::after {
     content: "\2193"; /* Down arrow Unicode */
-    color: #333;
+    color: var(--w-color-text-label);
 }
 
 /* 给表格一些基本的Wagtail风格的边框和内边距，如果listing类没有完全覆盖 */
@@ -36,12 +36,12 @@
 .search-analytics-container .search-trends-table td,
 .search-analytics-container .search-trends-table th {
     padding: 0.6em 0.8em; /* 调整内边距以匹配Wagtail风格 */
-    border: 1px solid #dcdcdc; /* Wagtail边框颜色 */
+    border: 1px solid var(--w-color-border-furniture); /* Wagtail边框颜色 */
     text-align: left;
 }
 
 .search-analytics-container .search-trends-table th {
-    background-color: #f8f8f8; /* Wagtail表头背景色 */
+    background-color: var(--w-color-surface-header); /* Wagtail表头背景色 */
     font-weight: bold;
 }
 

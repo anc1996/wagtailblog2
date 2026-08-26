@@ -1,0 +1,464 @@
+/*
+ * 公开页面组件的语义 token 桥接层。
+ * 旧 CSS 仍保留布局和行为，本层只收敛颜色、边框、阴影与焦点状态。
+ */
+
+.comment-box,
+.search-page-shell,
+.archive-page,
+.archive-list-page {
+    color: var(--site-text-strong);
+}
+
+/* 评论：所有状态共享站点表面和状态色，避免 Bootstrap 蓝色残留。 */
+.comment-box {
+    background: var(--site-surface-inset);
+    border-color: var(--site-border);
+    box-shadow: var(--site-component-shadow);
+}
+
+.comment-box h2,
+.comment-box h3,
+.comment-box .login-prompt-title {
+    color: var(--site-text-strong);
+    border-color: var(--site-border-subtle);
+}
+
+.comment-box .login-prompt,
+.comment-box .comments-loading-indicator,
+.comment-box .replies-loading-indicator,
+.comment-box .comment-reply-form,
+.comment-box .edit-comment-form,
+.comment-box .nested-comment,
+.comment-box .no-comments {
+    color: var(--site-text-subtle);
+    background: var(--site-surface-raised);
+    border-color: var(--site-border);
+}
+
+.comment-box .comment {
+    color: var(--site-text-strong);
+    background: var(--site-surface-raised);
+    border-color: var(--site-border);
+    border-left-color: var(--site-accent);
+    box-shadow: var(--site-shadow-sm);
+}
+
+.comment-box .comment:hover {
+    background: var(--site-surface-soft);
+    border-color: var(--site-border-strong);
+    border-left-color: var(--site-accent-hover);
+    box-shadow: var(--site-shadow-sm);
+}
+
+.comment-box .comment .text,
+.comment-box .comment .text p,
+.comment-box .comment .comment-meta,
+.comment-box .login-prompt-text,
+.comment-box .no-comments,
+.comment-box .comments-loading-indicator,
+.comment-box .replies-loading-indicator {
+    color: var(--site-text-subtle);
+}
+
+.comment-box .comment-actions-list,
+.comment-box .comment-markdown-toolbar,
+.comment-box .comment-formula-picker,
+.comment-box .comment-emoji-picker {
+    border-color: var(--site-border);
+    background: var(--site-surface-soft);
+}
+
+.comment-box .comment-actions-list a,
+.comment-box .vote-link,
+.comment-box .show-replies-btn,
+.comment-box .sort-btn {
+    color: var(--site-link);
+}
+
+.comment-box .sort-btn.active,
+.comment-box .theme-btn,
+.comment-box .load-more-btn {
+    color: var(--site-surface);
+    background: var(--site-accent);
+    border-color: var(--site-accent);
+}
+
+.comment-box .sort-btn:hover,
+.comment-box .sort-btn:focus-visible,
+.comment-box .theme-btn:hover,
+.comment-box .theme-btn:focus-visible,
+.comment-box .load-more-btn:hover,
+.comment-box .load-more-btn:focus-visible {
+    color: var(--site-surface);
+    background: var(--site-accent-hover);
+    border-color: var(--site-accent-hover);
+}
+
+.comment-box .comment-error-message {
+    color: var(--site-danger-text);
+    background: var(--site-danger-soft);
+    border-left-color: var(--site-danger);
+}
+
+.comment-box .comment-success-message {
+    color: var(--site-success-text);
+    background: var(--site-success-soft);
+    border-left-color: var(--site-success);
+}
+
+.comment-box input,
+.comment-box textarea,
+.comment-box select {
+    color: var(--site-text-strong);
+    background: var(--site-surface-raised);
+    border-color: var(--site-border-strong);
+}
+
+.comment-box input:focus,
+.comment-box textarea:focus,
+.comment-box select:focus {
+    border-color: var(--site-teal);
+    box-shadow: 0 0 0 3px var(--site-focus-ring);
+}
+
+/* 搜索：表面、输入控件和结果状态与公开站点 token 对齐。 */
+.search-results-page {
+    background: var(--site-bg);
+}
+
+.search-page-shell,
+.search-header,
+.search-form,
+.search-result,
+.no-results,
+.search-welcome-state {
+    color: var(--site-text-strong);
+    border-color: var(--site-border);
+    background: var(--site-surface);
+    box-shadow: var(--site-component-shadow);
+}
+
+.search-header {
+    background: linear-gradient(135deg, var(--site-surface) 0%, var(--site-surface-warm) 100%);
+}
+
+.search-header h1,
+.search-result .result-title,
+.no-results h2,
+.no-results h3,
+.search-welcome-state h2,
+.search-welcome-state h3 {
+    color: var(--site-text-strong);
+}
+
+.search-header p,
+.result-intro,
+.result-meta,
+.pagination-info,
+.no-results,
+.search-welcome-state {
+    color: var(--site-text-subtle);
+}
+
+.search-eyebrow,
+.search-input-icon,
+.search-control-with-icon > i,
+.result-type,
+.view-result,
+.no-results > i,
+.search-welcome-state > i {
+    color: var(--site-accent);
+}
+
+.search-input,
+.date-input,
+.sort-select,
+.jump-page-input {
+    color: var(--site-text-strong);
+    background: var(--site-surface-soft);
+    border-color: var(--site-border-strong);
+}
+
+.search-input:focus,
+.date-input:focus,
+.sort-select:focus,
+.jump-page-input:focus {
+    border-color: var(--site-teal);
+    box-shadow: 0 0 0 3px var(--site-focus-ring);
+}
+
+.search-button,
+.jump-page-button,
+.filter-button.active {
+    color: var(--site-surface);
+    background: var(--site-accent);
+    border-color: var(--site-accent);
+}
+
+.search-button:hover,
+.search-button:focus-visible,
+.jump-page-button:hover,
+.jump-page-button:focus-visible,
+.filter-button.active:hover {
+    color: var(--site-surface);
+    background: var(--site-accent-hover);
+    border-color: var(--site-accent-hover);
+}
+
+.filter-button,
+.pagination-button {
+    color: var(--site-text-subtle);
+    background: var(--site-surface-soft);
+    border-color: var(--site-border);
+}
+
+.filter-button:hover:not(.active),
+.pagination-button:hover,
+.pagination-button:focus-visible {
+    color: var(--site-accent-hover);
+    background: var(--site-accent-soft);
+    border-color: var(--site-accent);
+}
+
+.search-pagination {
+    border-top-color: var(--site-border-subtle);
+}
+
+.highlight {
+    color: var(--site-warning-text);
+    background: var(--site-warning-soft);
+}
+
+/* 归档：列表卡片和树形导航共享搜索页的表面层级。 */
+.archive-list-page .blog-search-filter,
+.archive-list-page .blog-item,
+.archive-list-page .archive-pagination,
+.archive-page .archive-tree {
+    color: var(--site-text-strong);
+    background: var(--site-surface);
+    border-color: var(--site-border);
+    box-shadow: var(--site-component-shadow);
+}
+
+.archive-list-page header h1,
+.archive-list-page .blog-item h3 a,
+.archive-list-page .archive-search-heading h2,
+.archive-page .archive-summary-text strong {
+    color: var(--site-text-strong);
+}
+
+.archive-list-page .lead,
+.archive-list-page .archive-result-total,
+.archive-list-page .archive-search-heading p,
+.archive-list-page .archive-post-intro,
+.archive-list-page .archive-post-meta,
+.archive-list-page .archive-page-info,
+.archive-list-page .archive-async-status,
+.archive-page .archive-summary-text small,
+.archive-page .months-grid-hint,
+.archive-page .archive-empty {
+    color: var(--site-text-subtle);
+}
+
+.archive-list-page .blog-search-filter,
+.archive-page .archive-summary {
+    background: linear-gradient(135deg, var(--site-surface-warm) 0%, var(--site-surface) 100%);
+    border-color: var(--site-border-subtle);
+}
+
+.archive-list-page .search-input,
+.archive-list-page .archive-jump-form input {
+    color: var(--site-text-strong);
+    background: var(--site-surface-soft);
+    border-color: var(--site-border-strong);
+}
+
+.archive-list-page .archive-post-date,
+.archive-list-page .view-stats-total,
+.archive-list-page .view-stats-today,
+.archive-list-page .reaction-count,
+.archive-list-page .tag,
+.archive-page .archive-count-badge {
+    color: var(--site-accent-hover);
+    background: var(--site-accent-soft);
+    border-color: var(--site-border-subtle);
+}
+
+.archive-list-page .archive-page-button,
+.archive-list-page .archive-jump-form button,
+.archive-page .archive-more-toggle {
+    color: var(--site-accent-hover);
+    background: var(--site-surface-soft);
+    border-color: var(--site-border-strong);
+}
+
+.archive-list-page .archive-page-button:hover,
+.archive-list-page .archive-page-button:focus-visible,
+.archive-list-page .archive-jump-form button:hover,
+.archive-list-page .archive-jump-form button:focus-visible,
+.archive-page .archive-more-toggle:hover,
+.archive-page .archive-more-toggle:focus-visible {
+    color: var(--site-surface);
+    background: var(--site-accent);
+    border-color: var(--site-accent);
+}
+
+.archive-list-page a:focus-visible,
+.archive-list-page button:focus-visible,
+.archive-list-page input:focus-visible,
+.archive-page .archive-tree a:focus-visible,
+.archive-page .archive-tree button:focus-visible {
+    outline: 3px solid var(--site-focus-ring);
+    outline-offset: 3px;
+}
+
+/* 兼容旧主题选择器的高优先级，仅重复选择器层级，不重复颜色值。 */
+html:root[data-theme] .blog-page-wrapper .comment-box {
+    color: var(--site-text-strong);
+    background: var(--site-surface-inset);
+    border-color: var(--site-border);
+    box-shadow: var(--site-component-shadow);
+}
+
+html:root[data-theme] .blog-page-wrapper .comment-box .comment {
+    color: var(--site-text-strong);
+    background: var(--site-surface-raised);
+    border-color: var(--site-border);
+    border-left-color: var(--site-accent);
+    box-shadow: var(--site-shadow-sm);
+}
+
+html:root[data-theme] .blog-page-wrapper .comment-box .comment:hover {
+    background: var(--site-surface-soft);
+    border-color: var(--site-border-strong);
+    border-left-color: var(--site-accent-hover);
+    box-shadow: var(--site-shadow-sm);
+}
+
+html:root[data-theme] .blog-page-wrapper .comment-box .comment .image {
+    border-color: var(--site-border);
+    box-shadow: var(--site-shadow-sm);
+}
+
+html:root[data-theme] .blog-page-wrapper .comment-box h2,
+html:root[data-theme] .blog-page-wrapper .comment-box h3,
+html:root[data-theme] .blog-page-wrapper .comment-box .comment .text,
+html:root[data-theme] .blog-page-wrapper .comment-box .comment .text p,
+html:root[data-theme] .blog-page-wrapper .comment-box .comment .comment-meta,
+html:root[data-theme] .blog-page-wrapper .comment-box .login-prompt-text,
+html:root[data-theme] .blog-page-wrapper .comment-box .no-comments {
+    color: var(--site-text-subtle);
+}
+
+html:root[data-theme] .blog-page-wrapper .comment-box h2,
+html:root[data-theme] .blog-page-wrapper .comment-box h3 {
+    color: var(--site-text-strong);
+    border-color: var(--site-border-subtle);
+}
+
+html:root[data-theme] .blog-page-wrapper .comment-box .comment.nested-comment,
+html:root[data-theme] .blog-page-wrapper .comment-box .login-prompt,
+html:root[data-theme] .blog-page-wrapper .comment-box .no-comments,
+html:root[data-theme] .blog-page-wrapper .comment-box .comments-loading-indicator,
+html:root[data-theme] .blog-page-wrapper .comment-box .replies-loading-indicator,
+html:root[data-theme] .blog-page-wrapper .comment-box .comment-reply-form,
+html:root[data-theme] .blog-page-wrapper .comment-box .edit-comment-form {
+    background: var(--site-surface-raised);
+    border-color: var(--site-border);
+}
+
+html:root[data-theme] body.search-results-page,
+html:root[data-theme] body.search-results-page .search-page-shell {
+    color: var(--site-text-strong);
+    background: var(--site-bg);
+}
+
+html:root[data-theme] body.search-results-page .search-header {
+    background: linear-gradient(135deg, var(--site-surface) 0%, var(--site-surface-warm) 100%);
+    border-color: var(--site-border);
+    box-shadow: var(--site-component-shadow);
+}
+
+html:root[data-theme] body.search-results-page .search-form,
+html:root[data-theme] body.search-results-page .search-result,
+html:root[data-theme] body.search-results-page .no-results,
+html:root[data-theme] body.search-results-page .search-welcome-state {
+    color: var(--site-text-strong);
+    background: var(--site-surface);
+    border-color: var(--site-border);
+    box-shadow: var(--site-component-shadow);
+}
+
+html:root[data-theme] body.search-results-page .search-input,
+html:root[data-theme] body.search-results-page .date-input,
+html:root[data-theme] body.search-results-page .sort-select,
+html:root[data-theme] body.search-results-page .jump-page-input {
+    color: var(--site-text-strong);
+    background: var(--site-surface-soft);
+    border-color: var(--site-border-strong);
+}
+
+html:root[data-theme] body.search-results-page .filter-button,
+html:root[data-theme] body.search-results-page .clear-filters-button,
+html:root[data-theme] body.search-results-page .pagination-button {
+    color: var(--site-text-subtle);
+    background: var(--site-surface-soft);
+    border-color: var(--site-border-strong);
+}
+
+html:root[data-theme] body.search-results-page .filter-button.active {
+    color: var(--site-surface);
+    background: var(--site-accent);
+    border-color: var(--site-accent);
+}
+
+html:root[data-theme] body.search-results-page .suggestions,
+html:root[data-theme] body.search-results-page .popular-searches-container {
+    color: var(--site-text-strong);
+    background: var(--site-surface);
+    border-color: var(--site-border);
+    box-shadow: var(--site-component-shadow);
+}
+
+html:root[data-theme] .archive-page .archive-tree {
+    color: var(--site-text-strong);
+    background: var(--site-surface);
+    border-color: var(--site-border);
+    box-shadow: var(--site-component-shadow);
+}
+
+html:root[data-theme] .archive-page .archive-summary {
+    background: linear-gradient(135deg, var(--site-surface-warm) 0%, var(--site-surface) 100%);
+    border-color: var(--site-border-subtle);
+}
+
+html:root[data-theme] .archive-page .archive-summary-text strong {
+    color: var(--site-text-strong);
+}
+
+html:root[data-theme] .archive-page .archive-summary-text small,
+html:root[data-theme] .archive-page .months-grid-hint,
+html:root[data-theme] .archive-page .archive-empty {
+    color: var(--site-text-subtle);
+}
+
+html:root[data-theme] .archive-page .archive-count-badge,
+html:root[data-theme] .archive-page .archive-post-date,
+html:root[data-theme] .archive-page .view-stats-total,
+html:root[data-theme] .archive-page .view-stats-today,
+html:root[data-theme] .archive-page .reaction-count,
+html:root[data-theme] .archive-page .tag {
+    color: var(--site-accent-hover);
+    background: var(--site-accent-soft);
+    border-color: var(--site-border-subtle);
+}
+
+html:root[data-theme] .archive-list-page .blog-item {
+    color: var(--site-text-strong);
+    background: var(--site-surface);
+    border-color: var(--site-border);
+    box-shadow: var(--site-component-shadow);
+}
+
+/* 旧暗色块规则使用 :root + 页面容器的高优先级，这里保持同级以完成收敛。 */

@@ -314,7 +314,7 @@
 }
 
 .home-page .category-widget .cat-list li a {
-    color: #5d5752;
+    color: var(--home-muted);
 }
 
 .home-page .category-widget .cat-list li a:hover,
@@ -334,6 +334,60 @@
     --home-ink: var(--site-ink);
     --home-muted: var(--site-muted);
     --home-accent: var(--site-primary);
+}
+
+/* 暗色主题下，主页正文和控件必须与卡片表面使用同一套语义颜色，避免旧模板样式靠继承产生浅底深字或灰字对灰底。 */
+:root[data-theme='dark'] .home-page .main-slider,
+:root[data-theme='dark'] .home-page .sidebar-page-container,
+:root[data-theme='dark'] .home-page .content-inner,
+:root[data-theme='dark'] .home-page .news-detail,
+:root[data-theme='dark'] .home-page .fullwidth-content {
+    color: var(--home-ink);
+    background-color: var(--home-page-bg);
+}
+
+:root[data-theme='dark'] .home-page .news-detail .fullwidth-content .text,
+:root[data-theme='dark'] .home-page .news-detail .fullwidth-content .text p,
+:root[data-theme='dark'] .home-page .news-detail .fullwidth-content .text li {
+    color: var(--home-muted);
+    line-height: 1.75;
+}
+
+:root[data-theme='dark'] .home-page .news-detail .fullwidth-content .hero-text {
+    margin: 0 0 1.35rem;
+    padding: 1.1rem 1.25rem;
+    color: var(--home-ink);
+    background: var(--home-card-soft);
+    border-left: 3px solid var(--home-accent);
+    border-radius: var(--site-radius-sm);
+}
+
+:root[data-theme='dark'] .home-page .news-detail .fullwidth-content blockquote {
+    background: var(--home-card-soft);
+}
+
+:root[data-theme='dark'] .home-page .home-carousel-toggle {
+    color: var(--home-ink);
+    background: var(--home-card-bg);
+    border-color: var(--home-border-strong);
+}
+
+:root[data-theme='dark'] .home-page .home-carousel-toggle:hover,
+:root[data-theme='dark'] .home-page .home-carousel-toggle:focus-visible {
+    color: var(--home-accent);
+    background: var(--home-card-soft);
+    border-color: var(--home-accent);
+}
+
+:root[data-theme='dark'] .home-page .sec-title .separator,
+:root[data-theme='dark'] .home-page .sec-title .separator::before,
+:root[data-theme='dark'] .home-page .sec-title .separator::after {
+    background-color: var(--home-border-strong);
+}
+
+:root[data-theme='dark'] .home-page .sidebar-side .sidebar-widget .cat-list li,
+:root[data-theme='dark'] .home-page .sidebar-side .sidebar-widget {
+    border-color: var(--home-border);
 }
 
 :root[data-theme='dark'] .home-page .news-detail > .inner-box,

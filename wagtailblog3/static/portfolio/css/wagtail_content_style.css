@@ -14,6 +14,20 @@
     color: var(--portfolio-ink);
 }
 
+/* 暗色主题沿用站点语义 token，避免作品集卡片继续使用亮色硬编码。 */
+:root[data-theme='dark'] .portfolio-page {
+    --portfolio-bg: var(--site-bg);
+    --portfolio-card: var(--site-surface-raised);
+    --portfolio-soft: var(--site-surface-soft);
+    --portfolio-soft-strong: var(--site-surface-warm);
+    --portfolio-border: var(--site-border);
+    --portfolio-border-strong: var(--site-border-strong);
+    --portfolio-ink: var(--site-text-strong);
+    --portfolio-muted: var(--site-text-subtle);
+    --portfolio-accent: var(--site-accent);
+    --portfolio-accent-dark: var(--site-accent-hover);
+}
+
 .portfolio-page .portfolio-shell {
     overflow: hidden;
     background:
@@ -141,15 +155,15 @@
     padding: 30px 34px;
     border: 1px solid var(--portfolio-border);
     border-radius: 20px;
-    background: rgba(255,255,255,.92);
-    box-shadow: 0 13px 38px rgba(72, 54, 43, .065);
+    background: var(--portfolio-card);
+    box-shadow: var(--site-shadow-md);
 }
 
 .portfolio-page .portfolio-stream-block--heading_block {
     margin-bottom: 18px;
     padding-bottom: 21px;
     border-left: 4px solid var(--portfolio-accent);
-    background: linear-gradient(105deg, #fff, var(--portfolio-soft));
+    background: linear-gradient(105deg, var(--portfolio-card), var(--portfolio-soft));
 }
 
 .portfolio-page .portfolio-stream-block--heading_block h2,
@@ -220,7 +234,7 @@
     border-left: 4px solid var(--portfolio-accent);
     border-radius: 0 12px 12px 0;
     background: var(--portfolio-soft);
-    color: #5f5852;
+    color: var(--portfolio-muted);
 }
 
 /* Project card block. */
@@ -230,7 +244,7 @@
     border: 1px solid var(--portfolio-border);
     border-radius: 22px;
     background: var(--portfolio-card);
-    box-shadow: 0 16px 46px rgba(72, 54, 43, .08);
+    box-shadow: var(--site-shadow-md);
 }
 
 .portfolio-page .portfolio-project-grid {
@@ -294,13 +308,13 @@
 
 .portfolio-page .portfolio-project-copy .portfolio-richtext {
     margin-top: 22px;
-    color: #57514c;
+    color: var(--portfolio-muted);
 }
 
 /* Featured BlogPage selections. */
 .portfolio-page .portfolio-featured {
     padding: 38px;
-    background: linear-gradient(145deg, #fff 0%, #fdfaf7 100%);
+    background: linear-gradient(145deg, var(--portfolio-card) 0%, var(--portfolio-soft) 100%);
 }
 
 .portfolio-page .portfolio-section-heading {
@@ -341,15 +355,15 @@
     overflow: hidden;
     border: 1px solid var(--portfolio-border);
     border-radius: 18px;
-    background: #fff;
-    box-shadow: 0 9px 28px rgba(72,54,43,.055);
+    background: var(--portfolio-card);
+    box-shadow: var(--site-shadow-sm);
     transition: transform .25s ease, border-color .25s ease, box-shadow .25s ease;
 }
 
 .portfolio-page .portfolio-post-card:hover {
     transform: translateY(-3px);
     border-color: rgba(186,109,60,.36);
-    box-shadow: 0 16px 38px rgba(72,54,43,.1);
+    box-shadow: var(--site-shadow-md);
 }
 
 .portfolio-page .portfolio-post-media {
@@ -433,7 +447,7 @@
 }
 
 .portfolio-page .portfolio-post-intro {
-    color: #625b55;
+    color: var(--portfolio-muted);
     font-size: 15px;
     line-height: 1.75;
 }

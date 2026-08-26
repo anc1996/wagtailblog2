@@ -31,8 +31,8 @@
 
 
 input[type="text"].datepicker:focus {
-    border-color: #26a69a;
-    box-shadow: 0 0 2px #26a69a;
+    border-color: var(--w-color-primary);
+    box-shadow: 0 0 2px var(--w-color-primary);
 }
 
 .field .field-content .w-button + .w-button--secondary,
@@ -59,11 +59,11 @@ input[type="text"].datepicker:focus {
     padding: var(--w-spacing-2, 0.4em) var(--w-spacing-1, 0.3em); /* 大幅减少内边距 */
     white-space: nowrap; /* 防止月份和数字换行 */
     text-align: center;
-    border: 1px solid var(--w-color-border-furniture, #e0e1e1); /* 单元格边框 */
+    border: 1px solid var(--w-color-border-furniture); /* 单元格边框 */
 }
 
 .archive-stats-table table.w-table th {
-    background-color: var(--w-color-surface-header, #f5f6f7);
+    background-color: var(--w-color-surface-header);
     font-weight: var(--w-font-weight-bold, bold);
     vertical-align: middle;
 }
@@ -80,11 +80,11 @@ input[type="text"].datepicker:focus {
 }
 
 .archive-stats-table .text-meta {
-    color: var(--w-color-text-meta, #68768A);
+    color: var(--w-color-text-meta);
 }
 
 .archive-stats-table a {
-    color: var(--w-color-text-link, #2962ff); /* Wagtail 链接颜色 */
+    color: var(--w-color-text-link); /* Wagtail 链接颜色 */
     text-decoration: none;
     display: block; /* 使整个单元格可点击 */
     padding: var(--w-spacing-2, 0.4em) var(--w-spacing-1, 0.3em); /* 与单元格内边距匹配 */
@@ -93,7 +93,7 @@ input[type="text"].datepicker:focus {
 
 .archive-stats-table td:hover a, /* 改善hover效果 */
 .archive-stats-table td a:hover {
-    background-color: var(--w-color-surface-hover, #f0f1f2); /* Wagtail hover背景色 */
+    background-color: var(--w-color-surface-hover); /* Wagtail hover背景色 */
     text-decoration: none;
 }
 

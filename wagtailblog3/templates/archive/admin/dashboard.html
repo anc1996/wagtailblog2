@@ -79,6 +79,7 @@
 
 {% block extra_css %}
     {{ block.super }}
+    <link rel="stylesheet" href="{% static 'archive/css/admin_archive.css' %}?v=20260826-1">
     <style>
         /* 搜索表单优化 */
         .search-form .fields.inline {
@@ -107,10 +108,10 @@
         .search-form .date-input {
             width: 180px;
             padding: 0.5em;
-            border: 1px solid #ccc;
+            border: 1px solid var(--w-color-border-field-default);
             border-radius: 3px;
             font-family: inherit;
-            color: #333;
+            color: var(--w-color-text-label);
         }
 
         /* 使用 JavaScript 控制的类来隐藏占位符 */
@@ -128,7 +129,7 @@
         }
 
         .search-form .date-input.hide-placeholder:focus {
-            color: #333;
+            color: var(--w-color-text-label);
         }
 
         .button-row {
@@ -167,11 +168,11 @@
             width: 100px;
             text-align: center;
             font-weight: 600;
-            background-color: #f8f8f8;
+            background-color: var(--w-color-surface-header);
         }
 
         .listing td.archive-month .muted {
-            color: #999;
+            color: var(--w-color-text-meta);
         }
 
         /* 归档分页样式 */
@@ -187,7 +188,7 @@
         .archive-pagination .page-info {
             display: inline-block;
             margin: 0 1em;
-            color: #666;
+            color: var(--w-color-text-meta);
         }
 
         /* 文章列表表格优化 */
@@ -204,27 +205,27 @@
         .status-tag {
             display: inline-block;
             padding: 3px 10px;
-            background: #e8f4f8;
+            background: var(--w-color-surface-info);
             border-radius: 3px;
             font-size: 0.85em;
             margin-right: 0.3em;
         }
 
         .status-tag.primary {
-            background: #007d7e;
-            color: white;
+            background: var(--w-color-primary);
+            color: var(--w-color-text-button);
         }
 
         /* 分页样式优化 */
         .pagination {
             margin-top: 2em;
-            border-top: 1px solid #e6e6e6;
+            border-top: 1px solid var(--w-color-border-furniture);
             padding-top: 1.5em;
         }
 
         .pagination-count {
             margin-bottom: 1em;
-            color: #666;
+            color: var(--w-color-text-meta);
             font-size: 0.95em;
         }
 
@@ -245,29 +246,29 @@
         .pagination li span {
             display: inline-block;
             padding: 0.5em 0.8em;
-            border: 1px solid #d9d9d9;
+            border: 1px solid var(--w-color-border-furniture);
             border-radius: 3px;
             text-decoration: none;
-            color: #333;
+            color: var(--w-color-text-label);
             min-width: 36px;
             text-align: center;
         }
 
         .pagination li a:hover {
-            background-color: #f5f5f5;
-            border-color: #999;
+            background-color: var(--w-color-surface-hover);
+            border-color: var(--w-color-border-field-default);
             cursor: pointer;
         }
 
         .pagination li.active span {
-            background-color: #007d7e;
-            border-color: #007d7e;
-            color: white;
+            background-color: var(--w-color-primary);
+            border-color: var(--w-color-primary);
+            color: var(--w-color-text-button);
             font-weight: 600;
         }
 
         .pagination li.disabled span {
-            color: #ccc;
+            color: var(--w-color-text-meta);
             border: none;
             cursor: default;
         }
@@ -287,14 +288,14 @@
         .label-above .count {
             font-weight: normal;
             font-size: 0.85em;
-            color: #666;
+            color: var(--w-color-text-meta);
         }
 
         /* 空状态提示 */
         .no-results-message {
             text-align: center;
             padding: 3em 1em;
-            color: #999;
+            color: var(--w-color-text-meta);
         }
 
         .no-results-message p {
@@ -306,7 +307,7 @@
         .loading-indicator {
             text-align: center;
             padding: 2em;
-            color: #666;
+            color: var(--w-color-text-meta);
         }
 
         /* 响应式调整 */

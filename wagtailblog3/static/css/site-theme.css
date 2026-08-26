@@ -24,6 +24,24 @@
     --site-success: #3b805d;
     --site-danger: #b85a5a;
     --site-focus: rgba(57, 125, 136, .34);
+    /* 页面组件统一消费的语义颜色，避免各页面重新定义同一套棕色。 */
+    --site-surface-raised: #ffffff;
+    --site-surface-inset: #f8f3ed;
+    --site-text-strong: #292724;
+    --site-text-subtle: #6f6b66;
+    --site-border-subtle: #eee3d5;
+    --site-accent: #a76035;
+    --site-accent-hover: #814423;
+    --site-accent-soft: #f2e5da;
+    --site-info-soft: #e3f1ef;
+    --site-success-soft: #dcefe2;
+    --site-success-text: #235338;
+    --site-danger-soft: #f8e1e1;
+    --site-danger-text: #7a3030;
+    --site-warning-soft: #fff0a8;
+    --site-warning-text: #4b3d00;
+    --site-focus-ring: rgba(57, 125, 136, .34);
+    --site-component-shadow: 0 8px 24px rgba(40, 34, 28, .08);
     --site-radius-sm: 6px;
     --site-radius-md: 10px;
     --site-radius-lg: 16px;
@@ -53,6 +71,23 @@
     --site-success: #78ad8d;
     --site-danger: #e18a82;
     --site-focus: rgba(121, 170, 167, .5);
+    --site-surface-raised: #2b2926;
+    --site-surface-inset: #2d2824;
+    --site-text-strong: #f0eae3;
+    --site-text-subtle: #b8afa6;
+    --site-border-subtle: #493f37;
+    --site-accent: #d39468;
+    --site-accent-hover: #e7ad84;
+    --site-accent-soft: #3b2d24;
+    --site-info-soft: #253b3c;
+    --site-success-soft: #20382b;
+    --site-success-text: #bce1c8;
+    --site-danger-soft: #482525;
+    --site-danger-text: #ffd0ca;
+    --site-warning-soft: #4a3d19;
+    --site-warning-text: #f6e8a5;
+    --site-focus-ring: rgba(121, 170, 167, .5);
+    --site-component-shadow: none;
     --site-shadow-sm: none;
     --site-shadow-md: none;
 }

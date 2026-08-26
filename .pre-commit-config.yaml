@@ -11,3 +11,8 @@ repos:
         entry: bash -lc 'WAGTAILBLOG_ENV=test /root/anaconda3/envs/wagtailblog-test/bin/python manage.py check'
         language: system
         pass_filenames: false
+      - id: css-token-lint
+        name: CSS semantic token lint
+        entry: python tools/check_css_tokens.py
+        language: system
+        pass_filenames: false

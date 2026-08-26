@@ -7,8 +7,12 @@
 }
 
 .content-block-wrapper[data-block-type='image_block'] > .content-image {
+    /* 桌面端按正文容器计算半宽，避免媒体占满整行造成视觉失衡。 */
+    width: 50%;
+    max-width: 100%;
     margin-right: auto;
     margin-left: auto;
+    box-sizing: border-box;
 }
 
 .content-image {
@@ -36,6 +40,7 @@
 
 .content-image__media {
     position: relative;
+    width: 100%;
     overflow: hidden;
     background: #eeece8;
     border: 1px solid var(--content-image-border);
@@ -54,6 +59,8 @@
     display: block;
     width: 100%;
     height: auto;
+    aspect-ratio: auto;
+    object-fit: contain;
     margin: 0;
     background: #eeece8;
     transition: filter 180ms ease;
@@ -211,6 +218,11 @@
 @media (max-width: 767px) {
     .content-block-wrapper[data-block-type='image_block'] {
         margin: 1.8rem 0 2.4rem;
+    }
+
+    .content-block-wrapper[data-block-type='image_block'] > .content-image {
+        width: 100%;
+        max-width: 100%;
     }
 
     .content-image__media {

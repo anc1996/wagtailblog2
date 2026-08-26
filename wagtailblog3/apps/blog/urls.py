@@ -58,6 +58,8 @@ urlpatterns = [
     path('api/tag-index-pages/<int:pk>/results/', views.tag_index_results_api, name='tag_index_results_api'),
     # GET /blog/api/authors/<pk>/posts/：返回指定作者的文章结果片段。
     path('api/authors/<int:pk>/posts/', views.author_posts_api, name='author_posts_api'),
+    # GET /blog/api/gallery/<pk>/items/：返回公开文章画廊的下一批图片。
+    path('api/gallery/<int:pk>/items/', views.gallery_items_api, name='gallery_items_api'),
 
     # GET /blog/authors/：渲染作者列表页面。
     path('authors/', AuthorListView.as_view(), name='author_list'),

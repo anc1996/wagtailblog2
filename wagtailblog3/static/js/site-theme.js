@@ -98,6 +98,15 @@
         if (willOpen) menu.querySelector('[aria-checked="true"]')?.focus();
     }
 
+    // 主题菜单使用方向键循环选项，避免键盘用户只能逐项离开菜单。
+    function moveMenuFocus(menu, current, direction) {
+        const options = [...menu.querySelectorAll('[data-site-theme-option]')];
+        if (!options.length) return;
+        const index = Math.max(options.indexOf(current), 0);
+        const nextIndex = (index + direction + options.length) % options.length;
+        options[nextIndex].focus();
+    }
+
     document.addEventListener('click', (event) => {
         const toggle = event.target.closest('[data-site-theme-toggle]');
         if (toggle) {
@@ -108,8 +117,11 @@
 
         const option = event.target.closest('[data-site-theme-option]');
         if (option) {
+            const control = option.closest('[data-site-theme-control]');
+            const toggle = control?.querySelector('[data-site-theme-toggle]');
             applyPreference(option.dataset.siteThemeOption, { persist: true });
             closeMenus();
+            toggle?.focus();
             return;
         }
 
@@ -117,6 +129,27 @@
     });
 
     document.addEventListener('keydown', (event) => {
+        const option = event.target.closest('[data-site-theme-option]');
+        if (option) {
+            const menu = option.closest('[data-site-theme-menu]');
+            if (event.key === 'ArrowDown' || event.key === 'ArrowRight') {
+                event.preventDefault();
+                moveMenuFocus(menu, option, 1);
+                return;
+            }
+            if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') {
+                event.preventDefault();
+                moveMenuFocus(menu, option, -1);
+                return;
+            }
+            if (event.key === 'Home' || event.key === 'End') {
+                event.preventDefault();
+                const options = menu?.querySelectorAll('[data-site-theme-option]');
+                options?.[event.key === 'Home' ? 0 : options.length - 1]?.focus();
+                return;
+            }
+        }
+
         if (event.key !== 'Escape') return;
         const openControl = document.querySelector('[data-site-theme-control].is-open');
         if (!openControl) return;

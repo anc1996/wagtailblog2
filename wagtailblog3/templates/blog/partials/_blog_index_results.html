@@ -1,4 +1,4 @@
-{% load wagtailcore_tags wagtailimages_tags static blog_tags %}
+{% load wagtailcore_tags wagtailimages_tags blog_tags %}
 
 <section class="filters-section" aria-labelledby="blog-filter-title">
     <div class="filter-card-header">
@@ -78,19 +78,13 @@
 
     <div class="blog-list-items">
         {% for post in blog_pages %}
-            <article class="post-list-item">
+            <article class="post-list-item{% if not post.specific.featured_image %} post-list-item--no-image{% endif %}">
                 {% if post.specific.featured_image %}
                     <a class="post-card-image post-card-image--actual" href="{% pageurl post %}" aria-label="阅读 {{ post.title|inline_title_text }}">
                         {% image post.specific.featured_image width-420 as img %}
                         {# 首张卡片服务首屏，其余图片延迟加载，降低列表页初始请求量。 #}
                         <img src="{{ img.url }}" alt="{{ post.title|inline_title_text }}"
                              width="{{ img.width }}" height="{{ img.height }}" decoding="async"
-                             {% if forloop.first %}loading="eager" fetchpriority="high"{% else %}loading="lazy"{% endif %}>
-                    </a>
-                {% else %}
-                    <a class="post-card-image post-card-image--fallback" href="{% pageurl post %}" aria-label="阅读 {{ post.title|inline_title_text }}">
-                        <img src="{% static 'gretzia/images/resource/news-15.jpg' %}" alt="{{ post.title|inline_title_text }}"
-                             width="420" height="280" decoding="async"
                              {% if forloop.first %}loading="eager" fetchpriority="high"{% else %}loading="lazy"{% endif %}>
                     </a>
                 {% endif %}

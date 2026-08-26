@@ -11,7 +11,7 @@
     box-sizing: border-box;
     aspect-ratio: 16 / 5;
     overflow: hidden;
-    background: #111;
+    background: var(--site-surface-soft, #111);
 }
 
 .home-featured-carousel .slide .image {
@@ -28,6 +28,34 @@
     display: block;
     object-fit: cover;
     object-position: center;
+}
+
+.home-carousel-controls {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 10px;
+}
+
+.home-carousel-toggle {
+    min-width: 44px;
+    min-height: 44px;
+    padding: 8px 12px;
+    color: var(--site-ink);
+    background: var(--site-surface);
+    border: 1px solid var(--site-border-strong);
+    border-radius: var(--site-radius-sm);
+    cursor: pointer;
+}
+
+.home-carousel-toggle i {
+    margin-right: 6px;
+    color: var(--site-primary);
+}
+
+.home-carousel-toggle:hover,
+.home-carousel-toggle:focus-visible {
+    color: var(--site-primary-dark);
+    border-color: var(--site-primary);
 }
 
 @media (max-width: 991px) {
@@ -51,11 +79,11 @@
     margin: 15px 0;
     padding-top: 15px;
     overflow-x: auto;
-    color: #777;
+    color: var(--home-muted, var(--site-muted));
     font-size: 13px;
     line-height: 1;
     white-space: nowrap;
-    border-top: 1px solid #eee;
+    border-top: 1px solid var(--home-border, var(--site-border));
     scrollbar-width: thin;
 }
 
@@ -70,12 +98,12 @@
 
 .home-page .post-stats .view-count i,
 .home-page .post-stats .reaction-count i {
-    color: #c58a42;
+    color: var(--home-accent, var(--site-primary));
     font-size: 14px;
 }
 
 .home-page .post-stats .view-count strong {
-    color: #555;
+    color: var(--home-ink, var(--site-ink));
     font-weight: 600;
 }
 
@@ -229,6 +257,16 @@
     transform: translateY(-2px);
 }
 
+/* 无文章封面时让热门阅读卡片回到内容优先，不留下空白图片栏。 */
+.home-page .news-block-two--no-image > .inner-box {
+    display: flex;
+    flex-direction: column;
+}
+
+.home-page .news-block-two--no-image .lower-content {
+    flex: 1 1 auto;
+}
+
 .home-page .news-block-two .inner-box .image,
 .home-page .news-block-two .inner-box .image img {
     border-radius: 15px 15px 0 0;
@@ -244,7 +282,7 @@
 }
 
 .home-page .post-stats .view-count strong {
-    color: #514a45;
+    color: var(--home-ink);
 }
 
 .home-page .sidebar-side .sidebar-widget {
@@ -284,6 +322,64 @@
 .home-page .sidebar-widget h2 a:hover,
 .home-page .sidebar-widget h2 a:focus {
     color: var(--home-accent);
+}
+
+/* 夜间模式沿用站点语义色，避免首页晚加载的浅色变量覆盖全局主题。 */
+:root[data-theme='dark'] .home-page {
+    --home-page-bg: var(--site-bg);
+    --home-card-bg: var(--site-surface);
+    --home-card-soft: var(--site-surface-warm);
+    --home-border: var(--site-border);
+    --home-border-strong: var(--site-border-strong);
+    --home-ink: var(--site-ink);
+    --home-muted: var(--site-muted);
+    --home-accent: var(--site-primary);
+}
+
+:root[data-theme='dark'] .home-page .news-detail > .inner-box,
+:root[data-theme='dark'] .home-page .news-block-two > .inner-box,
+:root[data-theme='dark'] .home-page .sidebar-side .sidebar-widget {
+    box-shadow: none;
+}
+
+/* 图片保持原始内容，使用容器边界和柔和叠层与暗色卡片建立层次。 */
+:root[data-theme='dark'] .home-page .news-detail .inner-box .image,
+:root[data-theme='dark'] .home-page .news-block-two .inner-box .image {
+    overflow: hidden;
+    background: var(--site-surface-soft);
+    box-shadow: inset 0 0 0 1px var(--site-border);
+}
+
+:root[data-theme='dark'] .home-page .news-block-two .inner-box .image {
+    position: relative;
+}
+
+:root[data-theme='dark'] .home-page .news-block-two .inner-box .image::after {
+    position: absolute;
+    inset: 0;
+    content: '';
+    pointer-events: none;
+    background: linear-gradient(180deg, rgba(23, 23, 21, 0.04), rgba(23, 23, 21, 0.2));
+}
+
+:root[data-theme='dark'] .home-page .news-block-two .inner-box .lower-content .title,
+:root[data-theme='dark'] .home-page .post-stats .view-count i,
+:root[data-theme='dark'] .home-page .post-stats .reaction-count i {
+    color: var(--site-primary);
+}
+
+:root[data-theme='dark'] .home-page .news-block-two .inner-box .lower-content .title::after {
+    background: var(--site-primary-soft);
+}
+
+:root[data-theme='dark'] .home-page .post-stats .view-count strong,
+:root[data-theme='dark'] .home-page .category-widget .cat-list li a {
+    color: var(--site-ink);
+}
+
+:root[data-theme='dark'] .home-page .news-block-two > .inner-box:hover {
+    border-color: var(--site-primary);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.2);
 }
 
 @media (max-width: 991px) {
@@ -338,6 +434,10 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+    .home-carousel-toggle {
+        transition: none;
+    }
+
     .home-page .home-featured-carousel .slide .overlay-box,
     .home-page .home-featured-carousel .slide .overlay-box .content a {
         transition: none;

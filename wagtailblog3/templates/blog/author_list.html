@@ -23,7 +23,7 @@
 
                     {# 搜索作者 Widget #}
                     <div class="sidebar-widget search-box">
-                        <form method="get" action="{% url 'blog:author_list' %}">
+                        <form method="get" action="{% url 'blog:author_list' %}" role="search">
                             <div class="form-group">
                                 <label class="sr-only" for="author-list-search">{% translate 'Search Authors' %}</label>
                                 <input type="search" name="q" id="author-list-search" value="{{ search_query|default:'' }}"
@@ -109,7 +109,8 @@
                         {% endfor %}
 
                         {% if is_paginated %}
-                        <ul class="styled-pagination text-center">
+                        <nav aria-label="作者列表分页">
+                            <ul class="styled-pagination text-center">
                             {% if page_obj.has_previous %}
                                 <li><a href="?page={{ page_obj.previous_page_number }}{% if search_query %}&q={{ search_query }}{% endif %}"
                                        aria-label="上一页"><span class="fa fa-angle-left" aria-hidden="true"></span></a></li>
@@ -117,7 +118,7 @@
 
                             {% for num in paginator.page_range %}
                                 {% if page_obj.number == num %}
-                                    <li class="active"><a href="#" aria-current="page" aria-label="第{{ num }}页">{{ num }}</a></li>
+                                    <li class="active"><span aria-current="page" aria-label="第{{ num }}页">{{ num }}</span></li>
                                 {% elif num > page_obj.number|add:'-3' and num < page_obj.number|add:'3' %}
                                     <li><a href="?page={{ num }}{% if search_query %}&q={{ search_query }}{% endif %}" aria-label="第{{ num }}页">{{ num }}</a></li>
                                 {% endif %}
@@ -127,7 +128,8 @@
                                 <li><a href="?page={{ page_obj.next_page_number }}{% if search_query %}&q={{ search_query }}{% endif %}"
                                        aria-label="下一页"><span class="fa fa-angle-right" aria-hidden="true"></span></a></li>
                             {% endif %}
-                        </ul>
+                            </ul>
+                        </nav>
                         {% endif %}
                     </div>
                     {% else %}

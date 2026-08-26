@@ -18,10 +18,12 @@
     --site-border-strong: #d8d3cc;
     --site-primary: #a76035;
     --site-primary-dark: #814423;
+    --site-link: #8f4e2b;
     --site-primary-soft: #f2e5da;
     --site-teal: #397d88;
     --site-success: #3b805d;
     --site-danger: #b85a5a;
+    --site-focus: rgba(57, 125, 136, .34);
     --site-radius-sm: 6px;
     --site-radius-md: 10px;
     --site-radius-lg: 16px;
@@ -45,10 +47,12 @@
     --site-border-strong: #514941;
     --site-primary: #d39468;
     --site-primary-dark: #e7ad84;
+    --site-link: #e7ad84;
     --site-primary-soft: #3b2d24;
     --site-teal: #79aaa7;
     --site-success: #78ad8d;
     --site-danger: #e18a82;
+    --site-focus: rgba(121, 170, 167, .5);
     --site-shadow-sm: none;
     --site-shadow-md: none;
 }
@@ -57,10 +61,25 @@ html {
     scroll-behavior: smooth;
 }
 
+@media (prefers-reduced-motion: reduce) {
+    html {
+        scroll-behavior: auto;
+    }
+
+    *,
+    *::before,
+    *::after {
+        scroll-behavior: auto !important;
+        transition-duration: 0.01ms !important;
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+    }
+}
+
 body {
     color: var(--site-ink);
     background: var(--site-bg);
-    font-size: 15px;
+    font-size: 16px;
     line-height: 1.75;
 }
 
@@ -69,7 +88,8 @@ button,
 input,
 select,
 textarea {
-    font-family: 'Lato', sans-serif;
+    /* 中文站点显式声明 CJK 回退，避免不同主机的默认字体造成字重和行高漂移。 */
+    font-family: 'Lato', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif;
 }
 
 h1,
@@ -79,12 +99,12 @@ h4,
 h5,
 h6 {
     color: var(--site-ink);
-    font-family: 'Playfair Display', serif;
+    font-family: 'Playfair Display', 'Noto Serif CJK SC', 'Songti SC', 'SimSun', serif;
     font-weight: 600;
 }
 
 a {
-    color: var(--site-primary);
+    color: var(--site-link);
     transition: color var(--site-transition), background-color var(--site-transition), border-color var(--site-transition), box-shadow var(--site-transition), transform var(--site-transition);
 }
 
@@ -98,7 +118,7 @@ button:focus-visible,
 input:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
-    outline: 3px solid rgba(57, 125, 136, .26);
+    outline: 3px solid var(--site-focus);
     outline-offset: 2px;
 }
 
@@ -210,8 +230,9 @@ img {
 
 .site-theme-toggle {
     display: inline-grid;
-    width: 36px;
-    height: 36px;
+    /* 主题切换是高频触控入口，保持与其他图标按钮一致的命中区。 */
+    width: 44px;
+    height: 44px;
     place-items: center;
     padding: 0;
     color: var(--site-muted);
@@ -253,7 +274,7 @@ img {
 .site-theme-menu button {
     display: grid;
     width: 100%;
-    min-height: 38px;
+    min-height: 44px;
     grid-template-columns: 24px 1fr 16px;
     align-items: center;
     gap: 8px;
@@ -363,6 +384,30 @@ img {
 :root[data-theme='dark'] .main-header .search-box-btn img,
 :root[data-theme='dark'] .main-header .mobile-nav-toggler img {
     filter: invert(1) sepia(.08) saturate(.4);
+}
+
+/* 暗色主题下覆盖旧模板的白色表单默认值，确保搜索文字与输入背景有足够对比。 */
+:root[data-theme='dark'] .main-header .search-panel input[type='search'],
+:root[data-theme='dark'] .main-header .search-panel input[type='text'] {
+    color: var(--site-ink);
+    background: var(--site-surface-soft);
+    border-color: var(--site-border-strong);
+    caret-color: var(--site-primary);
+}
+
+:root[data-theme='dark'] .main-header .search-panel input::placeholder {
+    color: var(--site-muted);
+}
+
+:root[data-theme='dark'] .main-header .search-panel input:focus {
+    background: var(--site-surface);
+    border-color: var(--site-teal);
+    box-shadow: 0 0 0 3px rgba(121, 170, 167, .16);
+}
+
+:root[data-theme='dark'] .main-header .search-panel .form-group button {
+    color: var(--site-primary);
+    background: transparent;
 }
 
 :root[data-theme='dark'] .mobile-menu .menu-box {
@@ -500,6 +545,19 @@ body:not(.blog-index-page) .pagination-button:hover {
     color: var(--site-primary-dark);
     background: var(--site-primary-soft);
     border-color: var(--site-primary);
+}
+
+/* 夜间主按钮使用深色文字，避免浅暖橙背景上的白字降低对比度。 */
+:root[data-theme='dark'] body:not(.blog-index-page) .btn-style-one,
+:root[data-theme='dark'] body:not(.blog-index-page) .filter-submit,
+:root[data-theme='dark'] body:not(.blog-index-page) button[type='submit'] {
+    color: #2b211b;
+}
+
+:root[data-theme='dark'] body:not(.blog-index-page) .btn-style-one:hover,
+:root[data-theme='dark'] body:not(.blog-index-page) .filter-submit:hover,
+:root[data-theme='dark'] body:not(.blog-index-page) button[type='submit']:hover {
+    color: #2b211b;
 }
 
 body:not(.blog-index-page) input:not([type='checkbox']):not([type='radio']),
@@ -697,6 +755,11 @@ body:not(.blog-index-page) .form-control:focus {
     border-top: 1px solid var(--site-border);
 }
 
+/* 该文件在页面 CSS 之后加载，无图卡片必须在后置层继续保持整宽，避免留下空媒体列。 */
+.blog-index-page .post-list-item--no-image {
+    grid-template-columns: minmax(0, 1fr);
+}
+
 .blog-index-page .post-card-image {
     display: block;
     overflow: hidden;
@@ -713,6 +776,27 @@ body:not(.blog-index-page) .form-control:focus {
     min-height: 170px;
     object-fit: cover;
     transition: transform 260ms ease;
+}
+
+/* 后置覆盖必须位于通用媒体规则之后，才能保留有封面文章的真实宽高比。 */
+.blog-index-page .post-card-image--actual {
+    display: flex;
+    align-self: center;
+    height: auto;
+    min-height: 0;
+    aspect-ratio: auto;
+    align-items: flex-start;
+    justify-content: center;
+}
+
+.blog-index-page .post-card-image--actual img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    aspect-ratio: auto;
+    object-fit: contain;
+    object-position: center;
 }
 
 .blog-index-page .post-list-item:hover .post-card-image img {
@@ -1447,7 +1531,8 @@ body.author-list-page .search-box button {
 :root[data-theme='dark'] body.search-results-page .search-header h1,
 :root[data-theme='dark'] body.search-results-page .result-title a,
 :root[data-theme='dark'] body.search-results-page .no-results h2,
-:root[data-theme='dark'] body.search-results-page .search-welcome-state h2 {
+:root[data-theme='dark'] body.search-results-page .search-welcome-state h2,
+:root[data-theme='dark'] body.search-results-page .search-welcome-state h3 {
     color: var(--site-ink);
 }
 
@@ -2259,6 +2344,14 @@ footer .main-footer {
     .blog-index-page .post-card-image img {
         min-height: 0;
         aspect-ratio: 16 / 9;
+    }
+
+    .blog-index-page .post-card-image--actual,
+    .blog-index-page .post-card-image--actual img {
+        height: 100%;
+        min-height: 0;
+        aspect-ratio: auto;
+        object-fit: contain;
     }
 
     .blog-index-page .post-card-title {

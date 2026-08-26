@@ -16,6 +16,7 @@ from blog.models import (
 	Author,
 	BlogIndexPage,
 	BlogPage,
+	BlogPageGalleryImage,
 	BlogTagIndexPage,
 	BLOG_INDEX_DEFAULT_SORT_PRIMARY,
 	BLOG_INDEX_DEFAULT_SORT_SECONDARY,
@@ -25,6 +26,7 @@ from blog.services.tag_listing import get_tag_index_context
 
 
 AUTHOR_POSTS_PER_PAGE = 10
+GALLERY_ITEMS_PER_PAGE = 8
 
 
 def get_client_ip(request):
@@ -531,6 +533,69 @@ def author_posts_api(request, pk):
 					author=author,
 					context=context,
 				),
+			},
+		}
+	)
+	response['Cache-Control'] = 'private, no-store'
+	return response
+
+
+def gallery_items_api(request, pk):
+	"""返回公开文章画廊的下一批图片片段；接口只读且每页固定八张。"""
+	if request.method != 'GET':
+		response = JsonResponse(
+			{
+				'ok': False,
+				'error': {
+					'code': 'method_not_allowed',
+					'message': '仅支持 GET 请求。',
+				},
+			},
+			status=405,
+		)
+		response['Allow'] = 'GET'
+		response['Cache-Control'] = 'private, no-store'
+		return response
+
+	page = BlogPage.objects.live().public().filter(pk=pk).first()
+	if page is None:
+		response = JsonResponse(
+			{
+				'ok': False,
+				'error': {
+					'code': 'blog_page_not_found',
+					'message': '未找到该博客文章。',
+				},
+			},
+			status=404,
+		)
+		response['Cache-Control'] = 'private, no-store'
+		return response
+
+	gallery = (
+		BlogPageGalleryImage.objects.filter(page=page)
+		.select_related('image')
+		.order_by('sort_order', 'pk')
+	)
+	paginator = Paginator(gallery, GALLERY_ITEMS_PER_PAGE)
+	page_obj = paginator.get_page(request.GET.get('page', 1))
+	gallery_offset = (page_obj.number - 1) * GALLERY_ITEMS_PER_PAGE
+	response = JsonResponse(
+		{
+			'ok': True,
+			'data': {
+				'html': render_to_string(
+					'blog/partials/_gallery_items.html',
+					{
+						'gallery_images': page_obj.object_list,
+						'gallery_offset': gallery_offset,
+					},
+					request=request,
+				),
+				'page': page_obj.number,
+				'loaded_count': min(page_obj.number * GALLERY_ITEMS_PER_PAGE, paginator.count),
+				'total': paginator.count,
+				'has_next': page_obj.has_next(),
 			},
 		}
 	)

@@ -12,7 +12,7 @@
 {% endblock %}
 
 {% block extra_css_after_site_theme %}
-    <link rel="stylesheet" href="{% static 'css/home-carousel.css' %}?v=20260824-1">
+    <link rel="stylesheet" href="{% static 'css/home-carousel.css' %}?v=20260825-1">
 {% endblock %}
 
 {% block page_vendor_js %}
@@ -22,6 +22,7 @@
 
 {% block extra_js %}
     <script src="{% static 'archive/js/archive.js' %}?v=20260726-4"></script>
+    <script src="{% static 'js/home-carousel.js' %}?v=20260825-1"></script>
 {% endblock %}
 
 {% block content %}
@@ -76,6 +77,12 @@
                 </div>
                 {% endfor %}
             {% endif %}
+        </div>
+        <div class="home-carousel-controls" aria-label="首页轮播控制">
+            <button type="button" class="home-carousel-toggle" data-home-carousel-toggle aria-pressed="false">
+                <i class="fa fa-pause" aria-hidden="true"></i>
+                <span>暂停轮播</span>
+            </button>
         </div>
     </div>
 </section>
@@ -146,11 +153,11 @@
 
                         {% for post in popular_posts %} {# 遍历最热的博客文章 #}
                         <!--News Block Two-->
-                        <div class="news-block-two masonry-item col-md-6 col-sm-6 col-xs-12">
+                        <div class="news-block-two masonry-item col-md-6 col-sm-6 col-xs-12{% if not post.featured_image %} news-block-two--no-image{% endif %}">
                             <div class="inner-box">
-                                <div class="image">
-                                    {% if post.featured_image %}
-                                        {# 性能优化: 这里的图片在首屏下方，必须开启 lazy loading #}
+                                {% if post.featured_image %}
+                                    <div class="image">
+                                        {# 有文章封面时使用原图作为卡片视觉区，无封面不生成默认占位图。 #}
                                         {% image post.featured_image fill-400x300 format-webp as post_img %}
                                         <img src="{{ post_img.url }}"
                                              alt="{{ post.title|inline_title_text }}"
@@ -159,11 +166,8 @@
                                              height="{{ post_img.height }}"
                                              decoding="async"
                                              class="transition-image" />
-                                    {% else %}
-                                        <img src="{% static 'gretzia/images/resource/news-7.jpg' %}" alt="{{ post.title|inline_title_text }}"
-                                             loading="lazy" decoding="async" width="400" height="300" />
-                                    {% endif %}
-                                </div>
+                                    </div>
+                                {% endif %}
                                 <div class="lower-content">
                                     {# 显示文章分类（如果有的话） #}
                                     {% if post.categories.first %}

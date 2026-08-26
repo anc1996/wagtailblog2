@@ -964,15 +964,69 @@ html {
 }
 /* ========== 评论区视觉与安全 Markdown 增强 ========== */
 .comment-box {
-    --comment-accent: #a66f3f;
-    --comment-accent-dark: #7f4f29;
-    --comment-border: #ddcfbe;
-    --comment-muted: #7b6d60;
+    /* 评论区使用独立语义变量，便于亮暗主题保持同一层级关系。 */
+    --comment-surface: var(--site-surface, #ffffff);
+    --comment-surface-soft: var(--site-surface-soft, #fbfaf8);
+    --comment-surface-subtle: var(--site-surface-warm, #f8f3ed);
+    --comment-text: var(--site-ink, #292724);
+    --comment-text-strong: var(--site-ink, #292724);
+    --comment-muted: var(--site-muted, #6f6b66);
+    --comment-faint: var(--site-faint, #96918b);
+    --comment-border: var(--site-border, #e5e3df);
+    --comment-border-strong: var(--site-border-strong, #d8d3cc);
+    --comment-accent: var(--site-primary, #a76035);
+    --comment-accent-dark: var(--site-primary-dark, #814423);
+    --comment-accent-soft: var(--site-primary-soft, #f2e5da);
+    --comment-info: var(--site-teal, #397d88);
+    --comment-info-soft: #e3f1ef;
+    --comment-success: var(--site-success, #3b805d);
+    --comment-success-soft: #dcefe2;
+    --comment-success-ink: #235338;
+    --comment-danger: var(--site-danger, #b85a5a);
+    --comment-danger-soft: #f8e1e1;
+    --comment-danger-ink: #7a3030;
+    --comment-warning-soft: #fff0a8;
+    --comment-warning-ink: #4b3d00;
+    --comment-code-surface: #18232d;
+    --comment-code-border: #293846;
+    --comment-code-ink: #e8edf1;
+    --comment-focus-ring: rgba(57, 125, 136, .28);
+    --comment-shadow-sm: 0 2px 8px rgba(40, 34, 28, .08);
+    --comment-shadow-md: 0 12px 30px rgba(40, 34, 28, .14);
     padding: clamp(20px, 3vw, 34px);
     border: 1px solid var(--comment-border);
     border-radius: 16px;
-    background: #fbf7f0;
+    background: var(--comment-surface-soft);
     box-shadow: 0 12px 34px rgba(73, 52, 34, 0.08);
+}
+
+:root[data-theme='dark'] .comment-box {
+    /* 深色主题降低边界亮度，保留暖棕品牌和青绿色交互提示。 */
+    --comment-surface: var(--site-surface, #211f1d);
+    --comment-surface-soft: var(--site-surface-soft, #282522);
+    --comment-surface-subtle: var(--site-surface-warm, #2d2824);
+    --comment-text: var(--site-ink, #e8e2db);
+    --comment-text-strong: #f4eee8;
+    --comment-muted: var(--site-muted, #b8afa6);
+    --comment-faint: var(--site-faint, #8f867e);
+    --comment-border: var(--site-border, #3b3631);
+    --comment-border-strong: var(--site-border-strong, #514941);
+    --comment-accent: var(--site-primary, #d39468);
+    --comment-accent-dark: var(--site-primary-dark, #e7ad84);
+    --comment-accent-soft: var(--site-primary-soft, #3b2d24);
+    --comment-info: var(--site-teal, #79aaa7);
+    --comment-info-soft: #253b3c;
+    --comment-success: var(--site-success, #78ad8d);
+    --comment-success-soft: #20382b;
+    --comment-success-ink: #bce1c8;
+    --comment-danger: var(--site-danger, #e18a82);
+    --comment-danger-soft: #482525;
+    --comment-danger-ink: #ffd0ca;
+    --comment-warning-soft: #4a3d19;
+    --comment-warning-ink: #f6e8a5;
+    --comment-focus-ring: rgba(121, 170, 167, .42);
+    --comment-shadow-sm: 0 2px 10px rgba(0, 0, 0, .24);
+    --comment-shadow-md: 0 12px 30px rgba(0, 0, 0, .36);
 }
 
 .comment-box h2 {
@@ -1495,4 +1549,222 @@ html {
     .comment-reply-form .author-image {
         display: none;
     }
+}
+
+/* ========== 亮暗主题状态覆盖 ========== */
+
+/* 动态状态也使用语义色，避免 AJAX 插入节点在深色主题中出现白底和低对比度文字。 */
+.comment-box .login-prompt,
+.comment-box .no-comments,
+.comment-box .comments-loading-indicator,
+.comment-box .replies-loading-indicator {
+    color: var(--comment-muted);
+    background: var(--comment-surface-subtle);
+    border-color: var(--comment-border);
+}
+
+.comment-box .login-prompt-icon,
+.comment-box .no-comments-icon,
+.comment-box .comments-loading-indicator .loading-spinner,
+.comment-box .replies-loading-indicator .loading-spinner-small {
+    color: var(--comment-info);
+}
+
+.comment-box .login-prompt-title,
+.comment-box h2,
+.comment-box .comment h3 {
+    color: var(--comment-text-strong);
+}
+
+.comment-box .comment-error-message,
+.comment-box .comment-success-message {
+    box-shadow: var(--comment-shadow-sm);
+}
+
+.comment-box .comment-error-message {
+    color: var(--comment-danger-ink);
+    background: var(--comment-danger-soft);
+    border-left-color: var(--comment-danger);
+}
+
+.comment-box .comment-success-message {
+    color: var(--comment-success-ink);
+    background: var(--comment-success-soft);
+    border-left-color: var(--comment-success);
+}
+
+.comment-box .edit-comment-form,
+.comment-box .comment-reply-form,
+.comment-box .active-reply-form {
+    color: var(--comment-text);
+    background: var(--comment-surface);
+    border-color: var(--comment-border);
+    box-shadow: var(--comment-shadow-sm);
+}
+
+.comment-box .comment-reply-form .form-control,
+.comment-box .edit-comment-form .edit-textarea,
+.comment-box .active-reply-form .form-control {
+    color: var(--comment-text);
+    background: var(--comment-surface-soft);
+    border-color: var(--comment-border-strong);
+    caret-color: var(--comment-accent);
+}
+
+.comment-box .comment-reply-form .form-control::placeholder,
+.comment-box .edit-comment-form .edit-textarea::placeholder,
+.comment-box .active-reply-form .form-control::placeholder {
+    color: var(--comment-faint);
+}
+
+.comment-box .comment-reply-form .form-control:focus,
+.comment-box .edit-comment-form .edit-textarea:focus,
+.comment-box .active-reply-form .form-control:focus {
+    border-color: var(--comment-info);
+    box-shadow: 0 0 0 3px var(--comment-focus-ring);
+}
+
+.comment-box .reply-to-info,
+.comment-box .active-reply-form .reply-to-info {
+    color: var(--comment-text);
+    background: var(--comment-info-soft);
+    border-color: var(--comment-info);
+}
+
+.comment-box .reply-to-info #cancel-reply,
+.comment-box .active-reply-form .reply-to-info #cancel-reply {
+    color: var(--comment-danger);
+}
+
+.comment-box .reply-to-info #cancel-reply:hover,
+.comment-box .active-reply-form .reply-to-info #cancel-reply:hover {
+    color: var(--comment-danger-ink);
+    background: var(--comment-danger-soft);
+}
+
+.comment-box .comments-sort-area .sort-btn,
+.comment-box .show-replies-btn {
+    color: var(--comment-muted);
+    background: var(--comment-surface);
+    border-color: var(--comment-border-strong);
+}
+
+.comment-box .comments-sort-area .sort-btn:hover,
+.comment-box .comments-sort-area .sort-btn:focus-visible,
+.comment-box .show-replies-btn:hover,
+.comment-box .show-replies-btn:focus-visible {
+    color: var(--comment-accent-dark);
+    background: var(--comment-accent-soft);
+    border-color: var(--comment-accent);
+}
+
+.comment-box .comments-sort-area .sort-btn.active,
+.comment-box .theme-btn {
+    color: var(--comment-surface);
+    background: var(--comment-accent);
+    border-color: var(--comment-accent);
+}
+
+.comment-box .comments-sort-area .sort-btn.active:hover,
+.comment-box .theme-btn:hover {
+    color: var(--comment-surface);
+    background: var(--comment-accent-dark);
+    border-color: var(--comment-accent-dark);
+}
+
+.comment-box .theme-btn-small {
+    color: var(--comment-surface);
+    background: var(--comment-muted);
+    border-color: var(--comment-muted);
+}
+
+.comment-box .theme-btn-small:hover,
+.comment-box .theme-btn-small:focus-visible {
+    color: var(--comment-surface);
+    background: var(--comment-text);
+    border-color: var(--comment-text);
+}
+
+.comment-box .comment-markdown-toolbar {
+    color: var(--comment-text);
+    background: var(--comment-surface-subtle);
+    border-color: var(--comment-border-strong);
+}
+
+.comment-box .comment-markdown-toolbar button {
+    color: var(--comment-muted);
+}
+
+.comment-box .comment-markdown-toolbar button:hover,
+.comment-box .comment-markdown-toolbar button:focus-visible,
+.comment-box .comment-markdown-toolbar button[aria-expanded="true"] {
+    color: var(--comment-accent-dark);
+    background: var(--comment-accent-soft);
+    border-color: var(--comment-border-strong);
+}
+
+.comment-box .comment-markdown-toolbar button:focus-visible {
+    outline-color: var(--comment-focus-ring);
+}
+
+.comment-box .comment-markdown-toolbar .comment-toolbar-divider {
+    background: var(--comment-border-strong);
+}
+
+.comment-box .comment-markdown-toolbar .comment-formula-toggle {
+    color: var(--comment-info);
+}
+
+.comment-box .comment-markdown-toolbar .comment-formula-toggle:hover,
+.comment-box .comment-markdown-toolbar .comment-formula-toggle:focus-visible,
+.comment-box .comment-markdown-toolbar .comment-formula-toggle[aria-expanded="true"] {
+    color: var(--comment-info);
+    background: var(--comment-info-soft);
+}
+
+.comment-box .comment-formula-picker,
+.comment-box .comment-emoji-picker {
+    color: var(--comment-text);
+    background: var(--comment-surface);
+    border-color: var(--comment-border-strong);
+    box-shadow: var(--comment-shadow-md);
+}
+
+.comment-box .comment-markdown-toolbar .comment-formula-tabs button {
+    color: var(--comment-muted);
+}
+
+.comment-box .comment-markdown-toolbar .comment-formula-tabs button[aria-selected="true"] {
+    color: var(--comment-info);
+    background: var(--comment-info-soft);
+    border-color: var(--comment-info);
+}
+
+.comment-box .comment-markdown-toolbar .comment-formula-grid button {
+    color: var(--comment-text);
+    background: var(--comment-surface-soft);
+    border-color: var(--comment-border);
+}
+
+.comment-box .comment-markdown-toolbar .comment-formula-grid button span {
+    color: var(--comment-text-strong);
+}
+
+.comment-box .comment-markdown-toolbar .comment-formula-grid button small {
+    color: var(--comment-muted);
+}
+
+.comment-box .comment-markdown-toolbar .comment-formula-grid button:hover,
+.comment-box .comment-markdown-toolbar .comment-formula-grid button:focus-visible {
+    background: var(--comment-info-soft);
+    border-color: var(--comment-info);
+}
+
+.comment-box .comment-emoji-picker button {
+    background: transparent;
+}
+
+.comment-box .comment-emoji-picker button:hover,
+.comment-box .comment-emoji-picker button:focus-visible {
+    background: var(--comment-accent-soft);
 }

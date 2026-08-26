@@ -11,19 +11,19 @@
     {% if has_image or has_gallery %}{% include "includes/content/image_viewer_css.html" %}{% endif %}
 
     <link rel="stylesheet" href="{% static 'blog/css/github-markdown.min.css' %}">
-    <link rel="stylesheet" href="{% static 'blog/css/markdown-theme.css' %}?v=20260818-1">
+    <link rel="stylesheet" href="{% static 'blog/css/markdown-theme.css' %}?v=20260825-1">
     <link rel="stylesheet" href="{% static 'blog/css/rich-text-theme.css' %}?v=20260804-1">
 
     <link rel="stylesheet" href="{% static 'vendor/katex/katex.min.css' %}?v=20260728-1">
 
     {# 评论支持代码围栏，因此评论区存在时也按需启用公共代码高亮能力。 #}
     {% include "includes/content/code_highlighting_css.html" %}
-    {% if has_gallery %}<link rel="stylesheet" href="{% static 'blog/css/blog-gallery.css' %}?v=20260726-2">{% endif %}
+    {% if has_gallery %}<link rel="stylesheet" href="{% static 'blog/css/blog-gallery.css' %}?v=20260826-4">{% endif %}
     {% if has_video or has_audio %}
         <link rel="stylesheet" href="{% static 'vendor/plyr/plyr.css' %}?v=3.7.8">
     {% endif %}
     {% if has_video %}
-        <link rel="stylesheet" href="{% static 'blog/css/video_blocks.css' %}?v=20260801-1">
+        <link rel="stylesheet" href="{% static 'blog/css/video_blocks.css' %}?v=20260826-1">
     {% endif %}
     {% if has_audio %}<link rel="stylesheet" href="{% static 'blog/css/audio_blocks.css' %}">{% endif %}
     {% if has_embed %}<link rel="stylesheet" href="{% static 'blog/css/embed_blocks.css' %}?v=20260801-1">{% endif %}
@@ -254,10 +254,15 @@
         </div>
 
         {% with gallery_images=page.gallery_images.all %}
-            {% if gallery_images %}
+            {% with gallery_total=gallery_images|length %}
+            {% if gallery_total %}
+                {% url 'blog:gallery_items_api' page.pk as gallery_api_url %}
                 <section class="blog-gallery"
                          data-gallery-batch-size="8"
-                         data-gallery-total="{{ gallery_images|length }}"
+                         data-gallery-total="{{ gallery_total }}"
+                         data-gallery-count="{{ gallery_total }}"
+                         data-gallery-api-url="{{ gallery_api_url }}"
+                         data-gallery-page="1"
                          data-content-image-gallery
                          aria-labelledby="blog-gallery-title">
                     <div class="blog-gallery-header">
@@ -265,38 +270,12 @@
                             <span class="blog-gallery-kicker">IMAGE GALLERY</span>
                             <h2 id="blog-gallery-title"><i class="fa fa-images" aria-hidden="true"></i> 图片画廊</h2>
                         </div>
-                        <span class="blog-gallery-count">{{ gallery_images|length }} 张图片</span>
+                        <span class="blog-gallery-count">{{ gallery_total }} 张图片</span>
                     </div>
                     <div class="gallery-grid">
-                        {% for gallery_image in gallery_images %}
-                            {% image gallery_image.image fill-640x400 format-webp as gallery_thumb %}
-                            {% image gallery_image.image width-640 format-webp as gallery_medium %}
-                            {% image gallery_image.image width-1280 format-webp as gallery_large %}
-                            <figure class="gallery-item" data-gallery-index="{{ forloop.counter0 }}">
-                                <a class="gallery-link"
-                                   href="{% image_url gallery_image.image 'original' %}"
-                                   data-pswp-item
-                                   data-pswp-width="{{ gallery_image.image.width }}"
-                                   data-pswp-height="{{ gallery_image.image.height }}"
-                                   data-pswp-srcset="{{ gallery_medium.url }} {{ gallery_medium.width }}w{% if gallery_large.width != gallery_medium.width %}, {{ gallery_large.url }} {{ gallery_large.width }}w{% endif %}"
-                                   data-pswp-caption="{% if gallery_image.caption %}{{ gallery_image.caption }}{% else %}{{ gallery_image.image.title }}{% endif %}"
-                                   aria-label="查看大图：{% if gallery_image.caption %}{{ gallery_image.caption }}{% else %}{{ gallery_image.image.title }}{% endif %}">
-                                    <img src="{{ gallery_thumb.url }}"
-                                         alt="{% if gallery_image.caption %}{{ gallery_image.caption }}{% else %}{{ gallery_image.image.title }}{% endif %}"
-                                         width="{{ gallery_thumb.width }}"
-                                         height="{{ gallery_thumb.height }}"
-                                         loading="lazy"
-                                         decoding="async">
-                                    <span class="gallery-zoom" aria-hidden="true"><i class="fa fa-search-plus"></i></span>
-                                    <span class="gallery-number" aria-hidden="true">{{ forloop.counter|stringformat:"02d" }}</span>
-                                </a>
-                                {% if gallery_image.caption %}
-                                    <figcaption>{{ gallery_image.caption }}</figcaption>
-                                {% endif %}
-                            </figure>
-                        {% endfor %}
+                        {% include "blog/partials/_gallery_items.html" with gallery_images=gallery_images|slice:":8" gallery_offset=0 %}
                     </div>
-                    {% if gallery_images|length > 8 %}
+                    {% if gallery_total > 8 %}
                         <div class="blog-gallery-controls">
                             <button class="blog-gallery-toggle"
                                     type="button"
@@ -309,6 +288,7 @@
                     {% endif %}
                 </section>
             {% endif %}
+            {% endwith %}
         {% endwith %}
 
         {% if page.pk %}
@@ -347,7 +327,7 @@
 
     {% include "includes/content/article_reading_js.html" %}
     {% if has_image or has_gallery %}{% include "includes/content/image_viewer_js.html" %}{% endif %}
-    {% if has_gallery %}<script src="{% static 'blog/js/blog-gallery.js' %}?v=20260726-1" defer></script>{% endif %}
+    {% if has_gallery %}<script src="{% static 'blog/js/blog-gallery.js' %}?v=20260826-1" defer></script>{% endif %}
     {% if has_video or has_audio %}
         <script src="{% static 'vendor/plyr/plyr.min.js' %}?v=3.7.8" defer></script>
     {% endif %}

@@ -93,3 +93,14 @@ code.highlight:not(pre code),
 .markdown-body th .arithmatex .katex-display {
     margin: 0.35rem 0;
 }
+
+/* KaTeX 使用正文前景色，避免系统媒体查询把手动白天主题的公式染成浅色。 */
+.markdown-body .katex,
+.markdown-body .katex-display {
+    color: var(--site-ink, #24292e);
+}
+
+:root[data-theme='dark'] .markdown-body .katex,
+:root[data-theme='dark'] .markdown-body .katex-display {
+    color: var(--site-ink, #e8e2db);
+}

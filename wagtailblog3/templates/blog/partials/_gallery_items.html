@@ -1,0 +1,28 @@
+{% load wagtailimages_tags %}
+{% for gallery_image in gallery_images %}
+    {% image gallery_image.image width-640 format-webp as gallery_thumb %}
+    {% image gallery_image.image width-640 format-webp as gallery_medium %}
+    {% image gallery_image.image width-1280 format-webp as gallery_large %}
+    <figure class="gallery-item" data-gallery-index="{{ forloop.counter0|add:gallery_offset }}">
+        <a class="gallery-link"
+           href="{% image_url gallery_image.image 'original' %}"
+           data-pswp-item
+           data-pswp-width="{{ gallery_image.image.width }}"
+           data-pswp-height="{{ gallery_image.image.height }}"
+           data-pswp-srcset="{{ gallery_medium.url }} {{ gallery_medium.width }}w{% if gallery_large.width != gallery_medium.width %}, {{ gallery_large.url }} {{ gallery_large.width }}w{% endif %}"
+           data-pswp-caption="{% if gallery_image.caption %}{{ gallery_image.caption }}{% else %}{{ gallery_image.image.title }}{% endif %}"
+           aria-label="查看大图：{% if gallery_image.caption %}{{ gallery_image.caption }}{% else %}{{ gallery_image.image.title }}{% endif %}">
+            <img src="{{ gallery_thumb.url }}"
+                 alt="{% if gallery_image.caption %}{{ gallery_image.caption }}{% else %}{{ gallery_image.image.title }}{% endif %}"
+                 width="{{ gallery_thumb.width }}"
+                 height="{{ gallery_thumb.height }}"
+                 loading="lazy"
+                 decoding="async">
+            <span class="gallery-zoom" aria-hidden="true"><i class="fa fa-search-plus"></i></span>
+            <span class="gallery-number" aria-hidden="true">{{ forloop.counter0|add:gallery_offset|add:1|stringformat:"02d" }}</span>
+        </a>
+        {% if gallery_image.caption %}
+            <figcaption>{{ gallery_image.caption }}</figcaption>
+        {% endif %}
+    </figure>
+{% endfor %}

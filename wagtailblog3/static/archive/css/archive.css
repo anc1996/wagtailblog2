@@ -756,6 +756,191 @@
     }
 }
 
+/* 归档页独立加载本样式，主题文件不会覆盖其浅色默认值。 */
+:root[data-theme='dark'] .archive-list-page {
+    color: #e8e2db;
+}
+
+:root[data-theme='dark'] .archive-list-page .archive-list-page,
+:root[data-theme='dark'] .archive-list-page .blog-search-filter,
+:root[data-theme='dark'] .archive-list-page .blog-item,
+:root[data-theme='dark'] .archive-list-page .archive-pagination {
+    background: #211f1d;
+    border-color: #3b3631;
+    box-shadow: none;
+}
+
+:root[data-theme='dark'] .archive-list-page header h1,
+:root[data-theme='dark'] .archive-list-page .blog-item h3 a,
+:root[data-theme='dark'] .archive-list-page .archive-search-heading h2 {
+    color: #e8e2db;
+}
+
+:root[data-theme='dark'] .archive-list-page header .lead,
+:root[data-theme='dark'] .archive-list-page .archive-result-total,
+:root[data-theme='dark'] .archive-list-page .archive-search-heading p,
+:root[data-theme='dark'] .archive-list-page .archive-post-intro,
+:root[data-theme='dark'] .archive-list-page .archive-post-meta,
+:root[data-theme='dark'] .archive-list-page .archive-page-info,
+:root[data-theme='dark'] .archive-list-page .archive-jump-form,
+:root[data-theme='dark'] .archive-list-page .archive-async-status {
+    color: #b8afa6;
+}
+
+:root[data-theme='dark'] .archive-list-page .blog-search-filter {
+    background: linear-gradient(135deg, #23211f 0%, #292521 100%);
+}
+
+:root[data-theme='dark'] .archive-list-page .archive-search-icon {
+    color: #e2a77e;
+    background: rgba(211, 148, 104, .12);
+    border-color: rgba(211, 148, 104, .28);
+}
+
+:root[data-theme='dark'] .archive-list-page .search-input,
+:root[data-theme='dark'] .archive-list-page .archive-jump-form input {
+    color: #e8e2db;
+    background: #1c1b19;
+    border-color: #514941;
+}
+
+:root[data-theme='dark'] .archive-list-page .search-input::placeholder {
+    color: #8f867e;
+}
+
+:root[data-theme='dark'] .archive-list-page .archive-post-date,
+:root[data-theme='dark'] .archive-list-page .view-stats-today,
+:root[data-theme='dark'] .archive-list-page .reaction-count,
+:root[data-theme='dark'] .archive-list-page .tag {
+    color: #b8afa6;
+    background: #2a2724;
+    border-color: #3b3631;
+}
+
+:root[data-theme='dark'] .archive-list-page .view-stats-total {
+    color: #e2a77e;
+    background: rgba(211, 148, 104, .11);
+    border-color: rgba(211, 148, 104, .28);
+}
+
+:root[data-theme='dark'] .archive-list-page .view-stats strong,
+:root[data-theme='dark'] .archive-list-page .reaction-count strong {
+    color: #e0d8d0;
+}
+
+:root[data-theme='dark'] .archive-list-page .tags {
+    border-color: #493f37;
+}
+
+:root[data-theme='dark'] .archive-list-page .archive-page-button,
+:root[data-theme='dark'] .archive-list-page .archive-jump-form button {
+    color: #c6bcb3;
+    background: #292622;
+    border-color: #514941;
+}
+
+:root[data-theme='dark'] .archive-list-page .archive-page-number {
+    color: #c6bcb3;
+    background: #1c1b19;
+    border-color: #3b3631;
+}
+
+:root[data-theme='dark'] .archive-list-page .archive-page-number.is-current,
+:root[data-theme='dark'] .archive-list-page .archive-page-button:hover,
+:root[data-theme='dark'] .archive-list-page .archive-page-button:focus,
+:root[data-theme='dark'] .archive-list-page .archive-jump-form button:hover,
+:root[data-theme='dark'] .archive-list-page .archive-jump-form button:focus {
+    color: #211f1d;
+    background: #d39468;
+    border-color: #d39468;
+}
+
+:root[data-theme='dark'] .archive-list-page .blog-item h3 a:hover,
+:root[data-theme='dark'] .archive-list-page .blog-item h3 a:focus,
+:root[data-theme='dark'] .archive-list-page a.tag:hover,
+:root[data-theme='dark'] .archive-list-page a.tag:focus {
+    color: #e7ad84;
+}
+
+:root[data-theme='dark'] .archive-page .archive-tree {
+    color: #b8afa6;
+    background: #1d1c1a;
+    border-color: #3b3631;
+    box-shadow: none;
+}
+
+:root[data-theme='dark'] .archive-page .archive-summary {
+    background: linear-gradient(135deg, #302923 0%, #292521 100%);
+    border-color: #493f37;
+}
+
+:root[data-theme='dark'] .archive-page .archive-summary-text strong {
+    color: #e4aa80;
+}
+
+:root[data-theme='dark'] .archive-page .archive-summary-text small,
+:root[data-theme='dark'] .archive-page .months-grid-hint,
+:root[data-theme='dark'] .archive-page .archive-empty {
+    color: #a99f96;
+}
+
+:root[data-theme='dark'] .archive-page .archive-year-item {
+    border-color: #38332f;
+}
+
+:root[data-theme='dark'] .archive-page .archive-tree .year-link {
+    color: #c7bdb4;
+}
+
+:root[data-theme='dark'] .archive-page .archive-tree .year-link:hover,
+:root[data-theme='dark'] .archive-page .archive-tree .year-link:focus {
+    color: #edb58d;
+    background: #332b25;
+}
+
+:root[data-theme='dark'] .archive-page .archive-count-badge {
+    color: #d5a27c;
+    background: #3a3028;
+}
+
+:root[data-theme='dark'] .archive-page .archive-tree .month-toggle {
+    color: #c89a77;
+    border-left-color: #403a35;
+}
+
+:root[data-theme='dark'] .archive-page .archive-tree .months-panel {
+    background: #242220;
+    border-color: #4a4038;
+}
+
+:root[data-theme='dark'] .archive-page .archive-tree .month-cell.has-posts {
+    color: #ddb08c;
+    background: #362d26;
+    border-color: #654a38;
+    box-shadow: none;
+}
+
+:root[data-theme='dark'] .archive-page .archive-tree .month-cell.is-empty {
+    color: #817a73;
+    background: #282624;
+    border-color: #37332f;
+}
+
+:root[data-theme='dark'] .archive-page .archive-more-toggle {
+    color: #cba07e;
+    background: #2d2925;
+    border-color: #493f37;
+}
+
+.archive-list-page a:focus-visible,
+.archive-list-page button:focus-visible,
+.archive-list-page input:focus-visible,
+.archive-page .archive-tree a:focus-visible,
+.archive-page .archive-tree button:focus-visible {
+    outline: 3px solid rgba(197, 138, 66, .8);
+    outline-offset: 3px;
+}
+
 /* 归档列表分页：支持直接选择页码和快速跳转 */
 .archive-pagination {
     margin: 24px 0 8px;

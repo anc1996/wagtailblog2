@@ -33,12 +33,13 @@
                                 type="button"
                                 data-site-theme-toggle
                                 aria-haspopup="menu"
+                                aria-controls="site-theme-menu-header"
                                 aria-expanded="false"
                                 aria-label="阅读主题：跟随系统"
                                 title="阅读主题：跟随系统">
                             <i class="fa fa-adjust" aria-hidden="true"></i>
                         </button>
-                        <div class="site-theme-menu" data-site-theme-menu role="menu" aria-label="选择阅读主题" hidden>
+                        <div id="site-theme-menu-header" class="site-theme-menu" data-site-theme-menu role="menu" aria-label="选择阅读主题" hidden>
                             <button type="button" role="menuitemradio" aria-checked="true" data-site-theme-option="auto">
                                 <i class="fa fa-adjust" aria-hidden="true"></i><span>跟随系统</span>
                             </button>
@@ -61,7 +62,8 @@
                                             {# 使用 Wagtail 的搜索 URL 反向解析 #}
                                             {# 添加 CSRF 令牌以保护表单 #}
                                             <div class="form-group">
-                                                <input type="search" name="query" type="text" value="" placeholder="Search Here" required="">
+                                                <label class="sr-only" for="site-header-search">搜索站内文章</label>
+                                                <input id="site-header-search" type="search" name="query" value="" placeholder="Search Here" required>
                                                 <button type="submit" aria-label="提交搜索"><span class="icon fa fa-search"></span></button>
                                             </div>
                                         </form>

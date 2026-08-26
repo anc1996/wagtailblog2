@@ -273,23 +273,24 @@
 }
 
 /* ==================== 深色模式适配 ==================== */
+/* 仅在主题脚本尚未设置 data-theme 时跟随系统，避免覆盖用户的手动选择。 */
 @media (prefers-color-scheme: dark) {
-    .gretzia-video-preview,
-    .gretzia-video-caption {
+    :root:not([data-theme]) .gretzia-video-preview,
+    :root:not([data-theme]) .gretzia-video-caption {
         background: #2d3748;
         box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
     }
 
-    .gretzia-video-caption {
+    :root:not([data-theme]) .gretzia-video-caption {
         color: #a0aec0;
         border-top-color: #4a5568;
     }
 
-    .gretzia-video-preview:hover .gretzia-video-caption {
+    :root:not([data-theme]) .gretzia-video-preview:hover .gretzia-video-caption {
         color: #cbd5e0;
     }
 
-    .gretzia-video-placeholder {
+    :root:not([data-theme]) .gretzia-video-placeholder {
         background: #2d3748;
         border-color: #4a5568;
         color: #a0aec0;
@@ -299,6 +300,16 @@
 /* ==================== Blog video theme ==================== */
 
 :root {
+    --blog-video-bg: var(--site-surface-soft, #f8f3ed);
+    --blog-video-panel: var(--site-surface, #ffffff);
+    --blog-video-border: var(--site-border, #e5e3df);
+    --blog-video-accent: var(--site-primary, #a76035);
+    --blog-video-accent-strong: var(--site-primary-soft, #f2e5da);
+    --blog-video-text: var(--site-ink, #292724);
+    --blog-video-muted: var(--site-muted, #6f6b66);
+}
+
+:root[data-theme='dark'] {
     --blog-video-bg: #111214;
     --blog-video-panel: #1b1c20;
     --blog-video-border: rgba(232, 197, 150, 0.2);
@@ -427,7 +438,11 @@
 .blog-video__collapse:focus-visible {
     color: #171513;
     background: var(--blog-video-accent-strong);
-    outline: none;
+}
+
+.blog-video__collapse:focus-visible {
+    outline: 2px solid var(--blog-video-accent);
+    outline-offset: 2px;
 }
 
 .blog-video--collapsed .blog-video__stage {
@@ -441,7 +456,7 @@
 .blog-video .plyr {
     --plyr-color-main: var(--blog-video-accent);
     --plyr-video-background: var(--blog-video-bg);
-    --plyr-menu-background: #202126;
+    --plyr-menu-background: var(--blog-video-panel);
     --plyr-menu-color: var(--blog-video-text);
     --plyr-control-icon-size: 16px;
     width: 100%;
@@ -558,7 +573,11 @@
 .blog-video__expand:focus-visible {
     color: #171513;
     background: var(--blog-video-accent-strong);
-    outline: none;
+}
+
+.blog-video__expand:focus-visible {
+    outline: 2px solid var(--blog-video-accent);
+    outline-offset: 2px;
 }
 
 .blog-video-dialog {
@@ -619,7 +638,11 @@
 .blog-video-dialog__close:focus-visible {
     color: #171513;
     background: var(--blog-video-accent-strong);
-    outline: none;
+}
+
+.blog-video-dialog__close:focus-visible {
+    outline: 2px solid var(--blog-video-accent);
+    outline-offset: 2px;
 }
 
 .blog-video-dialog__player,
@@ -630,7 +653,7 @@
 .blog-video-dialog .plyr {
     --plyr-color-main: var(--blog-video-accent);
     --plyr-video-background: var(--blog-video-bg);
-    --plyr-menu-background: #202126;
+    --plyr-menu-background: var(--blog-video-panel);
     --plyr-menu-color: var(--blog-video-text);
     background: var(--blog-video-bg);
 }

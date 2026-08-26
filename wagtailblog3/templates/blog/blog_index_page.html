@@ -8,12 +8,12 @@
     <link href="{% static 'gretzia/css/animate.css' %}" rel="stylesheet">
     <link rel="stylesheet" href="{% static 'archive/css/archive.css' %}?v=20260726-4">
     <link rel="stylesheet" href="{% static 'blog/css/blog.css' %}?v=20260726-1">
-    <link rel="stylesheet" href="{% static 'blog/css/blog-index.css' %}?v=20260807-1">
+    <link rel="stylesheet" href="{% static 'blog/css/blog-index.css' %}?v=20260825-4">
 {% endblock %}
 
 {% block extra_css_after_site_theme %}
     {# Restore the index page's established editorial layout after shared theme overrides. #}
-    <link rel="stylesheet" href="{% static 'blog/css/blog-index.css' %}?v=20260807-1">
+    <link rel="stylesheet" href="{% static 'blog/css/blog-index.css' %}?v=20260825-4">
 {% endblock %}
 
 {% block page_vendor_js %}
@@ -29,15 +29,11 @@
                     <section class="page-intro-section" aria-labelledby="blog-index-title">
                         {% if page.featured_image %}
                             <figure class="page-intro-image wow fadeInRight" data-wow-delay="0ms" data-wow-duration="1000ms">
-                                {% image page.featured_image width-800 as feat_img %}
+                                {# 索引头图显示宽度约 300-390px，使用接近展示尺寸的缩略图避免下载过大的原图。 #}
+                                {% image page.featured_image width-420 as feat_img %}
                                 <img src="{{ feat_img.url }}" alt="{{ feat_img.alt|default:page.title }}"
                                      width="{{ feat_img.width }}" height="{{ feat_img.height }}"
                                      loading="eager" fetchpriority="high" decoding="async" />
-                            </figure>
-                        {% else %}
-                            <figure class="page-intro-image page-intro-image--fallback">
-                                <img src="{% static 'gretzia/images/resource/news-24.jpg' %}" alt="{{ page.title }}"
-                                     width="800" height="450" loading="eager" fetchpriority="high" decoding="async" />
                             </figure>
                         {% endif %}
 

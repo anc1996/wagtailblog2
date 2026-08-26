@@ -1,9 +1,6 @@
 /* Author detail additions. Shared article cards and pagination come from blog-index.css. */
 .author-detail-page .author-profile {
-    display: grid;
-    grid-template-columns: 150px minmax(0, 1fr);
-    align-items: start;
-    gap: 30px;
+    display: flow-root;
     margin-bottom: 38px;
     padding: 30px;
     border: 1px solid var(--index-border);
@@ -13,9 +10,10 @@
 }
 
 .author-detail-page .author-profile-image {
+    float: left;
     width: 150px;
     height: 150px;
-    margin: 0;
+    margin: 0 30px 22px 0;
     overflow: hidden;
     border: 1px solid var(--index-border-strong);
     border-radius: 50%;
@@ -88,8 +86,9 @@
 
 .author-detail-page .author-profile-bio {
     color: #514b46;
-    font-size: 15px;
-    line-height: 1.8;
+    font-family: 'Lato', sans-serif;
+    font-size: 16px;
+    line-height: 1.85;
 }
 
 .author-detail-page .author-profile-bio p {
@@ -98,6 +97,30 @@
 
 .author-detail-page .author-profile-bio p:last-child {
     margin-bottom: 0;
+}
+
+.author-detail-page .author-profile-bio h2,
+.author-detail-page .author-profile-bio h3 {
+    margin: 20px 0 8px;
+    color: var(--index-ink);
+    font-family: 'Playfair Display', serif;
+    font-weight: 600;
+    line-height: 1.25;
+}
+
+.author-detail-page .author-profile-bio h2 {
+    font-size: 30px;
+}
+
+.author-detail-page .author-profile-bio h3 {
+    font-size: 24px;
+}
+
+.author-detail-page .author-profile-bio a {
+    color: var(--index-accent-dark);
+    text-decoration: underline;
+    text-decoration-color: rgba(186, 109, 60, 0.45);
+    text-underline-offset: 2px;
 }
 
 .author-detail-page .blog-list-heading-row h2 {
@@ -351,15 +374,13 @@
 
 @media (max-width: 767px) {
     .author-detail-page .author-profile {
-        grid-template-columns: 112px minmax(0, 1fr);
-        align-items: start;
-        gap: 22px;
         padding: 24px;
     }
 
     .author-detail-page .author-profile-image {
         width: 112px;
         height: 112px;
+        margin-right: 22px;
     }
 
     .author-detail-page .author-profile h1 {
@@ -369,9 +390,6 @@
 
 @media (max-width: 575px) {
     .author-detail-page .author-profile {
-        grid-template-columns: 1fr;
-        justify-items: center;
-        gap: 18px;
         margin-bottom: 30px;
         padding: 21px 19px 23px;
         border-radius: 13px;
@@ -380,6 +398,11 @@
 
     .author-detail-page .author-profile-content {
         width: 100%;
+    }
+
+    .author-detail-page .author-profile-image {
+        float: none;
+        margin: 0 auto 18px;
     }
 
     .author-detail-page .author-profile-meta {
@@ -421,5 +444,284 @@
 
     .author-detail-page .author-post-async-status.is-loading::before {
         animation: none;
+    }
+}
+
+/* 作者卡片采用“标题-媒体/正文”层级，避免窄内容栏把标题和元信息挤在右栏。 */
+.author-detail-page .author-post-card {
+    grid-template-columns: minmax(190px, 31%) minmax(0, 1fr);
+    grid-template-areas:
+        'heading heading'
+        'meta meta'
+        'media content';
+    column-gap: 22px;
+    row-gap: 0;
+    margin: 0;
+    padding: 0;
+    border-top: 0;
+}
+
+.author-detail-page .author-post-card-heading {
+    grid-area: heading;
+    min-width: 0;
+    padding: 25px 26px 14px;
+}
+
+.author-detail-page .author-post-card-heading .post-card-title {
+    margin: 0;
+    color: var(--index-ink);
+    font-family: 'Playfair Display', serif;
+    font-size: 24px;
+    font-weight: 600;
+    line-height: 1.3;
+    overflow-wrap: anywhere;
+}
+
+.author-detail-page .author-post-card-media {
+    display: flex;
+    grid-area: media;
+    min-width: 0;
+    align-self: start;
+    padding: 0 0 24px 26px;
+    flex-direction: column;
+}
+
+.author-detail-page .author-post-card .post-card-image,
+.author-detail-page .author-post-card .post-card-image--actual {
+    display: block;
+    align-self: start;
+    height: auto;
+    min-height: 0;
+    aspect-ratio: auto;
+    border-radius: 12px;
+}
+
+.author-detail-page .author-post-card .post-card-image img,
+.author-detail-page .author-post-card .post-card-image--actual img {
+    display: block;
+    width: 100%;
+    height: auto;
+    min-height: 0;
+    aspect-ratio: auto;
+    object-fit: contain;
+    object-position: center;
+}
+
+.author-detail-page .author-post-card-content {
+    grid-area: content;
+    min-width: 0;
+    padding: 0 26px 24px 0;
+}
+
+.author-detail-page .author-post-card-meta {
+    grid-area: meta;
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 12px;
+    margin: 0;
+    padding: 0 26px 16px;
+}
+
+.author-detail-page .author-post-card-meta .post-tags-row {
+    display: flex;
+    flex: 0 0 auto;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    border-top: 0;
+}
+
+.author-detail-page .author-post-card-meta .post-meta-info {
+    display: flex;
+    min-width: 0;
+    margin: 0;
+}
+
+.author-detail-page .author-post-card-date-row {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 14px;
+}
+
+.author-detail-page .author-post-card-view-stats {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 7px;
+    color: inherit;
+    font-size: 13px;
+}
+
+.author-detail-page .author-post-card-view-stats > span {
+    display: inline-flex;
+    min-height: 29px;
+    align-items: center;
+    white-space: nowrap;
+    border-radius: 999px;
+}
+
+.author-detail-page .author-post-card-view-stats .view-stats-total {
+    gap: 6px;
+    padding: 4px 10px 4px 6px;
+    border: 1px solid rgba(186, 109, 60, 0.22);
+    background: rgba(186, 109, 60, 0.08);
+    color: var(--index-accent-dark);
+    font-weight: 600;
+}
+
+.author-detail-page .author-post-card-view-stats .view-stats-total > i {
+    display: inline-flex;
+    width: 19px;
+    height: 19px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: var(--index-accent);
+    color: #fff;
+    font-size: 11px;
+}
+
+.author-detail-page .author-post-card-view-stats .view-stats-today {
+    padding: 4px 9px;
+    border: 1px solid var(--index-border);
+    background: rgba(250, 248, 245, 0.7);
+    color: #77716c;
+}
+
+.author-detail-page .author-post-card-view-stats .view-stats-today strong {
+    margin-left: 4px;
+    color: #514b46;
+    font-weight: 700;
+}
+
+:root[data-theme='dark'] .author-detail-page .author-post-card-view-stats .view-stats-today {
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--index-muted);
+}
+
+:root[data-theme='dark'] .author-detail-page .author-post-card-view-stats .view-stats-today strong {
+    color: var(--index-ink);
+}
+
+.author-detail-page .author-post-card-meta--has-tags .author-post-card-date {
+    padding-top: 0;
+    border-top: 0;
+}
+
+.author-detail-page .author-post-card-meta--has-tags .author-post-card-date-row {
+    padding-top: 12px;
+    border-top: 1px dashed rgba(186, 109, 60, 0.28);
+}
+
+.author-detail-page .author-post-card-link {
+    margin-top: 12px;
+}
+
+.author-detail-page .author-post-card-media .author-post-card-link {
+    align-self: flex-start;
+}
+
+.author-detail-page .author-post-card-summary-wide {
+    display: none;
+}
+
+.author-detail-page .author-post-card.post-list-item--no-image {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+        'heading'
+        'meta'
+        'content';
+}
+
+.author-detail-page .author-post-card.post-list-item--no-image .author-post-card-content {
+    padding: 0 26px 24px;
+}
+
+@media (max-width: 767px) {
+    .author-detail-page .author-post-card {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-areas:
+            'heading'
+            'meta'
+            'media'
+            'content';
+    }
+
+    .author-detail-page .author-post-card-heading {
+        padding: 22px 19px 13px;
+    }
+
+    .author-detail-page .author-post-card-media,
+    .author-detail-page .author-post-card-content {
+        padding-right: 19px;
+        padding-left: 19px;
+    }
+
+    .author-detail-page .author-post-card-meta {
+        padding-right: 19px;
+        padding-left: 19px;
+    }
+
+    .author-detail-page .author-post-card.post-list-item--no-image .author-post-card-content {
+        padding-right: 19px;
+        padding-left: 19px;
+    }
+
+    .author-detail-page .author-post-card.post-list-item--no-image {
+        grid-template-areas:
+            'heading'
+            'meta'
+            'content';
+    }
+}
+
+@media (max-width: 575px) {
+    .author-detail-page .author-post-card-heading .post-card-title {
+        font-size: 22px;
+    }
+
+    .author-detail-page .author-post-card-media {
+        padding-bottom: 20px;
+    }
+}
+
+/* 超宽桌面让简介环绕封面，自然填补图片下方的空白区域。 */
+@media (min-width: 1401px) {
+    .author-detail-page .author-post-card:not(.post-list-item--no-image) {
+        display: block;
+        overflow: hidden;
+    }
+
+    .author-detail-page .author-post-card:not(.post-list-item--no-image)::after {
+        display: table;
+        clear: both;
+        content: '';
+    }
+
+    .author-detail-page .author-post-card:not(.post-list-item--no-image) .author-post-card-heading {
+        display: block;
+    }
+
+    .author-detail-page .author-post-card:not(.post-list-item--no-image) .author-post-card-media {
+        float: left;
+        width: 31%;
+        margin: 0 22px 0 26px;
+        padding: 0 0 24px;
+    }
+
+    .author-detail-page .author-post-card:not(.post-list-item--no-image) .author-post-card-content {
+        display: block;
+        padding: 0 26px 24px 0;
+    }
+
+    .author-detail-page .author-post-card-summary-compact {
+        display: none;
+    }
+
+    .author-detail-page .author-post-card-summary-wide {
+        display: block;
     }
 }

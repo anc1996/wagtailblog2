@@ -18,10 +18,21 @@ from wagtail.admin.auth import require_admin_access
 from wagtail.images import get_image_model
 from wagtail.images.formats import get_image_format
 from wagtail.images.forms import get_image_form
-from wagtail.images.permissions import permission_policy
+from wagtail.permissions import policy_registry
 
 
 logger = logging.getLogger(__name__)
+
+
+class _ImagePermissionPolicyProxy:
+    """延迟读取图片权限策略，避免 Wagtail 8 应用初始化阶段访问注册表。"""
+
+    def __getattr__(self, name: str) -> Any:
+        policy = policy_registry.get_by_type(get_image_model())
+        return getattr(policy, name)
+
+
+permission_policy = _ImagePermissionPolicyProxy()
 
 
 def _error_response(

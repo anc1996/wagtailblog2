@@ -9,7 +9,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ('blog', '0006_alter_blogpage_options'),
-        ('wagtailcore', '0096_remove_searchpromotion_query_and_more'),
+        ('wagtailcore', '0096_referenceindex_referenceindex_source_object_and_more'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 

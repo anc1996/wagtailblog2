@@ -8,6 +8,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from wagtail.models import Page
+from wagtail.permissions import policy_registry
 
 from .admin import PageViewAdmin, PageViewSnippetViewSet
 from .models import PageView
@@ -109,6 +110,11 @@ class PageViewAdminTests(TestCase):
 
 
 class PageViewSnippetQueryTests(TestCase):
+    def test_read_only_policy_is_registered_explicitly(self):
+        policy = policy_registry.get_by_type(PageView, fallback=False)
+        self.assertIsNotNone(policy)
+        self.assertFalse(policy.user_has_permission(None, "change"))
+
     def test_index_view_uses_related_objects_and_default_ordering(self):
         viewset = PageViewSnippetViewSet()
         queryset = viewset.get_queryset(None)

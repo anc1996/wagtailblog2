@@ -1,6 +1,7 @@
 from wagtail import hooks
 from wagtail.admin.ui.tables import Column
 from wagtail.permission_policies import ModelPermissionPolicy
+from wagtail.permissions import register_permission_policy
 from wagtail.snippets.views.snippets import SnippetViewSet
 
 from .models import BlogMetadataPromptTemplate
@@ -13,6 +14,14 @@ class PromptTemplatePermissionPolicy(ModelPermissionPolicy):
 		return user.is_superuser and super().user_has_permission(user, action)
 
 
+# Wagtail 8 要求自定义权限策略显式注册，确保策略不依赖 ViewSet 的弃用属性。
+register_permission_policy(
+	BlogMetadataPromptTemplate,
+	PromptTemplatePermissionPolicy(BlogMetadataPromptTemplate),
+	exact_class=True,
+)
+
+
 class BlogMetadataPromptTemplateViewSet(SnippetViewSet):
 	model = BlogMetadataPromptTemplate
 	icon = "form"
@@ -22,11 +31,6 @@ class BlogMetadataPromptTemplateViewSet(SnippetViewSet):
 	list_display = ["name", "version", "is_active", Column("updated_at", label="更新时间", sort_key="updated_at")]
 	search_fields = ("name", "description", "title_prompt", "intro_prompt", "tags_prompt")
 	ordering = ("name", "pk")
-
-	@property
-	def permission_policy(self):
-		return PromptTemplatePermissionPolicy(self.model)
-
 
 @hooks.register("register_admin_viewset")
 def register_blog_metadata_prompt_template_viewset():

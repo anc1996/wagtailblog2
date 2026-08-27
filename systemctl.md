@@ -795,3 +795,13 @@ WP8 只删除应用内影子与旧 DSL 代码，不新增服务、不改 unit、
 本批仅依次重启 `wagtailblog3.service`、`wagtailblog3-celery-maintenance.service`、`wagtailblog3-celery-beat.service`。不重启 `wagtailblog3-filebeat.service`、Nginx、Elasticsearch、MySQL、MongoDB、Redis 或 MinIO；若任一已重启服务未恢复 active，停止后续操作并按发布前代码 SHA 回滚。
 
 `CONTENT_SEARCH_QUERY_ENABLED`、`CONTENT_SEARCH_FEDERATED_ALL_ENABLED` 与 `CONTENT_SEARCH_SHADOW_*` 是 WP8 前的历史开关。WP8 部署后 Django 不再读取它们；不得将其写入 unit、drop-in 或开机恢复脚本。producer/consumer、内容 alias、maintenance Worker 和 Beat 的既有启动依赖保持不变。
+
+## Wagtail 8.0 升级 runbook（待生产授权）
+
+本节仅适用于 Wagtail 7.4.3 -> 8.0 的依赖、迁移和默认 Page 搜索索引升级，不适用上面的 WP8 code-only 业务发布。当前尚未执行生产操作，也未取得生产迁移、索引写入或服务重启授权。
+
+升级前必须在隔离环境完成依赖安装、`pip check`、`manage.py check`、迁移计划审阅和受影响测试；生产数据库、MongoDB 正文/草稿/revision、媒体和 Elasticsearch 必须先完成可恢复备份。Wagtail 8 的 `wagtailcore.0098_apitoken` 只允许在已审阅的维护窗口执行，禁止把 API token 表或迁移回滚作为默认删除动作。
+
+Wagtail 默认 Page 索引更新必须在旧 7.4.3 代码下先执行并记录 `update_index --backend default`，再升级代码后复核；该命令会重建 default 后端登记的多个 Wagtail 模型索引，不得误认为只写 Page，也不得触碰 `wagtailblog-prod-content-v002` 等自建内容索引或日志索引。任何 alias 切换、内容索引重建或 outbox 批量处置均需单独授权。
+
+维护顺序为：确认 MySQL、MongoDB、Redis、MinIO、Docker、Elasticsearch 可用并冻结应用写入；停止 `wagtailblog3.service`、`wagtailblog3-celery-maintenance.service`、`wagtailblog3-celery-beat.service`；安装已验证依赖并执行已审阅迁移；按“基础设施 -> Django/uWSGI -> maintenance Worker -> Beat -> Filebeat（仅日志格式变更时） -> Nginx（仅实际受影响时）”顺序恢复。任一检查失败即停止后续启动，切回上一个已验证 commit 与旧依赖环境；不删除 serving 索引、MongoDB 正文或 revision 数据。

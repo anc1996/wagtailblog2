@@ -18,7 +18,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ('taggit', '0006_rename_taggeditem_content_type_object_id_taggit_tagg_content_8fc721_idx'),
-        ('wagtailcore', '0096_remove_searchpromotion_query_and_more'),
+        ('wagtailcore', '0096_referenceindex_referenceindex_source_object_and_more'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 

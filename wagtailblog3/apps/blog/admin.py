@@ -2,6 +2,7 @@ from django.contrib import admin
 from django.db.models import Count
 from taggit.models import Tag
 from wagtail.permission_policies import ModelPermissionPolicy
+from wagtail.permissions import register_permission_policy
 from wagtail.snippets.views.snippets import CreateView, SnippetViewSet
 from wagtail.admin.panels import FieldPanel
 from wagtail.admin import messages
@@ -140,6 +141,14 @@ class ReadOnlyPageViewPermissionPolicy(ModelPermissionPolicy):
         return super().user_has_permission(user, action)
 
 
+# Wagtail 8 要求自定义权限策略显式注册，保持审计记录只读约束。
+register_permission_policy(
+    PageView,
+    ReadOnlyPageViewPermissionPolicy(PageView),
+    exact_class=True,
+)
+
+
 class PageViewSnippetViewSet(SnippetViewSet):
     """Read-only Wagtail listing for the page-view audit table."""
 
@@ -170,10 +179,6 @@ class PageViewSnippetViewSet(SnippetViewSet):
         "last_viewed_at",
         "user_agent",
     )
-
-    @property
-    def permission_policy(self):
-        return ReadOnlyPageViewPermissionPolicy(self.model)
 
     def get_queryset(self, request):
         return self.model.objects.select_related("page", "user")

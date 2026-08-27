@@ -8,7 +8,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ('home', '0003_alter_homepage_options_homepage_banner_image_and_more'),
-        ('wagtailcore', '0096_remove_searchpromotion_query_and_more'),
+        ('wagtailcore', '0096_referenceindex_referenceindex_source_object_and_more'),
     ]
 
     operations = [

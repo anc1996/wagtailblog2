@@ -26,9 +26,8 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ("blog", "0022_alter_blogpage_body"),
-        # Wagtail 7.4.2 的空合并迁移文件名可能随构建时间变化，直接依赖共同父节点以兼容各环境。
+        # Wagtail 8 移除了旧版 0097 合并节点，改依赖仍存在的 0097 索引迁移。
         ("wagtailcore", "0097_baselogentry_uuid_action_timestamp_indexes"),
-        ("wagtailcore", "0097_merge_20250811_1740"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 

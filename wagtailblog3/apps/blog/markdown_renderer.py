@@ -14,7 +14,21 @@ from django.utils.safestring import mark_safe
 from wagtail.rich_text import EmbedRewriter, LinkRewriter
 from wagtail.images.formats import get_image_format
 from wagtail.images.rich_text import ImageEmbedHandler
-from wagtail.rich_text.pages import PageLinkHandler
+
+
+class _LazyPageLinkHandler:
+    """在 Django 应用注册完成后再加载 Wagtail 页面链接处理器。"""
+
+    @classmethod
+    def expand_db_attributes_many(cls, attrs_list: list[dict[str, str]]) -> list[str]:
+        """委托 Wagtail 处理页面链接，避免模型导入阶段访问未就绪的注册表。"""
+        from wagtail.rich_text.pages import PageLinkHandler
+
+        return PageLinkHandler.expand_db_attributes_many(attrs_list)
+
+
+# 保留模块级名称，既兼容现有调用点，也允许测试替换处理器方法。
+PageLinkHandler = _LazyPageLinkHandler
 
 
 _WAGTAIL_PAGE_LINK_ID_RE = re.compile(r"^[1-9][0-9]{0,18}$")

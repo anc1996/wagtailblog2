@@ -1812,3 +1812,13 @@ Wagtail 的历史页本身主要读取 MySQL 的 `PageLogEntry`、`Revision` 元
 - 备份：删除前使用 `mongodump` 定向备份至 `/home/source/Django/wagtail/backups/wagtailblog3-orphan-page14-20260829-170000/`，包含 1 条 `blog_content` BSON（1153 bytes）及元数据；`blog_page_revision_bodies` 查询为 0 条。备份可用于恢复该孤儿正文。
 - 清理：按用户授权删除 Mongo `blog_content.page_id=14` 1 条；`blog_page_revision_bodies.page_id=14` 删除 0 条。未修改 MySQL、Wagtail 页面、State、Outbox、ES 索引或服务。
 - 复核：删除后 `blog_content`、`blog_page_revision_bodies`、`content_body_versions` 对 page 14 均为 0；四个应用服务未重启。回滚边界为使用定向 BSON 备份恢复 Mongo 孤儿文档，不得新建 Wagtail 页面或改动其他 page_id。
+
+### 74. 测试环境存量正文批量登记与 Mongo 孤儿清理（2026-08-30）
+
+- 只读盘点：测试库扫描 156 篇 `BlogPage`，初始 `state_missing=155`、针对可登记 BlogPage 的 Mongo 正文缺失为 0；已有现代正文版本 1 篇。所有页面均为 live/published；扫描未发现草稿 Revision 缺失。
+- 备份：测试机定向备份位于 `/home/source/Django/wagtail/test-backups/registration-20260829-180000/`，保存 BlogPage、PublicationState、SearchState/Outbox/Delivery 快照、Mongo `blog_content`/`blog_page_revision_bodies`/`content_body_versions` 导出和 manifest SHA-256。
+- 登记：按现有单页 `--apply --expected-hash` 接口逐篇处理剩余 155 篇（已有版本的页面不重复写入），实际 155/155 成功，每篇创建一个 Mongo `content_body_versions` 版本并写入 MySQL `BlogPublicationState`、Search State 和 Outbox。
+- 孤儿清理：根据 MySQL 不存在对应 `BlogPage` 的定义，删除 Mongo `blog_content.page_id in (14,609,621)` 共3 条；定向 `blog_page_revision_bodies` 为 0 条，`content_body_versions` 无关联版本因而未删除。另有 1 个非整数 page_id 保留并记录为待复核对象。
+- 对账：登记后 `BlogPublicationState=156`、Mongo `content_body_versions=156`，且 `state_missing=0`、Mongo 正文缺失=0、Outbox 身份不一致=0。只读 `blog_publication_consistency_check` 仍报告 156 条 `revision_body_mismatch`，与生产一致，原因是历史 live Revision 未回写新版本指针，本批未改写 Revision。
+- 搜索与服务：测试 serving 仍为旧 `test-content-replica0-v001`，只读搜索对账报告旧索引 stale/missing；`content-v005-fix` 仍为 building，未在本批切换 alias。测试机四个 systemd 单元不运行，本批未重启或改动服务。
+- 回滚与残余风险：正文版本、State、Outbox 不应直接删除；如需回滚，使用备份恢复孤儿文档或回退代码、依赖索引重建，不回写历史 Revision。

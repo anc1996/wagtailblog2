@@ -1705,3 +1705,15 @@ Wagtail 的历史页本身主要读取 MySQL 的 `PageLogEntry`、`Revision` 元
 - 数据/服务影响：仅写入测试 ES 隔离索引并登记测试 MySQL Target/Build（`content-v005-fix`），未切换 read alias，未处理旧 dead Delivery；生产尚未执行索引创建、alias 切换或服务重启。
 - 回滚点：删除/退役测试隔离 target 与索引即可；代码回退到本批次前 commit 不触及 MySQL/Mongo 正文。生产回滚仍限定为 alias 原子切回上一 serving 索引和恢复上一已验证代码。
 - 残余风险：需另行处理 13 个页面的 Mongo 正文完整性并完成全量重建、catch-up、alias 门禁；模板契约比较要求 ES 返回完整 template 结构，旧模板响应不完整时会安全拒绝复用。
+
+### 61. 生产 ES snapshot、v005 迁移、alias 切换与临时 BlogPage 验收实施记录（2026-08-29）
+
+- 状态：已完成生产 Elasticsearch 备份核验、v005 新索引迁移、全量回填、catch-up、read alias 原子切换，以及发布/删除闭环验收；未删除旧索引、未修改 Mongo 正文或历史 Revision。
+- 备份证据：生产 ES 使用已登记的 snapshot repository `wagtailblog3-pre-search-20260811-221511` 及快照 `pre-search-20260811-221511`，状态 `SUCCESS`（`include_global_state=false`）。备份目录为 `/home/source/Django/wagtail/backups/wagtailblog3-pre-search-20260811-221511/`；旧 v003 索引和该快照均保留为回滚点。恢复时不得覆盖集群级设置，也不得删除 snapshot、repository 或数据卷。
+- 索引迁移：新 serving 索引为 `wagtailblog-prod-content-v005`，read alias 为 `wagtailblog-prod-content-read`；全量回填 1098 条，成功 1098、缺失 0、失败 0，随后完成 catch-up 并以原子操作切换 alias。旧 `wagtailblog-prod-content-v003` 未删除。生产代码 commit 为 `e887cf12b9b200d15affdf872a7e4a7b157db7a7`。
+- 发布验收：通过 BrowserSkill（未使用 Playwright）新建临时 BlogPage ID 1193，标题“生产搜索修复验收-20260829”。完成编辑、保存草稿、预览、提交 `Moderators approval`、审批并发布；`ContentSearchState` 显示 `content_version=1`、`publication_generation=1`，v005 文档正文投影和 `searchable=true` 均正确。
+- 搜索与删除验收：前台精确搜索命中临时页 1 条；随后删除页面并确认 tombstone Delivery 目标为 v005，ES 文档变为 `searchable=false`，删除后前台搜索无结果。upsert 与 tombstone Delivery 均为 v005 target；旧 v003 target 保留历史 `dead/es_http_400` 记录，未被修改。删除过程未删除 Outbox、Mongo 正文或历史记录以外的受保护数据。
+- 证据与日志：BrowserSkill 截图位于 `output/playwright/prod-search-20260829/`（`01-draft-saved.png`、`02-preview.png`、`03-published.png`、`04-search-hit.png`、`05-delete-confirm.png`、`06-search-after-delete.png`）。四个项目服务自 2026-08-29 06:25 起未出现新的 `es_http_400` 或 `strict_dynamic_mapping_exception`；控制台仅有浏览器/CDN 跟踪防护和无效扩展资源警告。
+- 回滚边界：若 v005 出现回归，先停止受影响消费者并保留 v005、v003、snapshot、Outbox/Delivery 审计，再执行 alias 原子切回 v003；代码回滚到上一已验证 commit。不得通过回滚删除 Mongo 正文、草稿、Revision、Outbox 或直接手工改写 ES 文档。
+- 更正与残余风险：早期 §59 记录的临时页 ID 1192 属于前一轮验收；本轮实际验收页为 1193。当前 v005 投影已通过单页发布/删除验收，但仍需持续观察 dead/retry、alias 指向、ES 单节点 yellow 状态和旧 dead target 归档策略；存量 `BlogPublicationState` 回填、低频 Mongo 正文对账、恢复演练及百万级压测不在本批范围内。
+- 模型/推理实际调度：生产索引迁移与回滚边界按 `gpt-5.6-sol` 高推理门禁执行；搜索实现与验收由 `gpt-5.6-terra` 中高推理完成；BrowserSkill 只读证据整理由 `gpt-5.6-luna` 完成。未向外部模型发送凭据、Token 或正文内容。

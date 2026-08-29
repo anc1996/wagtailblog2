@@ -1738,3 +1738,12 @@ Wagtail 的历史页本身主要读取 MySQL 的 `PageLogEntry`、`Revision` 元
 - 导入流程结论：当前仓库没有 `register_legacy_blog_page` 命令；`add_blog_page` 只能 `add_child()` 创建新页面并保存/发布 Revision，不能用于存量登记。后续应实现默认 dry-run、按 `page_id` 幂等、带 expected hash/confirm 的受控登记命令，先创建不可变正文版本，再在 MySQL 事务内绑定 State，最后单独生成并验证 Search Outbox；旧 Revision 不直接改写。
 - 数据与回滚边界：本批唯一生产性变更是测试 MySQL schema；若测试迁移需要回退，应保留新增表/列并按迁移记录处理，不执行未经验证的反向迁移。报告和 dry-run 不修改业务数据；生产登记仍需独立备份、小批授权和可暂停/可重试审计。
 - 模型/推理实际调度：`gpt-5.6-terra` 复核旧文章登记契约和跨库失败补偿；`gpt-5.6-luna` 执行测试迁移门禁、只读报告和单篇 dry-run；主 agent 负责确认迁移顺序、报告边界和回滚约束。未向外部模型发送正文、凭据或生产数据。
+
+### 64. 只读登记命令实现与验收（2026-08-29）
+
+- 实际修改文件：新增 `wagtailblog3/apps/blog/management/commands/register_legacy_blog_page.py` 与 `wagtailblog3/apps/blog/test_register_legacy_blog_page.py`。命令默认只读，支持按 `page_id` 或分页扫描；`--apply` 当前明确拒绝，避免在登记流程尚未完成前误写数据。
+- 读取边界：MySQL 仅查询 BlogPage、BlogPublicationState 和 Wagtail Revision；Mongo 直接使用 PyMongo `find` 查询 `blog_content`、`content_body_versions`，不实例化 `MongoManager`，不会触发建索引或旧全文索引清理。
+- 输出字段：页面标题/发布状态、State 是否存在、Mongo 正文是否存在及块数、规范化 SHA-256、草稿 Revision、live/latest Revision 的正文版本指针、现代正文版本数量和分类统计；不输出正文内容。Django 启动横幅会先写 stdout，采集 JSON 时应读取最后一行。
+- 测试环境实跑：`WAGTAILBLOG_ENV=test conda run -n wagtailblog-test python manage.py register_legacy_blog_page --page-id 38 --dry-run` 成功；Page 38 输出 `state_missing`、`legacy_revision_unbound`，Mongo 正文 12 块，哈希为 `3764642ad3f11928ea48d63ad134794c6ed835b6f21f51a3584f4ab5f5920f53`，未产生 MySQL/Mongo/Outbox/ES 写入。
+- 自动化验证：新增命令测试 3 项通过；既有发布、工作流和搜索回归共 55 项通过；`compileall`、`manage.py check`、`makemigrations --check --dry-run`、`migrate --plan blog/search` 与 `git diff --check` 通过。保留既有 Wagtail 条件唯一约束警告。
+- 后续门禁：正式登记仍需单独实现 `--apply`、expected-hash、幂等锁与 Outbox 补偿，并先在隔离测试数据上小批量验证；本批次不执行 State 回填、Mongo 版本写入、搜索投影或生产操作。回滚边界为移除新增命令/测试文件，既有业务数据未改变。

@@ -1669,7 +1669,7 @@ Wagtail 的历史页本身主要读取 MySQL 的 `PageLogEntry`、`Revision` 元
 ### 58. 生产迁移实施记录（2026-08-29）
 
 - 状态：已完成代码同步、数据库迁移、服务恢复和只读验收；未执行正文回填、Mongo 删除、ES 重建、alias 切换或自动修复。
-- 发布 commit：`726978aaf1c2394167185c4ff45037de2a3ba3d5`。生产 `main`、`origin/main` 与测试已验证 commit 一致，生产工作树干净。
+- 运行时代码发布 commit：`726978aaf1c2394167185c4ff45037de2a3ba3d5`；随后仅文档实施记录提交为 `8d15cb48d7f37fc7fc88ab0ade8717935e571189`，生产与 `origin/main` 当前均在后者，生产工作树干净。
 - 备份目录：`/home/source/Django/wagtail/backups/wagtailblog3-markdown-import-20260829-100724`。包含 MySQL schema/data/triggers/routines/events 导出、Mongo `blog_content` 与 `blog_page_revision_bodies` 导出及校验信息、ES 集群健康和 snapshot repository 状态、`.env.production`、四个 systemd unit、Nginx 配置及迁移前后服务状态。
 - 迁移结果：成功应用 `blog.0029` 至 `blog.0033`、`search.0006` 和 `search.0007`；`wagtailcore.0098` 现场已是已应用状态。迁移未写入正文数据，也未回填 `BlogPublicationState`。
 - 服务验收：`wagtailblog3.service`、`wagtailblog3-celery-maintenance.service`、`wagtailblog3-celery-beat.service`、`wagtailblog3-filebeat.service` 均 active/enabled；首页 HTTP 200；生产 `manage.py check` 无错误，仅保留既有 MySQL 条件唯一约束警告。

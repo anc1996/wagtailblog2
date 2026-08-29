@@ -1666,3 +1666,13 @@ Wagtail 的历史页本身主要读取 MySQL 的 `PageLogEntry`、`Revision` 元
 - 生产迁移前仍需先提交并推送当前工作区改动，完成恢复演练和维护窗口审批；每日十几篇文章不需要为迁移额外扩容或分片。
 - 迁移后观察至少 1～2 周，记录发布成功率、对账周期、`lease_lost`、`last_error`、Outbox lag、Mongo 读取错误和数据库/ES 增长，再决定低频 Mongo 对账、归档和百万级压测的下一批次。
 - 模型/推理实际调度：`gpt-5.6-sol` 负责迁移和回滚架构复核；`gpt-5.6-terra` 负责服务/依赖顺序核对；主 agent 负责把方案写入文档并保留授权边界。未向外部模型发送源码、凭据或生产正文数据。
+### 58. 生产迁移实施记录（2026-08-29）
+
+- 状态：已完成代码同步、数据库迁移、服务恢复和只读验收；未执行正文回填、Mongo 删除、ES 重建、alias 切换或自动修复。
+- 发布 commit：`726978aaf1c2394167185c4ff45037de2a3ba3d5`。生产 `main`、`origin/main` 与测试已验证 commit 一致，生产工作树干净。
+- 备份目录：`/home/source/Django/wagtail/backups/wagtailblog3-markdown-import-20260829-100724`。包含 MySQL schema/data/triggers/routines/events 导出、Mongo `blog_content` 与 `blog_page_revision_bodies` 导出及校验信息、ES 集群健康和 snapshot repository 状态、`.env.production`、四个 systemd unit、Nginx 配置及迁移前后服务状态。
+- 迁移结果：成功应用 `blog.0029` 至 `blog.0033`、`search.0006` 和 `search.0007`；`wagtailcore.0098` 现场已是已应用状态。迁移未写入正文数据，也未回填 `BlogPublicationState`。
+- 服务验收：`wagtailblog3.service`、`wagtailblog3-celery-maintenance.service`、`wagtailblog3-celery-beat.service`、`wagtailblog3-filebeat.service` 均 active/enabled；首页 HTTP 200；生产 `manage.py check` 无错误，仅保留既有 MySQL 条件唯一约束警告。
+- 只读对账：扫描 1000 个页面，`state_missing=1000`；`mongo_missing`、`live_pointer_missing`、`revision_body_mismatch`、`outbox_missing`、`search_identity_mismatch` 等样本均为空。`state_missing` 是未回填存量 State 的已知结果，后续须单独制定只读观察、分批回填和回滚方案，不得由本次迁移自动修复。
+- 回滚边界：代码可回退到迁移前 commit；MySQL DDL 已执行，不执行未经验证的反向迁移或 `--fake`。保留新增表/列及备份，必要时停止应用服务并依据备份恢复；不删除 Mongo 正文、草稿、Revision 或 Outbox。
+- 残余风险：ES 无 snapshot repository 且集群为单节点 yellow；Mongo 正文对账当前为显式命令，Beat 默认不启用 Mongo 检查；存量 State 缺失、Outbox/Delivery 归档、百万级压测和恢复演练仍未完成。

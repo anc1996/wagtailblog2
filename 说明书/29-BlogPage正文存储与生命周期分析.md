@@ -1822,3 +1822,11 @@ Wagtail 的历史页本身主要读取 MySQL 的 `PageLogEntry`、`Revision` 元
 - 对账：登记后 `BlogPublicationState=156`、Mongo `content_body_versions=156`，且 `state_missing=0`、Mongo 正文缺失=0、Outbox 身份不一致=0。只读 `blog_publication_consistency_check` 仍报告 156 条 `revision_body_mismatch`，与生产一致，原因是历史 live Revision 未回写新版本指针，本批未改写 Revision。
 - 搜索与服务：测试 serving 仍为旧 `test-content-replica0-v001`，只读搜索对账报告旧索引 stale/missing；`content-v005-fix` 仍为 building，未在本批切换 alias。测试机四个 systemd 单元不运行，本批未重启或改动服务。
 - 回滚与残余风险：正文版本、State、Outbox 不应直接删除；如需回滚，使用备份恢复孤儿文档或回退代码、依赖索引重建，不回写历史 Revision。
+
+### 75. P0 不可变公开正文读取与旧存储隔离（2026-08-30）
+
+- 实际修改：`BlogPage.save()` 对已有 `published_body_version_id` 的页面跳过可变 Mongo `blog_content` 写入；`get_content_from_mongodb()` 优先按 State 中的正式指针、SHA-256 和 schema 读取 `content_body_versions`，指针失效时不回退旧正文，无 State 的旧页面保留兼容路径。
+- 搜索修改：`search.services.document` 的单页正式快照在未显式传入正文时优先读取发布版本；不存在 State 指针时回退旧 `blog_content`。批量 rebuild 显式传入旧正文的路径本批未改动，避免 N+1，后续需增加指针批量读取。
+- 测试：新增 `blog.test_public_body_reads` 和 `search.tests.test_search_content_index`，并扩充 lifecycle 回归测试；P0 定向测试 27 项通过，`manage.py check`、`makemigrations --check --dry-run`、`compileall` 和 `git diff --check` 通过。
+- 数据与服务影响：本批未操作数据库、ES alias、Celery 或 systemd；仅修改运行时读取/保存路径及测试。
+- 残余风险：Wagtail Revision 历史绑定、Workflow/定时发布边界、批量 rebuild 指针读取、并发登记审计和测试 ES v005 全量重建仍未完成，禁止以本批通过宣称全链路完成。

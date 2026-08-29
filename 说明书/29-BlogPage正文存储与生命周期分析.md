@@ -1777,3 +1777,9 @@ Wagtail 的历史页本身主要读取 MySQL 的 `PageLogEntry`、`Revision` 元
 - 核验结果：生产仓库 `main` 已同步至 `706269d3fe083f03d04746d4d8529f766c1195a6`，但在生产执行 `python manage.py register_legacy_blog_page --page-id 38 --dry-run` 返回 `Unknown command`；文档记录的 `/root/anaconda3/envs/wagtailblog` Python 路径也不存在。真实服务运行的 Conda/解释器和 Django 应用加载状态尚未确认。
 - 决策：在命令可被生产 Django 正确发现、真实解释器/环境核实、page 38 Mongo 正文 hash 与生产 v005 alias/mapping 只读核验完成，并完成生产备份记录前，不执行 `--apply`。当前无生产数据变化、无服务重启、无 ES 写入。
 - 下一步：先修正/确认生产运行环境与代码部署（不改变数据），重新执行 page 38 dry-run；随后单独说明生产备份、影响范围和回滚点，取得针对 page 38 的明确确认后再登记。
+
+### 69. 生产 SSH 目标核验结果（2026-08-29）
+
+- 直接 SSH `root@192.168.20.2:22` 后，远端 `hostname` 为 `ziliao`，但 `hostname -I` 返回 `192.168.20.5 172.17.0.1`；该连接实际落到测试/WSL 主机地址，而非预期的生产虚拟机地址。
+- 该主机不存在 `/home/source/Django/wagtail/wagtailblog3`、`wagtailblog3.service` 和记录中的生产 Conda 环境，因此不能在此执行生产 dry-run 或 `--apply`。本次仅执行路径、服务和网络身份只读检查，无数据或服务变更。
+- 生产登记门禁保持：需先确认真正生产 VM 的可达 IP/端口和主机身份，再核对 unit 的 `ExecStart`、EnvironmentFile、解释器、page 38 Mongo/hash、v005 alias 与备份，之后才可进行单页登记。

@@ -1037,6 +1037,27 @@ class BlogPage(Page):
 		)
 		
 		if not is_draft_metadata_update and not draft_only:
+			# 已登记页面的公开正文由不可变版本指针负责；编辑草稿时不能覆盖旧的 blog_content 正文。
+			# 未登记旧页面仍沿用兼容写入路径，待后续迁移完成后再统一切换。
+			immutable_published = False
+			if not is_new and self.pk:
+				try:
+					immutable_published = BlogPublicationState.objects.filter(
+						page_id=self.pk,
+						published_body_version_id__isnull=False,
+					).exists()
+				except Exception:
+					# 兼容尚未应用 State 迁移的旧环境，不阻断原有保存流程。
+					immutable_published = False
+			if immutable_published:
+				logger.info("blog_body_save_legacy_skipped page_id=%s", self.pk)
+				real_body = self.body
+				self.body = []
+				try:
+					super().save(*args, **kwargs)
+				finally:
+					self.body = real_body
+				return
 			# 全量保存才写入正式集合；草稿正文已经由 serializable_data 保存到历史集合。
 			temp_body_raw = self.body.raw_data if hasattr(self.body, 'raw_data') else None
 			if temp_body_raw is None and self.body:
@@ -1152,6 +1173,33 @@ class BlogPage(Page):
 	# =========================================================================
 	def get_content_from_mongodb(self) -> dict[str, Any] | None:
 		"""读取正式正文，并在内存副本补齐前端 StreamField 所需的块 ID 和 value。"""
+		# 已登记页面只允许读取 published_body_version_id，避免草稿覆盖旧 blog_content 后泄露到公开页。
+		state = None
+		try:
+			state = BlogPublicationState.objects.filter(page_id=self.pk).first()
+			if state and state.published_body_version_id:
+				version = MongoManager().get_content_body_version(
+					"blog_page", self.pk, state.published_body_version_id,
+					state.published_body_sha256 or "",
+					state.published_body_schema_version or 0,
+				)
+				if not isinstance(version.get("body"), list):
+					return None
+				return {
+					"_id": state.published_body_version_id,
+					"page_id": self.pk,
+					"title": self.title,
+					"intro": self.intro,
+					"body": version["body"],
+				}
+		except MongoRevisionReadError as exc:
+			logger.warning("blog_published_body_unavailable page_id=%s error=%s", self.pk, type(exc).__name__)
+			return None
+		except Exception:
+			# 状态存在但正式指针读取异常时禁止回退旧正文，只有状态表尚未应用才保留旧页面兼容路径。
+			if state is not None and state.published_body_version_id:
+				return None
+			pass
 		if not getattr(self, 'mongo_content_id', None):
 			return None
 		try:

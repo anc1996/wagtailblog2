@@ -193,6 +193,48 @@ class ContentIndexDefinitionTests(SimpleTestCase):
         self.assertEqual(document.document["first_published_at"], "2026-08-11")
         self.assertNotIn("mongo_content_id", document.document)
 
+    def test_document_prefers_published_body_version_pointer(self):
+        page = _FormalContentPage()
+        page._meta = SimpleNamespace()
+        state_values = Mock()
+        state_values.first.return_value = {
+            "published_body_version_id": "body-v2",
+            "published_body_sha256": "a" * 64,
+            "published_body_schema_version": 1,
+        }
+        state_filter = Mock()
+        state_filter.values.return_value = state_values
+        manager = Mock()
+        manager.get_content_body_version.return_value = {
+            "body": [{"type": "markdown_block", "value": "发布版本"}],
+        }
+
+        with (
+            patch("blog.models.BlogPublicationState.objects.filter", return_value=state_filter),
+            patch("wagtailblog3.mongo.MongoManager", return_value=manager),
+        ):
+            document = build_formal_content_document(page, content_version=8)
+
+        self.assertEqual(page.mongo_read_count, 0)
+        manager.get_content_body_version.assert_called_once_with(
+            "blog_page", page.pk, "body-v2", "a" * 64, 1
+        )
+        self.assertEqual(document.document["body_text"], "正式正文")
+
+    def test_document_falls_back_to_legacy_content_without_published_pointer(self):
+        page = _FormalContentPage()
+        page._meta = SimpleNamespace()
+        state_values = Mock()
+        state_values.first.return_value = None
+        state_filter = Mock()
+        state_filter.values.return_value = state_values
+
+        with patch("blog.models.BlogPublicationState.objects.filter", return_value=state_filter):
+            document = build_formal_content_document(page, content_version=9)
+
+        self.assertEqual(page.mongo_read_count, 1)
+        self.assertEqual(document.document["body_text"], "正式正文")
+
     def test_batch_projection_never_falls_back_to_per_page_mongo_reads(self):
         first_page = _FormalContentPage()
         second_page = _FormalContentPage()

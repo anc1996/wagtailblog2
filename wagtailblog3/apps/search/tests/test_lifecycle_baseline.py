@@ -254,6 +254,29 @@ class BlogLifecycleFixtureMixin:
 
 
 class BlogLifecycleBaselineTests(BlogLifecycleFixtureMixin, TestCase):
+
+
+    def test_registered_page_reads_immutable_published_body_after_legacy_document_changes(self):
+        """已登记页面公开读取固定到 State 指针，不受旧 blog_content 后续改写影响。"""
+        page = self._publish(self._create_draft_page("正式正文版本"))
+        content_id = page.mongo_content_id
+        self.mongo.live_documents[content_id]["body"] = self._markdown_body("不应公开的草稿")
+
+        content = page.get_content_from_mongodb()
+
+        self.assertIsNotNone(content)
+        self.assertIn("正式正文版本", str(content["body"]))
+        self.assertNotIn("不应公开的草稿", str(content["body"]))
+
+    def test_registered_page_save_does_not_overwrite_legacy_formal_document(self):
+        """已有不可变公开版本时，普通页面保存不覆盖兼容层正式正文。"""
+        page = self._publish(self._create_draft_page("保留的正式正文"))
+        content_id = page.mongo_content_id
+        page.body = self._markdown_body("编辑中的草稿")
+        page.save()
+
+        self.assertIn("保留的正式正文", str(self.mongo.live_documents[content_id]["body"]))
+        self.assertNotIn("编辑中的草稿", str(self.mongo.live_documents[content_id]["body"]))
     """验证正文、草稿和公开 QuerySet 的当前行为。"""
 
     def test_draft_revision_does_not_replace_published_mongo_body_until_publish(self):

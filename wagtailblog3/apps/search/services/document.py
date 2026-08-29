@@ -13,6 +13,61 @@ from django.utils.html import strip_tags
 _FORMAL_CONTENT_UNSET = object()
 
 
+def _published_body_version_content(page: object) -> tuple[bool, object | None]:
+	"""按发布状态读取不可变正文；返回值第一项表示是否配置了正文指针。
+
+	参数：``page`` 至少提供 ``pk``；真实 BlogPage 还必须存在对应的
+	``BlogPublicationState``。返回 ``(False, None)`` 表示旧页面没有状态记录，
+	调用方可以回退 ``blog_content``；返回 ``(True, None)`` 表示状态存在但版本
+	读取失败，此时必须阻止以旧正文冒充当前公开版本。
+	副作用：仅执行 MySQL/Mongo 读取，不修改页面、状态或搜索事件。
+	"""
+	if not hasattr(page, "_meta"):
+		# 单元测试中的轻量替身没有 Django 模型元数据，保持旧接口行为。
+		return False, None
+	try:
+		from blog.models import BlogPublicationState
+
+		state = (
+			BlogPublicationState.objects.filter(page_id=getattr(page, "pk", None))
+			.values(
+				"published_body_version_id",
+				"published_body_sha256",
+				"published_body_schema_version",
+			)
+			.first()
+		)
+	except Exception:
+		# 状态表尚不可用时保留旧页面兼容性；部署完成后真实页面会进入下方分支。
+		return False, None
+	if not state or not state.get("published_body_version_id"):
+		return False, None
+
+	try:
+		from wagtailblog3.mongo import MongoManager
+
+		body_version_id = state["published_body_version_id"]
+		body_sha256 = state.get("published_body_sha256")
+		body_schema_version = state.get("published_body_schema_version")
+		if (
+			not isinstance(body_version_id, str)
+			or not body_version_id
+			or not isinstance(body_sha256, str)
+			or not isinstance(body_schema_version, int)
+		):
+			return True, None
+		content = MongoManager().get_content_body_version(
+			"blog_page",
+			getattr(page, "pk", None),
+			body_version_id,
+			body_sha256,
+			body_schema_version,
+		)
+	except Exception:
+		return True, None
+	return True, content
+
+
 @dataclass(frozen=True)
 class FormalContentSnapshot:
     """正式正文的稳定标识和哈希；草稿 revision 不参与计算。"""
@@ -54,9 +109,13 @@ def _build_formal_payload(
     if not mongo_content_id:
         return None
 
-    # 回填可传入同批次已读取的正式正文，避免每篇文章再次访问 MongoDB。
+	# 回填可传入同批次已读取的正式正文，避免每篇文章再次访问 MongoDB。
     if formal_content is _FORMAL_CONTENT_UNSET:
-        formal_content = page.get_content_from_mongodb()
+        state_configured, state_content = _published_body_version_content(page)
+        if state_configured:
+            formal_content = state_content
+        else:
+            formal_content = page.get_content_from_mongodb()
     # 空文章正文是合法内容，只有正式文档不存在才应判定为 Mongo 缺失。
     if formal_content is None:
         return None

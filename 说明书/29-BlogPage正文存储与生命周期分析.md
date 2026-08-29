@@ -1717,3 +1717,14 @@ Wagtail 的历史页本身主要读取 MySQL 的 `PageLogEntry`、`Revision` 元
 - 回滚边界：若 v005 出现回归，先停止受影响消费者并保留 v005、v003、snapshot、Outbox/Delivery 审计，再执行 alias 原子切回 v003；代码回滚到上一已验证 commit。不得通过回滚删除 Mongo 正文、草稿、Revision、Outbox 或直接手工改写 ES 文档。
 - 更正与残余风险：早期 §59 记录的临时页 ID 1192 属于前一轮验收；本轮实际验收页为 1193。当前 v005 投影已通过单页发布/删除验收，但仍需持续观察 dead/retry、alias 指向、ES 单节点 yellow 状态和旧 dead target 归档策略；存量 `BlogPublicationState` 回填、低频 Mongo 正文对账、恢复演练及百万级压测不在本批范围内。
 - 模型/推理实际调度：生产索引迁移与回滚边界按 `gpt-5.6-sol` 高推理门禁执行；搜索实现与验收由 `gpt-5.6-terra` 中高推理完成；BrowserSkill 只读证据整理由 `gpt-5.6-luna` 完成。未向外部模型发送凭据、Token 或正文内容。
+
+### 62. 存量 State 回填只读分析与旧文章登记可行性（2026-08-29）
+
+- 只读报告：在 WSL2 `wagtailblog-test` 环境读取 BlogPage、Wagtail Revision 和 Mongo 元数据，未调用保存、迁移、索引创建或删除接口。报告文件为 `output/state-missing-report-20260829.json`，包含全部文章 ID、标题、发布状态、Mongo 正文存在性、Revision 数量和最新 Revision 标识；Mongo 查询仅返回数组类型/存在性元数据，不返回正文。
+- 环境前置发现：测试库 `wagtailsoftblog_test` 尚未应用 `blog.0029` 至 `blog.0033`，`blog_blogpublicationstate` 表不存在。因此本次扫描的 156 篇 BlogPage 是“State 表缺失基线”，不能等同于真实的 156 条 `state_missing`；必须先在授权的测试迁移批次应用 schema，再重新运行报告，才能生成可用于回填决策的真实分类。
+- 当前基线统计（仅供迁移前核对）：156 篇 BlogPage 均为 `live=1`，均存在 `blog_content` 正文元数据，Revision 共 352 条；按“最新 Revision ID 是否等于 live_revision_id”判定，未发现未同步的最新 Revision。现代 `content_body_versions` 集合未发现对应记录。该结果不构成生产数据结论。
+- 报告分类定义：`published/unpublished` 依据 BlogPage.live；`has_mongo_body` 依据 `blog_content` 或 `content_body_versions` 中存在合法数组正文；`has_draft_revision` 仅表示最新 Revision 不等于 live Revision，后续登记前仍需再区分真正草稿、历史 Revision 和审批状态，不能直接据此发布。
+- 旧文章逐个登记：方案可行，但应登记现有 BlogPage，不应重建页面或改变 page PK、slug、标题和页面树。每篇以 `page_id` 幂等，先只读校验正式 Mongo 正文、归属、schema 和 hash，再在独立批次写入不可变 `body_version`；随后在 MySQL 事务内锁定页面并创建/更新 `BlogPublicationState`，最后生成与当前公开代际一致的 Search State/Outbox。Mongo 写入与 MySQL 事务无法共享原子提交，Mongo 先写而 MySQL 失败时保留安全孤儿版本并进入待审计/后续 GC，Mongo 失败时不得创建 State 指针。
+- 历史兼容边界：旧 live Revision 往往没有 `mongo_body_version_id`，直接绑定新 State 会产生 `revision_body_mismatch`。此类页面应分类为 `legacy_revision_unbound`，先登记正式正文，是否创建桥接 Revision 另行审批；草稿 Revision 按其自身指针和正文可读性单独分类，不能用正式正文覆盖历史快照。现有 `add_blog_page` 或后台逐篇打开保存都不适合作为迁移工具。
+- 建议实施顺序：先应用并核验测试 schema → 重新生成真实 State 缺失报告 → 选取 1 篇已发布且 Mongo 正文完整的页面 dry-run → 验证幂等、指针/hash、Outbox 和搜索身份 → 扩大为小批量 → 观察并取得生产授权后再执行生产登记。整个登记批次必须默认 dry-run、单页/小批、可暂停、可重试并输出脱敏审计结果；本记录未执行任何登记或数据写入。
+- 模型/推理实际调度：`gpt-5.6-terra` 复核逐篇登记的数据流和跨库一致性；`gpt-5.6-luna` 执行只读报告与迁移前置检查；主 agent 负责把测试库缺表事实和生产授权边界写入方案。未向外部模型发送正文、凭据或生产数据。

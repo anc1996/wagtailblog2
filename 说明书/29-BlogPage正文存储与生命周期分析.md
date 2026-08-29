@@ -1770,3 +1770,10 @@ Wagtail 的历史页本身主要读取 MySQL 的 `PageLogEntry`、`Revision` 元
 - 只读核对确认 alias `wagtailblog-test-content-read` 唯一指向旧索引 `wagtailblog-test-content-replica0-v001`；其 strict mapping 缺少 `body_version_id`、`publication_generation`，不能直接接受新事件。
 - 候选 building 索引 `content-v004` 已包含新字段但 Build 状态为 failed；`content-v005-fix` 同样因 13 篇 Mongo 正式正文缺失而未达到 READY。直接切 alias 会造成公开搜索回退或数据缺失，因此本批次不切换 alias、不删除旧索引、不手工改 ES 文档。
 - 修复门槛：先完成缺失正文对账或建立完整可重建数据集，再运行测试索引全量回填、catch-up、READY 校验，最后执行原子 alias 切换并重放 page 548 的 Delivery。当前 page 548 的 State/Mongo/Outbox 正确，但 serving 搜索仍为部分通过。
+
+### 68. 生产 BlogPage 38 登记前置核验（2026-08-29）
+
+- 用户提出跳过测试搜索修复，直接在生产对 BlogPage 38 执行 `--apply`。该操作涉及生产 Mongo 正文版本、MySQL State、Search Outbox 和 ES 投影，按生产门禁先做只读核验，未执行任何写入。
+- 核验结果：生产仓库 `main` 已同步至 `706269d3fe083f03d04746d4d8529f766c1195a6`，但在生产执行 `python manage.py register_legacy_blog_page --page-id 38 --dry-run` 返回 `Unknown command`；文档记录的 `/root/anaconda3/envs/wagtailblog` Python 路径也不存在。真实服务运行的 Conda/解释器和 Django 应用加载状态尚未确认。
+- 决策：在命令可被生产 Django 正确发现、真实解释器/环境核实、page 38 Mongo 正文 hash 与生产 v005 alias/mapping 只读核验完成，并完成生产备份记录前，不执行 `--apply`。当前无生产数据变化、无服务重启、无 ES 写入。
+- 下一步：先修正/确认生产运行环境与代码部署（不改变数据），重新执行 page 38 dry-run；随后单独说明生产备份、影响范围和回滚点，取得针对 page 38 的明确确认后再登记。

@@ -1755,3 +1755,12 @@ Wagtail 的历史页本身主要读取 MySQL 的 `PageLogEntry`、`Revision` 元
 - 失败补偿：Mongo 写入失败时不创建 State；MySQL 事务失败时自动回滚 State/Outbox，Mongo 版本保留为安全孤儿版本并记录错误日志，后续重试依靠相同正文 hash 幂等复用。当前未建立持久化审计表，正式批量运行前应补充审计/对账记录。
 - 测试：新增 hash 不匹配拒绝测试；`register_legacy_blog_page` 定向测试 4 项通过，既有发布/工作流/搜索回归 55 项通过，`compileall`、`manage.py check`、迁移检查和 `git diff --check` 通过。
 - 安全边界：本批次只在测试环境验证命令契约，未对真实页面执行 `--apply`，未修改生产 MySQL、Mongo、Outbox 或 Elasticsearch。正式登记仍需先备份、单页试运行，再小批量推进并观察搜索投递。
+
+### 66. 测试文章 548 实际登记验收（2026-08-29）
+
+- 目标：测试库 BlogPage 548，标题“测试第一页”。只读筛选确认 `live=True`、旧 Mongo 正文 5 块、哈希 `d3721e5d0e06f170ad753d91be2401f1c804d174cdb065d2e5b7d0d5ac2b077f`，原先无 State/现代正文版本。
+- 执行：运行 `register_legacy_blog_page --apply --page-id 548 --expected-hash d3721e5d0e06f170ad753d91be2401f1c804d174cdb065d2e5b7d0d5ac2b077f`，返回 `status=registered`，生成 `body_version_id=57ade9c49d2040e98f209567d00cf1bb`。
+- MySQL 核验：`BlogPublicationState` 已写入 draft/published 指针、同一 SHA/schema，`publication_generation=1`；`ContentSearchState` 为 `content_version=2`、`upsert`、`searchable=true`、同一正文版本；`ContentSearchOutbox` id=97 已生成。
+- Mongo 核验：`content_body_versions` 存在唯一版本，`aggregate_type=blog_page`、`aggregate_id=548`、SHA/schema 与 State 一致，正文块数为 5。
+- 搜索投影核验：building 目标 `wagtailblog-test-content-v004` 的文档 548 已成功写入并包含 `body_version_id`、`publication_generation=1`；当前 serving 目标 `wagtailblog-test-content-replica0-v001` 仍为旧 mapping，文档仅有旧字段，Delivery id=163 以 `es_http_400` 进入 `dead`，因此本次搜索链路验收为**部分通过**，不能宣称 serving 搜索已完全正确。该结果复现了旧 serving mapping 与新字段契约不兼容的问题。
+- 数据/回滚：本次仅修改测试库 BlogPage 548 的 State、Mongo 版本和测试 ES 投影；未触碰生产。若需清理测试数据，应按回滚方案处理并保留 Outbox/Delivery 证据，不直接删除 Mongo 正文版本。

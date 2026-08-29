@@ -1676,3 +1676,14 @@ Wagtail 的历史页本身主要读取 MySQL 的 `PageLogEntry`、`Revision` 元
 - 只读对账：扫描 1000 个页面，`state_missing=1000`；`mongo_missing`、`live_pointer_missing`、`revision_body_mismatch`、`outbox_missing`、`search_identity_mismatch` 等样本均为空。`state_missing` 是未回填存量 State 的已知结果，后续须单独制定只读观察、分批回填和回滚方案，不得由本次迁移自动修复。
 - 回滚边界：代码可回退到迁移前 commit；MySQL DDL 已执行，不执行未经验证的反向迁移或 `--fake`。保留新增表/列及备份，必要时停止应用服务并依据备份恢复；不删除 Mongo 正文、草稿、Revision 或 Outbox。
 - 残余风险：ES 无 snapshot repository 且集群为单节点 yellow；Mongo 正文对账当前为显式命令，Beat 默认不启用 Mongo 检查；存量 State 缺失、Outbox/Delivery 归档、百万级压测和恢复演练仍未完成。
+
+### 59. Wagtail 8.0 生产真实验收与 BrowserSkill 协议记录（2026-08-29）
+
+- 浏览器自动化使用 BrowserSkill `bsk`，未使用 Playwright。首次诊断发现扩展协议 1.1、daemon 协议 1.0（扩展 0.1.7、CLI/daemon 0.1.10）；升级 CLI/daemon 至 0.1.11 后协议统一为 1.1，`bsk doctor` 全部通过。该问题属于工具链版本漂移，不是业务代码错误。
+- 生产验收页：BlogPage ID 1192，标题“生产验收测试-20260829”。完成创建、编辑、保存草稿、预览、提交 Moderators approval、批准并发布；页面详情读取 Mongo 正文正常。证据位于 `output/playwright/production-acceptance-20260829/01-*` 至 `13-*`。
+- 发布后 MySQL/Wagtail：`live=True`、`live_revision_id=1870`；`BlogPublicationState.published_body_version_id` 已写入、`publication_generation=1`。说明发布服务与正文指针切换成功。
+- 发布后搜索链路未通过：`ContentSearchOutbox(id=23, operation=upsert)` 和 Delivery(id=32) 进入 `dead`，Delivery 错误码为 `es_http_400`；ES serving 索引中不存在文档 1192，前台搜索标题返回“未找到相关内容”。该结果证明搜索改造的发布投影仍有生产兼容缺陷，不能宣称搜索验收通过；未执行手工重试、索引重建或自动修复。
+- 删除验收页已获授权并完成：后台确认页显示“确定要删除此页面吗？”，删除后返回父页面并显示“页面已删除”。删除后 MySQL 页面不存在，Mongo 正式正文、Revision 正文及 `content_body_versions` 均已清理；产生的 `MongoCleanupIntent`（formal/revision）状态为 `succeeded`。
+- 删除 tombstone 同样进入 Outbox/Delivery dead（Delivery `es_http_400`），因此“取消/删除后搜索不可见”在本次索引失败下无法由 ES 投影证明；必须先修复并在测试环境复现 ES 400，再补做只读对账和可重试投递验证。
+- 日志：uWSGI 发布请求与前台正文读取无异常堆栈；maintenance worker 记录 ES bulk HTTP 200 但单项返回 400，现有 Delivery 仅保留错误码，缺少 ES 响应体，排障信息不足。建议后续在不记录正文/凭据的前提下补充受限错误摘要。
+- 残余风险（P0）：发布状态与 Mongo 正文已一致，但搜索 upsert/tombstone 均 dead，公开搜索与删除后的索引一致性不成立。回滚边界为保留 Wagtail/Mongo/Outbox 数据，禁止直接删除正文或手工改 ES；应先修复索引写入契约，再通过重试/重建恢复投影。

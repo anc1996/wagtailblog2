@@ -14,7 +14,7 @@ from django.utils import timezone
 from django.utils.text import slugify
 from django.utils.dateparse import parse_date
 from django.core.paginator import Paginator
-from django.db import models, transaction
+from django.db import DatabaseError, models, transaction
 from django import forms
 from django.db.models import Count, Subquery, OuterRef, F
 from django.conf import settings
@@ -1046,7 +1046,7 @@ class BlogPage(Page):
 						page_id=self.pk,
 						published_body_version_id__isnull=False,
 					).exists()
-				except Exception:
+				except DatabaseError:
 					# 兼容尚未应用 State 迁移的旧环境，不阻断原有保存流程。
 					immutable_published = False
 			if immutable_published:

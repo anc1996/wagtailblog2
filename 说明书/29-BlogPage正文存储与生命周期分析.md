@@ -1728,3 +1728,13 @@ Wagtail 的历史页本身主要读取 MySQL 的 `PageLogEntry`、`Revision` 元
 - 历史兼容边界：旧 live Revision 往往没有 `mongo_body_version_id`，直接绑定新 State 会产生 `revision_body_mismatch`。此类页面应分类为 `legacy_revision_unbound`，先登记正式正文，是否创建桥接 Revision 另行审批；草稿 Revision 按其自身指针和正文可读性单独分类，不能用正式正文覆盖历史快照。现有 `add_blog_page` 或后台逐篇打开保存都不适合作为迁移工具。
 - 建议实施顺序：先应用并核验测试 schema → 重新生成真实 State 缺失报告 → 选取 1 篇已发布且 Mongo 正文完整的页面 dry-run → 验证幂等、指针/hash、Outbox 和搜索身份 → 扩大为小批量 → 观察并取得生产授权后再执行生产登记。整个登记批次必须默认 dry-run、单页/小批、可暂停、可重试并输出脱敏审计结果；本记录未执行任何登记或数据写入。
 - 模型/推理实际调度：`gpt-5.6-terra` 复核逐篇登记的数据流和跨库一致性；`gpt-5.6-luna` 执行只读报告与迁移前置检查；主 agent 负责把测试库缺表事实和生产授权边界写入方案。未向外部模型发送正文、凭据或生产数据。
+
+### 63. 测试库 State 迁移、真实缺失报告与旧文章 dry-run（2026-08-29）
+
+- 状态：已在测试库应用 `blog.0029` 至 `blog.0033`；`search.0006`、`search.0007` 原已应用，因此没有重复执行。未执行生产迁移、State 回填、Mongo 正文版本写入或搜索事件投递。
+- 迁移验证：`python manage.py migrate blog` 五个迁移均返回 `OK`；随后 `migrate --plan blog/search` 均为 `No planned migration operations`，`manage.py check` 和 `makemigrations --check --dry-run` 通过（保留既有 Wagtail/MySQL 条件唯一约束警告）。
+- 真实 State 报告：State 表已存在但行数为 0，扫描 156 篇 BlogPage，确认 `state_missing=156`。156 篇均为 `live=True`，旧 `blog_content` 正文元数据存在；现代 `content_body_versions` 对应记录为 0；Wagtail Revision 共 352 条，其中 61 篇存在历史/非 live Revision，但没有最新 Revision 晚于 `live_revision_id` 的草稿候选。完整 ID、标题、发布状态、Mongo 存在性和 Revision 标识见 `output/state-missing-report-20260829.json`。
+- 单篇 dry-run（BlogPage 38）：旧 `mongo_content_id` 可读取 `blog_content`，正文为 12 个块，规范化 SHA-256 为 `3764642ad3f11928ea48d63ad134794c6ed835b6f21f51a3584f4ab5f5920f53`；`content_body_versions` 尚无相同版本；live Revision 1059 存在但不含 `mongo_body_version_id`，因此分类为 `legacy_revision_unbound/ready_formal_hydration`。本次仅读取和计算 hash，没有调用 `save_content_body_version()`、`save_revision()`、State 写入或 Outbox。
+- 导入流程结论：当前仓库没有 `register_legacy_blog_page` 命令；`add_blog_page` 只能 `add_child()` 创建新页面并保存/发布 Revision，不能用于存量登记。后续应实现默认 dry-run、按 `page_id` 幂等、带 expected hash/confirm 的受控登记命令，先创建不可变正文版本，再在 MySQL 事务内绑定 State，最后单独生成并验证 Search Outbox；旧 Revision 不直接改写。
+- 数据与回滚边界：本批唯一生产性变更是测试 MySQL schema；若测试迁移需要回退，应保留新增表/列并按迁移记录处理，不执行未经验证的反向迁移。报告和 dry-run 不修改业务数据；生产登记仍需独立备份、小批授权和可暂停/可重试审计。
+- 模型/推理实际调度：`gpt-5.6-terra` 复核旧文章登记契约和跨库失败补偿；`gpt-5.6-luna` 执行测试迁移门禁、只读报告和单篇 dry-run；主 agent 负责确认迁移顺序、报告边界和回滚约束。未向外部模型发送正文、凭据或生产数据。

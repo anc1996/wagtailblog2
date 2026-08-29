@@ -1783,3 +1783,11 @@ Wagtail 的历史页本身主要读取 MySQL 的 `PageLogEntry`、`Revision` 元
 - 直接 SSH `root@192.168.20.2:22` 后，远端 `hostname` 为 `ziliao`，但 `hostname -I` 返回 `192.168.20.5 172.17.0.1`；该连接实际落到测试/WSL 主机地址，而非预期的生产虚拟机地址。
 - 该主机不存在 `/home/source/Django/wagtail/wagtailblog3`、`wagtailblog3.service` 和记录中的生产 Conda 环境，因此不能在此执行生产 dry-run 或 `--apply`。本次仅执行路径、服务和网络身份只读检查，无数据或服务变更。
 - 生产登记门禁保持：需先确认真正生产 VM 的可达 IP/端口和主机身份，再核对 unit 的 `ExecStart`、EnvironmentFile、解释器、page 38 Mongo/hash、v005 alias 与备份，之后才可进行单页登记。
+### 70. 生产 BlogPage 38 单篇登记实施记录（2026-08-29）
+
+- 生产门禁：确认主机 `ziliao`（192.168.20.2）、代码 `main` 已 fast-forward 至 `1c0a8aa0d468f2c7c9bdb036ff0b6b7acbedffc2`，工作树干净；生产解释器为 `/root/anaconda3/envs/wagtailblog/bin/python`，Wagtail 8.0/Django 5.2.8。
+- 备份：建立 `/home/source/Django/wagtail/backups/wagtailblog3-registration-20260829-150000/`，保存 BlogPage 38、State、Search State/Outbox 快照及 manifest；引用既有 Mongo 全量备份 `wagtailblog3-markdown-import-20260829-100724/mongodb` 与 ES snapshot `wagtailblog3-search-snapshots/pre-search-20260829-134500`。未删除任何旧索引、正文或快照。
+- dry-run：page 38 为 live/published，Mongo 正文 20 块，hash `dacf01aaabe9135de0235c394eee46dd2bb6389d7e5c4915539948f68638cef1`，State/现代正文版本缺失，分类 `state_missing + legacy_revision_unbound`。
+- apply：使用 expected-hash 执行单篇登记，生成 Mongo `body_version_id=517972c372754b608d5fb25da25b5cb4`；MySQL `BlogPublicationState` draft/published 指针、hash/schema、`publication_generation=1` 均一致；Search State `content_version=2`、`upsert`、`searchable=true`，Outbox id=27 创建。
+- 搜索验收：v005 alias 文档 `_id=38` 已更新为 `content_version=2`，包含相同 `body_version_id`、`publication_generation=1`、`searchable=true`；v005 Delivery(id=39) succeeded。旧 v003 Delivery(id=38) 因兼容性映射缺失记为 `dead/es_http_400`，因此 Outbox 聚合状态仍为 dead，但生产 read alias 实际指向的 v005 已成功，不执行旧目标重试或删除。
+- 服务：四个生产服务保持 active/enabled，无重启；ES v005 green，集群整体 yellow（单节点副本未分配）作为残余风险记录。回滚边界为保留 Mongo 版本/State/Outbox 与备份，必要时恢复到 `1c0a8aa` 前代码或旧 alias，禁止删除正文。

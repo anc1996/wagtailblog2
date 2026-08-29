@@ -1764,3 +1764,9 @@ Wagtail 的历史页本身主要读取 MySQL 的 `PageLogEntry`、`Revision` 元
 - Mongo 核验：`content_body_versions` 存在唯一版本，`aggregate_type=blog_page`、`aggregate_id=548`、SHA/schema 与 State 一致，正文块数为 5。
 - 搜索投影核验：building 目标 `wagtailblog-test-content-v004` 的文档 548 已成功写入并包含 `body_version_id`、`publication_generation=1`；当前 serving 目标 `wagtailblog-test-content-replica0-v001` 仍为旧 mapping，文档仅有旧字段，Delivery id=163 以 `es_http_400` 进入 `dead`，因此本次搜索链路验收为**部分通过**，不能宣称 serving 搜索已完全正确。该结果复现了旧 serving mapping 与新字段契约不兼容的问题。
 - 数据/回滚：本次仅修改测试库 BlogPage 548 的 State、Mongo 版本和测试 ES 投影；未触碰生产。若需清理测试数据，应按回滚方案处理并保留 Outbox/Delivery 证据，不直接删除 Mongo 正文版本。
+
+### 67. 测试 serving 索引修复门禁（2026-08-29）
+
+- 只读核对确认 alias `wagtailblog-test-content-read` 唯一指向旧索引 `wagtailblog-test-content-replica0-v001`；其 strict mapping 缺少 `body_version_id`、`publication_generation`，不能直接接受新事件。
+- 候选 building 索引 `content-v004` 已包含新字段但 Build 状态为 failed；`content-v005-fix` 同样因 13 篇 Mongo 正式正文缺失而未达到 READY。直接切 alias 会造成公开搜索回退或数据缺失，因此本批次不切换 alias、不删除旧索引、不手工改 ES 文档。
+- 修复门槛：先完成缺失正文对账或建立完整可重建数据集，再运行测试索引全量回填、catch-up、READY 校验，最后执行原子 alias 切换并重放 page 548 的 Delivery。当前 page 548 的 State/Mongo/Outbox 正确，但 serving 搜索仍为部分通过。

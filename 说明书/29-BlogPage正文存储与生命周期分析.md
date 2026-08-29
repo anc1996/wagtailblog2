@@ -1722,7 +1722,7 @@ Wagtail 的历史页本身主要读取 MySQL 的 `PageLogEntry`、`Revision` 元
 
 - 只读报告：在 WSL2 `wagtailblog-test` 环境读取 BlogPage、Wagtail Revision 和 Mongo 元数据，未调用保存、迁移、索引创建或删除接口。报告文件为 `output/state-missing-report-20260829.json`，包含全部文章 ID、标题、发布状态、Mongo 正文存在性、Revision 数量和最新 Revision 标识；Mongo 查询仅返回数组类型/存在性元数据，不返回正文。
 - 环境前置发现：测试库 `wagtailsoftblog_test` 尚未应用 `blog.0029` 至 `blog.0033`，`blog_blogpublicationstate` 表不存在。因此本次扫描的 156 篇 BlogPage 是“State 表缺失基线”，不能等同于真实的 156 条 `state_missing`；必须先在授权的测试迁移批次应用 schema，再重新运行报告，才能生成可用于回填决策的真实分类。
-- 当前基线统计（仅供迁移前核对）：156 篇 BlogPage 均为 `live=1`，均存在 `blog_content` 正文元数据，Revision 共 352 条；按“最新 Revision ID 是否等于 live_revision_id”判定，未发现未同步的最新 Revision。现代 `content_body_versions` 集合未发现对应记录。该结果不构成生产数据结论。
+- 当前基线统计（仅供迁移前核对）：156 篇 BlogPage 均为 `live=1`，均存在 `blog_content` 正文元数据，Revision 共 352 条；其中 61 篇存在历史/非 live Revision，但按“最新 Revision ID 是否等于 live_revision_id”判定，未发现未同步的最新 Revision。现代 `content_body_versions` 集合未发现对应记录。该结果不构成生产数据结论。
 - 报告分类定义：`published/unpublished` 依据 BlogPage.live；`has_mongo_body` 依据 `blog_content` 或 `content_body_versions` 中存在合法数组正文；`has_draft_revision` 仅表示最新 Revision 不等于 live Revision，后续登记前仍需再区分真正草稿、历史 Revision 和审批状态，不能直接据此发布。
 - 旧文章逐个登记：方案可行，但应登记现有 BlogPage，不应重建页面或改变 page PK、slug、标题和页面树。每篇以 `page_id` 幂等，先只读校验正式 Mongo 正文、归属、schema 和 hash，再在独立批次写入不可变 `body_version`；随后在 MySQL 事务内锁定页面并创建/更新 `BlogPublicationState`，最后生成与当前公开代际一致的 Search State/Outbox。Mongo 写入与 MySQL 事务无法共享原子提交，Mongo 先写而 MySQL 失败时保留安全孤儿版本并进入待审计/后续 GC，Mongo 失败时不得创建 State 指针。
 - 历史兼容边界：旧 live Revision 往往没有 `mongo_body_version_id`，直接绑定新 State 会产生 `revision_body_mismatch`。此类页面应分类为 `legacy_revision_unbound`，先登记正式正文，是否创建桥接 Revision 另行审批；草稿 Revision 按其自身指针和正文可读性单独分类，不能用正式正文覆盖历史快照。现有 `add_blog_page` 或后台逐篇打开保存都不适合作为迁移工具。

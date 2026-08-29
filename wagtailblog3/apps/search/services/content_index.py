@@ -6,7 +6,8 @@ import re
 from typing import Any, Mapping
 
 
-CONTENT_INDEX_MAPPING_VERSION = "v003"
+# mapping 采用不可变物理索引；新增字段必须创建新版本索引后再切换 alias。
+CONTENT_INDEX_MAPPING_VERSION = "v005"
 CONTENT_INDEX_ANALYZER_PROFILES = {
     "legacy_standard": {
         "title": None,
@@ -184,13 +185,18 @@ def content_index_template_matches(
     existing_template: Mapping[str, Any],
     expected_template: Mapping[str, Any],
 ) -> bool:
-    """只复用带相同应用标识和 mapping 版本的模板，避免覆盖未知配置。"""
+    """仅复用完整契约一致的模板，避免 strict mapping 漂移导致 Bulk 单项 400。
 
+    参数：ES ``get_index_template`` 响应和本地待创建模板定义。
+    返回：仅当 index pattern、应用元数据及 settings/mappings 全部一致时返回 ``True``。
+    副作用：无；缺少任一契约字段即视为不匹配，由调用方停止覆盖并人工处理。
+    """
     templates = existing_template.get("index_templates", [])
     if len(templates) != 1:
         return False
     template = templates[0].get("index_template", {})
     return (
-        template.get("index_patterns") == expected_template["index_patterns"]
-        and template.get("_meta") == expected_template["_meta"]
+        template.get("index_patterns") == expected_template.get("index_patterns")
+        and template.get("_meta") == expected_template.get("_meta")
+        and template.get("template") == expected_template.get("template")
     )

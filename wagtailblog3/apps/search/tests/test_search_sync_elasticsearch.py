@@ -60,6 +60,51 @@ class ContentSearchElasticsearchWriterTests(SimpleTestCase):
 
         self.assertEqual(result.status, "superseded")
 
+    def test_single_writer_uses_content_version_when_publication_generation_present(self):
+        backend, client = self._backend_with_status(201)
+        document = {
+            **self.document,
+            "publication_generation": 1,
+        }
+        with patch("search.services.elasticsearch.get_search_backend", return_value=backend):
+            result = write_content_search_document(self.target, document, 9)
+
+        self.assertEqual(result.status, "succeeded")
+        operations = client.bulk.call_args.kwargs["operations"]
+        self.assertEqual(operations[0]["index"]["version"], document["content_version"])
+        self.assertEqual(operations[0]["index"]["version_type"], "external")
+
+    def test_bulk_writer_uses_each_content_version_with_publication_generation(self):
+        backend = SimpleNamespace(
+            es=Mock(
+                bulk=Mock(
+                    return_value={
+                        "items": [
+                            {"index": {"status": 201}},
+                            {"index": {"status": 409}},
+                        ]
+                    }
+                )
+            )
+        )
+        documents = [
+            {"page_id": 70001, "content_version": 9, "publication_generation": 1},
+            {"page_id": 70002, "content_version": 11, "publication_generation": 2},
+        ]
+        with patch("search.services.elasticsearch.get_search_backend", return_value=backend):
+            result = write_content_search_documents(self.target, documents)
+
+        self.assertEqual(result, ContentSearchBulkWriteResult(succeeded=1, superseded=1))
+        operations = backend.es.bulk.call_args.kwargs["operations"]
+        self.assertEqual(
+            [operations[0]["index"]["version"], operations[2]["index"]["version"]],
+            [document["content_version"] for document in documents],
+        )
+        self.assertEqual(
+            [operations[0]["index"]["version_type"], operations[2]["index"]["version_type"]],
+            ["external", "external"],
+        )
+
     def test_rate_limit_is_retryable_and_mapping_error_is_dead(self):
         for status, retryable in ((429, True), (400, False)):
             backend, _client = self._backend_with_status(status)

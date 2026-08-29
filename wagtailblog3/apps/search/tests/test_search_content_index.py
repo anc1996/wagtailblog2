@@ -142,6 +142,7 @@ class ContentIndexDefinitionTests(SimpleTestCase):
                     "name": "wagtailblog-test-content-v001-template",
                     "index_template": {
                         "index_patterns": definition["index_patterns"],
+                        "template": definition["template"],
                         "_meta": definition["_meta"],
                     },
                 }
@@ -150,6 +151,32 @@ class ContentIndexDefinitionTests(SimpleTestCase):
 
         self.assertTrue(content_index_template_matches(existing, definition))
         existing["index_templates"][0]["index_template"]["_meta"] = {}
+        self.assertFalse(content_index_template_matches(existing, definition))
+
+    def test_template_reuse_rejects_same_meta_when_mapping_is_missing_fields(self):
+        definition = build_content_index_template("wagtailblog-test-content-v005")
+        existing = {
+            "index_templates": [
+                {
+                    "index_template": {
+                        "index_patterns": definition["index_patterns"],
+                        "template": {
+                            **definition["template"],
+                            "mappings": {
+                                **definition["template"]["mappings"],
+                                "properties": {
+                                    key: value
+                                    for key, value in definition["template"]["mappings"]["properties"].items()
+                                    if key != "publication_generation"
+                                },
+                            },
+                        },
+                        "_meta": definition["_meta"],
+                    }
+                }
+            ]
+        }
+
         self.assertFalse(content_index_template_matches(existing, definition))
 
     def test_document_uses_one_formal_read_and_projects_filter_fields(self):

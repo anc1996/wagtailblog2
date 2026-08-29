@@ -1687,3 +1687,21 @@ Wagtail 的历史页本身主要读取 MySQL 的 `PageLogEntry`、`Revision` 元
 - 删除 tombstone 同样进入 Outbox/Delivery dead（Delivery `es_http_400`），因此“取消/删除后搜索不可见”在本次索引失败下无法由 ES 投影证明；必须先修复并在测试环境复现 ES 400，再补做只读对账和可重试投递验证。
 - 日志：uWSGI 发布请求与前台正文读取无异常堆栈；maintenance worker 记录 ES bulk HTTP 200 但单项返回 400，现有 Delivery 仅保留错误码，缺少 ES 响应体，排障信息不足。建议后续在不记录正文/凭据的前提下补充受限错误摘要。
 - 残余风险（P0）：发布状态与 Mongo 正文已一致，但搜索 upsert/tombstone 均 dead，公开搜索与删除后的索引一致性不成立。回滚边界为保留 Wagtail/Mongo/Outbox 数据，禁止直接删除正文或手工改 ES；应先修复索引写入契约，再通过重试/重建恢复投影。
+
+### 60. ES 400 测试复现与修复计划（2026-08-29）
+
+- 目标：在测试环境用真实 Elasticsearch 复现生产 `es_http_400`，确认是否由 strict mapping、索引版本或 Bulk 外部版本契约导致；修复后补充回归测试，并在生产仅做一次受控搜索验收。
+- 非目标：不修改生产正文、Mongo 草稿、历史 Revision，不手工重试或删除生产 Outbox，不在未通过测试门禁前切换生产 alias。
+- 计划：读取测试 ES alias/mapping 与 Outbox；使用隔离测试页面或最小 Bulk 请求复现并保存脱敏错误分类；由搜索实现补齐兼容 mapping/索引版本与错误诊断；运行搜索及 Django 回归；生产执行备份、发布精确 commit 后只创建临时页验证搜索，随后删除并核验 tombstone。
+- 验收标准：测试 upsert 与 tombstone Delivery 均 succeeded，ES 文档可检索且删除后不可检索；`manage.py check`、目标测试、`compileall`、迁移检查和 `git diff --check` 通过；生产搜索验收有截图、日志和 Outbox/Delivery 只读证据。
+- 回滚：测试环境可删除隔离索引/页面并恢复代码；生产仅回退到上一已验证 commit，保留 Outbox/Mongo/ES 证据，不执行未经授权的索引删除或数据修复。
+
+#### 实施记录：ES 400 根因确认与代码修复（2026-08-29）
+
+- 状态：代码修复与隔离索引写入验证完成；测试 serving alias 尚未切换，因现有公开页面中 13 个页面缺少 Mongo 正文而无法宣称全量重建完成。
+- 事实：测试 serving target `test-content-replica0-v001` 及其 read alias 指向旧 `dynamic: strict` mapping，缺少 `body_version_id`、`publication_generation`；真实 Bulk 单项返回 `strict_dynamic_mapping_exception`/HTTP 400。缺失正文页面 ID 仅记录为 `[604,608,610,611,612,613,614,615,616,617,618,619,620]`，未读取或修改正文。
+- 实际修改：`search/services/content_index.py` 将不可变 mapping 版本提升至 `v005`，并让模板复用比较完整 settings/mappings 契约；`search/services/elasticsearch.py` 固定以单调 `content_version` 作为 ES external version；补充 mapping 缺字段和 generation 不得覆盖 content version 的回归测试。
+- 测试证据：`search.tests.test_search_sync_elasticsearch` 9 项通过；`search.tests.test_search_content_index` 22 项通过；`manage.py check` 通过（保留既有 Wagtail 条件唯一约束警告）；在隔离物理索引 `wagtailblog-test-content-v005` 上真实 upsert 与 tombstone 均 succeeded，含新增身份字段且 tombstone 后 searchable=false。
+- 数据/服务影响：仅写入测试 ES 隔离索引并登记测试 MySQL Target/Build（`content-v005-fix`），未切换 read alias，未处理旧 dead Delivery；生产尚未执行索引创建、alias 切换或服务重启。
+- 回滚点：删除/退役测试隔离 target 与索引即可；代码回退到本批次前 commit 不触及 MySQL/Mongo 正文。生产回滚仍限定为 alias 原子切回上一 serving 索引和恢复上一已验证代码。
+- 残余风险：需另行处理 13 个页面的 Mongo 正文完整性并完成全量重建、catch-up、alias 门禁；模板契约比较要求 ES 返回完整 template 结构，旧模板响应不完整时会安全拒绝复用。

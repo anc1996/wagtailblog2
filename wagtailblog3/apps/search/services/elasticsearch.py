@@ -308,8 +308,9 @@ def _bulk_operations(target: Any, documents: Iterable[Mapping[str, Any]]) -> lis
                         "_index": target.index_name,
                         "_id": str(document["page_id"]),
                         # 新事件以公开代际作为 ES external version；旧事件继续使用 content_version。
-                        "version": document.get("publication_generation")
-                        or document["content_version"],
+                        # external version 只使用 MySQL State 的单调 content_version；
+                        # publication_generation 是公开身份字段，不能切换版本域。
+                        "version": document["content_version"],
                         "version_type": "external",
                     }
                 },

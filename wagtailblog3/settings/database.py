@@ -51,6 +51,13 @@ SERVICE_HOST = os.environ.get("SERVICE_HOST", "192.168.20.2")
 BLOG_ANALYTICS_CLEANUP_ENABLED = _env_bool("BLOG_ANALYTICS_CLEANUP_ENABLED", False)
 BLOG_PAGEVIEW_RETENTION_DAYS = _env_int("BLOG_PAGEVIEW_RETENTION_DAYS", 30)
 BLOG_ANALYTICS_CLEANUP_BATCH_SIZE = _env_int("BLOG_ANALYTICS_CLEANUP_BATCH_SIZE", 500)
+# 只读对账每轮最多扫描的页面数，避免 Beat 占满 maintenance Worker。
+BLOG_PUBLICATION_CONSISTENCY_BATCH_SIZE = max(
+	1, min(_env_int("BLOG_PUBLICATION_CONSISTENCY_BATCH_SIZE", 100), 5000)
+)
+BLOG_PUBLICATION_CONSISTENCY_LEASE_SECONDS = max(
+	1, min(_env_int("BLOG_PUBLICATION_CONSISTENCY_LEASE_SECONDS", 240), 3600)
+)
 
 # ==========================================================
 # MySQL 数据库配置
@@ -266,6 +273,7 @@ def get_celery_config(time_zone, redis_host, redis_port, redis_password):
 			'blog.tasks.cleanup_analytics_details': {'queue': maintenance_queue},
 			'blog.tasks.cleanup_markdown_import_artifact': {'queue': maintenance_queue},
 			'blog.tasks.dispatch_markdown_import_cleanup_retries': {'queue': maintenance_queue},
+			'blog.tasks.dispatch_pending_mongo_cleanup_retries': {'queue': maintenance_queue},
 			'blog.tasks.assemble_markdown_import_session': {'queue': maintenance_queue},
 			'blog.tasks.expire_markdown_import_sessions': {'queue': maintenance_queue},
 			'search.tasks.wake_content_search_delivery': {'queue': maintenance_queue},
@@ -415,6 +423,16 @@ def get_celery_config(time_zone, redis_host, redis_port, redis_password):
 			'dispatch-markdown-import-cleanup-retries': {
 				'task': 'blog.tasks.dispatch_markdown_import_cleanup_retries',
 				'schedule': 60,
+				'options': {'queue': maintenance_queue},
+			},
+			'dispatch-pending-mongo-cleanup-retries': {
+				'task': 'blog.tasks.dispatch_pending_mongo_cleanup_retries',
+				'schedule': 60,
+				'options': {'queue': maintenance_queue},
+			},
+			'check-blog-publication-consistency': {
+				'task': 'blog.tasks.check_publication_consistency',
+				'schedule': 300,
 				'options': {'queue': maintenance_queue},
 			},
 			'expire-markdown-import-sessions': {

@@ -56,6 +56,9 @@ class ContentSearchState(models.Model):
     searchable = models.BooleanField(default=False)
     content_hash = models.CharField(max_length=64, null=True, blank=True)
     mongo_content_id = models.CharField(max_length=50, null=True, blank=True)
+    # 新版本使用正文不可变指针和公开代际；旧页面可继续为空。
+    body_version_id = models.CharField(max_length=128, null=True, blank=True)
+    publication_generation = models.PositiveBigIntegerField(null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -76,6 +79,9 @@ class ContentSearchOutbox(models.Model):
     operation = models.CharField(max_length=16, choices=ContentSearchOperation.choices)
     content_hash = models.CharField(max_length=64, null=True, blank=True)
     mongo_content_id = models.CharField(max_length=50, null=True, blank=True)
+    # Outbox 事件携带生成时的正文身份，消费者据此拒绝迟到事件。
+    body_version_id = models.CharField(max_length=128, null=True, blank=True)
+    publication_generation = models.PositiveBigIntegerField(null=True, blank=True)
     searchable = models.BooleanField(default=False)
     status = models.CharField(
         max_length=16,
@@ -110,6 +116,10 @@ class ContentSearchOutbox(models.Model):
             models.Index(
                 fields=("status", "available_at"),
                 name="srch_outbox_stat_avail_idx",
+            ),
+            models.Index(
+                fields=("page_id", "-content_version", "-id"),
+                name="srch_outbox_page_ver_idx",
             ),
         ]
 

@@ -8,6 +8,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from wagtail.models import Page
+from wagtail.models import Locale
 from wagtail.permissions import policy_registry
 
 from .admin import PageViewAdmin, PageViewSnippetViewSet
@@ -25,7 +26,11 @@ from .models import PageView
 class PageViewAdminTests(TestCase):
     @classmethod
     def setUpTestData(cls):
-        cls.root = Page.objects.get(depth=1)
+        cls.root = Page.get_first_root_node()
+        if cls.root is None:
+            Locale.objects.get_or_create(language_code=settings.LANGUAGE_CODE)
+            cls.root = Page(title="PageView 测试根节点", slug="page-view-test-root")
+            Page.add_root(instance=cls.root)
         cls.page = cls.root.add_child(
             instance=Page(title="访问测试页面", slug="page-view-admin-test")
         )

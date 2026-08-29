@@ -1,6 +1,7 @@
 """验证 Markdown、Mongo 存储和 Vditor 控件之间的兼容契约。"""
 
 import hashlib
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -15,7 +16,8 @@ from blog.blocks import (
     MermaidBlock,
     VditorMarkdownBlock,
 )
-from blog.models import BlogPage
+from blog.models import BlogPage, BlogRevisionBodyUnavailableError
+from wagtailblog3.mongo import MongoRevisionNotFoundError, MongoRevisionPointerError
 from blog.widgets import VditorMarkdownWidget
 from blog.markdown_renderer import MarkdownRenderer
 from wagtailblog3.mongodb import MongoDBStreamFieldAdapter
@@ -83,6 +85,115 @@ class BlogPageRevisionStorageTests(TestCase):
         self.assertEqual(data["body"], "[]")
         self.assertEqual(data["mongo_draft_pointer"], "draft-pointer")
         manager_cls.return_value.save_blog_revision_body.assert_called_once()
+
+    @patch("blog.models.MongoManager")
+    def test_revision_pointer_restores_its_own_empty_body(self, manager_cls):
+        """空正文也是历史快照，不能改读当前正式正文。"""
+        manager = manager_cls.return_value
+        manager.save_blog_revision_body.return_value = "rev_544_legacy"
+        manager.get_blog_revision_body.return_value = {"page_id": 544, "body": []}
+        page = BlogPage(
+            title="临时文章",
+            body=[{"type": "markdown_block", "value": "草稿正文"}],
+            mongo_content_id="live-content",
+        )
+
+        data = page.serializable_data()
+        data["id"] = 544
+        restored = BlogPage.from_serializable_data(data)
+
+        self.assertEqual(len(restored.body), 0)
+        manager.get_blog_revision_body.assert_called_once_with("rev_544_legacy")
+        manager.get_blog_content.assert_not_called()
+
+    @patch("blog.models.MongoManager")
+    def test_missing_revision_snapshot_never_falls_back_to_live_content(self, manager_cls):
+        """指针存在但快照丢失时，历史页必须停止而不是展示当前正式正文。"""
+        manager = manager_cls.return_value
+        manager.save_blog_revision_body.return_value = "missing-revision"
+        manager.get_blog_revision_body.side_effect = MongoRevisionNotFoundError(
+            "MongoDB 中不存在对应历史正文快照"
+        )
+        manager.get_blog_content.return_value = {
+            "body": [{"type": "markdown_block", "value": "当前正式正文"}]
+        }
+        page = BlogPage(
+            title="临时文章",
+            body=[{"type": "markdown_block", "value": "历史正文"}],
+            mongo_content_id="live-content",
+        )
+
+        data = page.serializable_data()
+
+        with self.assertRaises(BlogRevisionBodyUnavailableError):
+            BlogPage.from_serializable_data(data)
+
+        manager.get_blog_content.assert_not_called()
+
+    @patch("blog.models.MongoManager")
+    def test_revision_without_mongo_pointer_keeps_legacy_mysql_body(
+        self, manager_cls
+    ):
+        """草稿体系启用前的 Revision 必须保留自身 MySQL 历史正文。"""
+        manager = manager_cls.return_value
+        manager.save_blog_revision_body.return_value = "unused-pointer"
+        page = BlogPage(
+            title="临时文章",
+            body=[{"type": "markdown_block", "value": "保存时正文"}],
+            mongo_content_id="live-content",
+        )
+        data = page.serializable_data()
+        data.pop("mongo_draft_pointer")
+        data["body"] = json.dumps(
+            [{"type": "markdown_block", "value": "旧版 Revision 正文"}]
+        )
+
+        restored = BlogPage.from_serializable_data(data)
+
+        self.assertEqual(restored.body.raw_data[0]["value"], "旧版 Revision 正文")
+        manager.get_blog_content.assert_not_called()
+
+    @patch("blog.models.MongoManager")
+    def test_empty_revision_pointer_never_falls_back_to_live_content(self, manager_cls):
+        """空指针是损坏 Revision，不是允许读取正式正文的无指针旧数据。"""
+        manager = manager_cls.return_value
+        manager.save_blog_revision_body.return_value = "unused-pointer"
+        manager.get_blog_revision_body.side_effect = MongoRevisionPointerError(
+            "历史正文指针为空"
+        )
+        page = BlogPage(
+            title="临时文章",
+            body=[{"type": "markdown_block", "value": "历史正文"}],
+            mongo_content_id="live-content",
+        )
+        data = page.serializable_data()
+        data["mongo_draft_pointer"] = ""
+
+        with self.assertRaises(BlogRevisionBodyUnavailableError):
+            BlogPage.from_serializable_data(data)
+
+        manager.get_blog_content.assert_not_called()
+
+    @patch("blog.models.MongoManager")
+    def test_revision_pointer_requires_matching_page_id(self, manager_cls):
+        """Mongo 快照缺少页面身份或跨页时，Revision 不得注入其正文。"""
+        manager = manager_cls.return_value
+        manager.save_blog_revision_body.return_value = "cross-page-pointer"
+        manager.get_blog_revision_body.return_value = {
+            "page_id": 545,
+            "body": [{"type": "markdown_block", "value": "另一篇文章"}],
+        }
+        page = BlogPage(
+            title="临时文章",
+            body=[{"type": "markdown_block", "value": "本页正文"}],
+        )
+        data = page.serializable_data()
+        data["id"] = 544
+
+        with self.assertRaises(BlogRevisionBodyUnavailableError) as error:
+            BlogPage.from_serializable_data(data)
+
+        self.assertEqual(error.exception.code, "revision_page_mismatch")
 
 
 class MermaidRendererCompatibilityTests(SimpleTestCase):

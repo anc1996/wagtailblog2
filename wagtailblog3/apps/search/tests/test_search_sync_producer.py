@@ -6,7 +6,7 @@ from django.db import close_old_connections, transaction
 from django.test import TestCase, TransactionTestCase, override_settings
 from wagtail.models import PageViewRestriction
 
-from blog.models import BlogPage
+from blog.models import BlogPage, BlogPublicationState
 from search.models import (
     ContentSearchOperation,
     ContentSearchOutbox,
@@ -44,6 +44,12 @@ class ContentSearchProducerLifecycleTests(BlogLifecycleFixtureMixin, TestCase):
             self.assertTrue(first_event.searchable)
             self.assertEqual(first_event.mongo_content_id, page.mongo_content_id)
             self.assertEqual(len(first_event.content_hash), 64)
+            publication_state = BlogPublicationState.objects.get(page_id=page.pk)
+            self.assertEqual(
+                first_event.body_version_id,
+                publication_state.published_body_version_id,
+            )
+            self.assertEqual(first_event.publication_generation, 1)
 
             page.body = self._markdown_body("第二版正式正文")
             page = self._publish(page)
@@ -56,6 +62,35 @@ class ContentSearchProducerLifecycleTests(BlogLifecycleFixtureMixin, TestCase):
         self.assertEqual([event.content_version for event in events], [1, 2])
         self.assertTrue(all(event.operation == ContentSearchOperation.UPSERT for event in events))
         self.assertEqual(wakeup.call_count, 2)
+
+    def test_publish_state_and_outbox_are_visible_in_same_transaction(self):
+        page = self._create_draft_page("事务一致性正文")
+        revision = page.save_revision()
+        observed = {}
+
+        def observe(sender, instance, **kwargs):
+            from blog.models import BlogPublicationState
+
+            state = BlogPublicationState.objects.get(page_id=instance.pk)
+            event = ContentSearchOutbox.objects.get(page_id=instance.pk)
+            observed.update(
+                in_atomic=connection.in_atomic_block,
+                state_body=state.published_body_version_id,
+                event_body=event.body_version_id,
+                generation=state.publication_generation,
+            )
+
+        from django.db import connection
+        from wagtail.signals import page_published
+
+        page_published.connect(observe, sender=BlogPage, weak=False)
+        self.addCleanup(page_published.disconnect, observe, BlogPage)
+        with patch("search.services.outbox.schedule_content_search_wakeup"):
+            revision.publish()
+
+        self.assertTrue(observed["in_atomic"])
+        self.assertEqual(observed["state_body"], observed["event_body"])
+        self.assertEqual(observed["generation"], 1)
 
     def test_unpublish_and_delete_create_tombstones_and_keep_state(self):
         with patch("search.services.outbox.schedule_content_search_wakeup"):

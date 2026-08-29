@@ -115,13 +115,15 @@ def check_content_search_consistency(
         .order_by("page_id")[:limit]
     )
     state_ids = [state.page_id for state in states]
-    index_documents = read_content_search_documents(target, state_ids)
+    index_documents = read_content_search_documents(target, state_ids, include_identity=True)
     counts = Counter()
     samples = {
         "missing": [],
         "stale": [],
         "ahead": [],
         "hash_mismatch": [],
+        "body_version_mismatch": [],
+        "generation_mismatch": [],
         "wrong_tombstone": [],
         "extra": [],
     }
@@ -162,8 +164,20 @@ def check_content_search_consistency(
         ):
             counts["hash_mismatch"] += 1
             _append_sample(samples, "hash_mismatch", state.page_id, sample_limit)
+        if state.body_version_id and document.get("body_version_id") != state.body_version_id:
+            counts["body_version_mismatch"] += 1
+            _append_sample(samples, "body_version_mismatch", state.page_id, sample_limit)
+        if (
+            state.publication_generation is not None
+            and _safe_int(document.get("publication_generation"))
+            != state.publication_generation
+        ):
+            counts["generation_mismatch"] += 1
+            _append_sample(samples, "generation_mismatch", state.page_id, sample_limit)
 
-    scanned_documents = scan_content_search_documents(target, after_page_id, limit)
+    scanned_documents = scan_content_search_documents(
+        target, after_page_id, limit, include_identity=True
+    )
     scanned_ids = [page_id for page_id, _document in scanned_documents]
     known_state_ids = set(
         ContentSearchState.objects.filter(page_id__in=scanned_ids).values_list(
@@ -175,6 +189,16 @@ def check_content_search_consistency(
             counts["extra"] += 1
             _append_sample(samples, "extra", page_id, sample_limit)
 
+    count_keys = [
+        "missing",
+        "stale",
+        "ahead",
+        "hash_mismatch",
+        "wrong_tombstone",
+        "extra",
+    ]
+    if any(state.body_version_id or state.publication_generation is not None for state in states):
+        count_keys.extend(("body_version_mismatch", "generation_mismatch"))
     return {
         "target_id": target.target_id,
         "connection_name": target.connection_name,
@@ -186,14 +210,7 @@ def check_content_search_consistency(
         "index_scanned": len(scanned_documents),
         "counts": {
             key: counts[key]
-            for key in (
-                "missing",
-                "stale",
-                "ahead",
-                "hash_mismatch",
-                "wrong_tombstone",
-                "extra",
-            )
+            for key in count_keys
         },
         "samples": samples,
     }

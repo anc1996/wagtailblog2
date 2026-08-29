@@ -279,6 +279,20 @@ def _load_current_event_and_state(lease: DeliveryLease):
         return event, state, "retry"
     if event.mongo_content_id and state.mongo_content_id and event.mongo_content_id != state.mongo_content_id:
         return event, state, "retry"
+    if event.body_version_id and event.body_version_id != state.body_version_id:
+        return event, state, "superseded"
+    if state.body_version_id and not event.body_version_id:
+        # 新状态已有不可变正文身份时，旧格式事件不得再索引未知正文。
+        return event, state, "superseded"
+    if event.publication_generation is not None:
+        if state.publication_generation is None:
+            return event, state, "retry"
+        if event.publication_generation < state.publication_generation:
+            return event, state, "superseded"
+        if event.publication_generation > state.publication_generation:
+            return event, state, "retry"
+    if state.publication_generation is not None and event.publication_generation is None:
+        return event, state, "superseded"
     return event, state, "ready"
 
 
@@ -310,6 +324,15 @@ def _confirm_formal_content(lease: DeliveryLease, formal_document: object) -> st
             return "retry"
         if event.mongo_content_id and event.mongo_content_id != formal_document.mongo_content_id:
             return "retry"
+        document_body_version_id = getattr(formal_document, "body_version_id", None)
+        if event.body_version_id and document_body_version_id != event.body_version_id:
+            return "retry"
+        if (
+            event.publication_generation is not None
+            and getattr(formal_document, "publication_generation", None)
+            != event.publication_generation
+        ):
+            return "retry"
 
         update_state = not state.content_hash
         update_event = not event.content_hash
@@ -332,6 +355,16 @@ def _tombstone_document(event: object) -> dict[str, object]:
         "content_version": event.content_version,
         "searchable": False,
         "operation": ContentSearchOperation.TOMBSTONE,
+        **(
+            {"body_version_id": event.body_version_id}
+            if event.body_version_id
+            else {}
+        ),
+        **(
+            {"publication_generation": event.publication_generation}
+            if event.publication_generation is not None
+            else {}
+        ),
     }
 
 
@@ -485,17 +518,29 @@ def process_content_search_delivery(delivery_id: int):
             return _complete_delivery(lease, ContentSearchStatus.SUPERSEDED)
 
         if event.operation == ContentSearchOperation.TOMBSTONE or not state.searchable:
-            write_result = write_content_search_document(
-                target,
-                _tombstone_document(event),
-                event.content_version,
-            )
+            tombstone = _tombstone_document(event)
+            if event.publication_generation is None:
+                write_result = write_content_search_document(
+                    target, tombstone, event.content_version
+                )
+            else:
+                write_result = write_content_search_document(
+                    target,
+                    tombstone,
+                    event.content_version,
+                    publication_generation=event.publication_generation,
+                )
         else:
             page = BlogPage.objects.live().public().filter(pk=event.page_id).first()
             if page is None:
                 # 访问限制刚改变时宁可暂不写入；范围任务会在后续版本生成 tombstone 或 upsert。
                 return _complete_delivery(lease, ContentSearchStatus.SUCCEEDED)
-            formal_document = build_formal_content_document(page, event.content_version)
+            formal_document = build_formal_content_document(
+                page,
+                event.content_version,
+                body_version_id=event.body_version_id,
+                publication_generation=event.publication_generation,
+            )
             if formal_document is None:
                 return _retry_or_dead_delivery(lease, "mongo_formal_content_unavailable")
             confirmation = _confirm_formal_content(lease, formal_document)
@@ -509,11 +554,17 @@ def process_content_search_delivery(delivery_id: int):
                 )
             if confirmation != "ready":
                 return _retry_or_dead_delivery(lease, "content_search_formal_content_changed")
-            write_result = write_content_search_document(
-                target,
-                formal_document.document,
-                event.content_version,
-            )
+            if event.publication_generation is None:
+                write_result = write_content_search_document(
+                    target, formal_document.document, event.content_version
+                )
+            else:
+                write_result = write_content_search_document(
+                    target,
+                    formal_document.document,
+                    event.content_version,
+                    publication_generation=event.publication_generation,
+                )
     except ContentSearchElasticsearchError as error:
         if error.retryable:
             return _retry_or_dead_delivery(lease, error.code)

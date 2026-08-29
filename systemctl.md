@@ -23,8 +23,8 @@ uWSGI 的 6051 是仅供本机诊断的 HTTP 端口，不作为对外入口。
 | 服务 | 职责 | 是否开机启动 |
 | --- | --- | --- |
 | `wagtailblog3.service` | uWSGI / Django 网站 | 是 |
-| `wagtailblog3-celery-maintenance.service` | 日志索引同步和维护队列；执行 Markdown 导入会话组装、媒体精确补偿和 cleanup retry，以及内容搜索 Delivery 的租约消费与重试 | 是 |
-| `wagtailblog3-celery-beat.service` | 补偿日志索引 outbox、内容搜索 pending/过期租约 Delivery，每日调度博客分析明细清理；定时投递过期 Markdown 导入会话和媒体 cleanup retry | 是 |
+| `wagtailblog3-celery-maintenance.service` | 日志索引同步和维护队列；执行 Markdown 导入会话组装、媒体精确补偿、Mongo 清理意图和内容搜索 Delivery 的租约消费与重试 | 是 |
+| `wagtailblog3-celery-beat.service` | 补偿日志索引 outbox、内容搜索与 Mongo 清理意图的 pending/过期租约任务，每日调度博客分析明细清理；定时投递过期 Markdown 导入会话和媒体 cleanup retry | 是 |
 | `wagtailblog3-filebeat.service` | 采集项目日志并写入 Elasticsearch | 是 |
 
 ## 分支与环境配置
@@ -562,6 +562,15 @@ Markdown 导入不会新增 systemd unit 或 Worker，复用现有 `maintenance`
 
 发布包含上述任务或 Beat 路由的代码时，必须按“基础设施 → `wagtailblog3.service` → maintenance Worker → Beat”顺序重启并执行健康检查；本地测试不重启生产服务。回滚到上一个已验证 commit 后，同样恢复这三个受影响服务，已存在的 cleanup retry 审计行不得通过删除数据库记录来掩盖。
 
+### Mongo 正文清理意图补偿
+
+Mongo 正文或 Revision 快照的物理回收不在 `pre_delete` 中执行。页面或 Revision 删除仅在 MySQL 写入 `MongoCleanupIntent`，事务提交后由 `blog.tasks.cleanup_mongo_intent(intent_id)` 在既有 `maintenance` 队列中认领租约并再次核验引用；Beat 每 60 秒运行 `blog.tasks.dispatch_pending_mongo_cleanup_retries()`，补偿 broker 唤醒失败、到期重试和过期租约。
+
+- Worker 只处理 `pending`/`retry` 意图；同一行只能有一个未过期 lease，过期 worker 的意图由 Beat 回收。共享 pointer 仍有 BlogPage 或 Revision 引用时保留为 `retry`，不得直接删除 Mongo。
+- Mongo 连接或删除异常记录错误类别、尝试次数和退避时间；达到上限后标记 `dead` 并保留审计记录，禁止以删除意图记录替代故障处理。
+- 部署包含此功能的迁移与任务代码前，必须确认 MySQL、MongoDB、Redis 可用，maintenance Worker 已注册 `cleanup_mongo_intent` 与 `dispatch_pending_mongo_cleanup_retries`，Beat 日志出现该周期任务；然后按“Django → maintenance Worker → Beat”顺序重启受影响服务。不得在未应用迁移或 Worker/Beat 代码版本不一致时启用该回收链路。
+- 回滚时先停止或回退 Worker/Beat 到前一已验证 commit，并保留 `MongoCleanupIntent` 审计行和所有 Mongo 正文/草稿；不得批量清理意图、Mongo 内容或 Revision 数据。
+
 ### 内容搜索同步运维
 
 内容搜索同步只允许向 `ContentSearchTarget` 中已登记且启用的物理索引写入。生产启用
@@ -796,12 +805,17 @@ WP8 只删除应用内影子与旧 DSL 代码，不新增服务、不改 unit、
 
 `CONTENT_SEARCH_QUERY_ENABLED`、`CONTENT_SEARCH_FEDERATED_ALL_ENABLED` 与 `CONTENT_SEARCH_SHADOW_*` 是 WP8 前的历史开关。WP8 部署后 Django 不再读取它们；不得将其写入 unit、drop-in 或开机恢复脚本。producer/consumer、内容 alias、maintenance Worker 和 Beat 的既有启动依赖保持不变。
 
-## Wagtail 8.0 升级 runbook（待生产授权）
+## Wagtail 8.0 与正文生命周期迁移 runbook
 
-本节仅适用于 Wagtail 7.4.3 -> 8.0 的依赖、迁移和默认 Page 搜索索引升级，不适用上面的 WP8 code-only 业务发布。当前尚未执行生产操作，也未取得生产迁移、索引写入或服务重启授权。
+本节前半适用于 Wagtail 7.4.3 -> 8.0 的依赖、迁移和默认 Page 搜索索引升级；根据 `说明书/27-Wagtail 8.0升级可行性方案.md` 的实施记录，Wagtail 8.0 升级已在 2026-08-27 完成。正文生命周期迁移（`blog.0029`-`blog.0033`、`search.0006`-`search.0007`）仍未执行，不能把历史 Wagtail 8 部署记录视为本批迁移授权；现场状态必须以生产 `showmigrations`、commit、服务和数据库检查为准。
 
 升级前必须在隔离环境完成依赖安装、`pip check`、`manage.py check`、迁移计划审阅和受影响测试；生产数据库、MongoDB 正文/草稿/revision、媒体和 Elasticsearch 必须先完成可恢复备份。Wagtail 8 的 `wagtailcore.0098_apitoken` 只允许在已审阅的维护窗口执行，禁止把 API token 表或迁移回滚作为默认删除动作。
 
 Wagtail 默认 Page 索引更新必须在旧 7.4.3 代码下先执行并记录 `update_index --backend default`，再升级代码后复核；该命令会重建 default 后端登记的多个 Wagtail 模型索引，不得误认为只写 Page，也不得触碰 `wagtailblog-prod-content-v002` 等自建内容索引或日志索引。任何 alias 切换、内容索引重建或 outbox 批量处置均需单独授权。
 
 维护顺序为：确认 MySQL、MongoDB、Redis、MinIO、Docker、Elasticsearch 可用并冻结应用写入；停止 `wagtailblog3.service`、`wagtailblog3-celery-maintenance.service`、`wagtailblog3-celery-beat.service`；安装已验证依赖并执行已审阅迁移；按“基础设施 -> Django/uWSGI -> maintenance Worker -> Beat -> Filebeat（仅日志格式变更时） -> Nginx（仅实际受影响时）”顺序恢复。任一检查失败即停止后续启动，切回上一个已验证 commit 与旧依赖环境；不删除 serving 索引、MongoDB 正文或 revision 数据。
+
+本项目正文生命周期改造的生产迁移对象为 `blog.0029`-`blog.0033`、`search.0006`-`search.0007`；是否包含 `wagtailcore.0098` 必须以生产 `showmigrations` 结果为准。执行前必须完成 MySQL（含 schema、数据、triggers、routines、events）、Mongo 正文/草稿/revision、Elasticsearch snapshot 和 systemd/env 清单备份及恢复演练，并取得独立迁移授权。迁移只改变 MySQL schema，不自动回填正文、删除 Mongo、重建 ES 或切换 alias；失败时停止后续服务恢复，保留新增表/列和备份，禁止未经数据库负责人确认执行反向迁移。
+### BlogPage 发布一致性只读对账
+
+Beat 每 300 秒向 `maintenance` 队列投递 `blog.tasks.check_publication_consistency`。该任务按 `BLOG_PUBLICATION_CONSISTENCY_BATCH_SIZE` 限制 BlogPage 批次，读取 BlogPage、BlogPublicationState、Revision、Search State/Outbox；周期模式只更新独立的 `BlogPublicationConsistencyCheckpoint` 游标、high-water、租约和统计元数据，不执行业务数据修复、删除、发布或外部写入。checkpoint 使用 MySQL 行锁租约，租约冲突返回 `lease_busy`，扫描异常释放租约并记录脱敏错误类型；需监控 `last_error`、租约过期和周期推进。启用前需先应用对应迁移（当前为 `blog.0033`）并确认 maintenance Worker 已注册任务；回滚时先停 Beat/Worker，再恢复上一个已验证代码版本，保留 checkpoint 与业务 State/Outbox 数据。

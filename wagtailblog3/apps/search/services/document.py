@@ -18,6 +18,8 @@ class FormalContentSnapshot:
     """正式正文的稳定标识和哈希；草稿 revision 不参与计算。"""
     mongo_content_id: str
     content_hash: str
+    body_version_id: str | None = None
+    publication_generation: int | None = None
 
 
 @dataclass(frozen=True)
@@ -26,6 +28,8 @@ class FormalContentDocument:
     mongo_content_id: str
     content_hash: str
     document: dict
+    body_version_id: str | None = None
+    publication_generation: int | None = None
 
 
 def _related_ids(page: object, relation_name: str) -> list[int]:
@@ -102,6 +106,9 @@ def build_formal_content_document(
     page: object,
     content_version: int,
     formal_content: object = _FORMAL_CONTENT_UNSET,
+    *,
+    body_version_id: str | None = None,
+    publication_generation: int | None = None,
 ) -> FormalContentDocument | None:
     """生成不含 HTML、草稿指针或 Mongo 原始块的最小公开索引文档。"""
     """生成最小公开索引文档，不包含 HTML、草稿指针或 Mongo 原始块。"""
@@ -125,10 +132,16 @@ def build_formal_content_document(
         "tag_ids": payload["tag_ids"],
         "category_ids": payload["category_ids"],
     }
+    if body_version_id:
+        document["body_version_id"] = body_version_id
+    if publication_generation is not None:
+        document["publication_generation"] = publication_generation
     return FormalContentDocument(
         mongo_content_id=payload["mongo_content_id"],
         content_hash=document["content_hash"],
         document=document,
+        body_version_id=body_version_id,
+        publication_generation=publication_generation,
     )
 
 
@@ -136,6 +149,9 @@ def build_formal_content_documents(
     pages: Sequence[object],
     content_versions: Mapping[int, int],
     formal_contents: Mapping[str, object],
+    *,
+    body_version_ids: Mapping[int, str | None] | None = None,
+    publication_generations: Mapping[int, int | None] | None = None,
 ) -> tuple[list[FormalContentDocument], list[int]]:
     """基于批量 Mongo 读取结果投影文档，禁止循环内回退单篇查询。"""
     """基于批量读取结果投影文档，禁止在循环中回退到单篇 Mongo 查询。"""
@@ -151,6 +167,8 @@ def build_formal_content_documents(
             page,
             content_versions[page.pk],
             formal_content=formal_content,
+            body_version_id=(body_version_ids or {}).get(page.pk),
+            publication_generation=(publication_generations or {}).get(page.pk),
         )
         if document is None:
             missing_page_ids.append(page.pk)

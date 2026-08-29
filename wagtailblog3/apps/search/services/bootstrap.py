@@ -50,6 +50,14 @@ def bootstrap_content_search_states(
             if dry_run:
                 result["created"] += 1
                 continue
+            try:
+                from blog.models import BlogPublicationState
+
+                publication_state = BlogPublicationState.objects.filter(page_id=page_id).first()
+            except Exception:
+                publication_state = None
+            body_version_id = getattr(publication_state, "published_body_version_id", None)
+            publication_generation = getattr(publication_state, "publication_generation", None)
             ContentSearchState.objects.create(
                 page_id=page_id,
                 content_version=1,
@@ -57,6 +65,10 @@ def bootstrap_content_search_states(
                 searchable=True,
                 content_hash=snapshot.content_hash,
                 mongo_content_id=snapshot.mongo_content_id,
+                body_version_id=body_version_id or None,
+                publication_generation=(
+                    publication_generation if publication_generation and publication_generation > 0 else None
+                ),
             )
             result["created"] += 1
     return result

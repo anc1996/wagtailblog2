@@ -34,6 +34,8 @@ CONTENT_INDEX_REQUIRED_FIELDS = frozenset(
         "page_id",
         "content_version",
         "content_hash",
+        "body_version_id",
+        "publication_generation",
         "operation",
         "title",
         "intro",
@@ -129,6 +131,8 @@ def build_content_index_template(
         "content_version": {"type": "long"},
         # hash 只供一致性读取，不参与查询、聚合或额外的 doc_values 存储。
         "content_hash": {"type": "keyword", "index": False, "doc_values": False},
+        "body_version_id": {"type": "keyword", "index": False, "doc_values": False},
+        "publication_generation": {"type": "long"},
         "operation": {"type": "keyword"},
         **text_fields,
         "date": {"type": "date"},

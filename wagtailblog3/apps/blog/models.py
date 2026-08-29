@@ -50,10 +50,117 @@ from blog.blocks import (
 	VditorMarkdownBlock,
 )
 from wagtailblog3.mongodb import MongoDBStreamFieldAdapter
-from wagtailblog3.mongo import MongoManager
+from wagtailblog3.mongo import MongoManager, MongoRevisionReadError
 
 
 logger = logging.getLogger(__name__)
+
+
+class MongoCleanupIntentStatus(models.TextChoices):
+	"""Mongo 清理意图的持久化状态。"""
+
+	PENDING = "pending", "待处理"
+	RETRY = "retry", "待重试"
+	PROCESSING = "processing", "处理中"
+	SUCCEEDED = "succeeded", "已完成"
+	SKIPPED = "skipped", "仍被引用"
+	DEAD = "dead", "终止"
+
+
+class MongoCleanupIntent(models.Model):
+	"""MySQL 中的 Mongo 清理意图；正文删除必须在事务提交后由任务执行。"""
+
+	intent_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+	dedupe_key = models.CharField(max_length=255, unique=True)
+	page_id = models.PositiveBigIntegerField()
+	pointer = models.CharField(max_length=255)
+	kind = models.CharField(max_length=16, choices=(("formal", "正式正文"), ("revision", "历史快照")))
+	status = models.CharField(max_length=16, choices=MongoCleanupIntentStatus.choices, default=MongoCleanupIntentStatus.PENDING)
+	attempts = models.PositiveIntegerField(default=0)
+	lease_reclaims = models.PositiveIntegerField(default=0)
+	last_error = models.CharField(max_length=255, blank=True, default="")
+	available_at = models.DateTimeField(default=timezone.now)
+	locked_by = models.CharField(max_length=128, blank=True, default="")
+	lock_expires_at = models.DateTimeField(null=True, blank=True)
+	created_at = models.DateTimeField(auto_now_add=True)
+	updated_at = models.DateTimeField(auto_now=True)
+
+	class Meta:
+		indexes = [
+			models.Index(fields=("status", "available_at"), name="blog_mongo_cleanup_status_idx"),
+			models.Index(fields=("status", "lock_expires_at"), name="blog_mongo_cleanup_lease_idx"),
+		]
+
+
+class BlogPublicationState(models.Model):
+	"""BlogPage 发布编排的 MySQL 状态快照，不直接承担实际发布动作。
+
+	页面正文版本仍由 MongoDB 保存；本表只保存待发布/已发布版本指针、哈希、
+	模式版本和审批 Revision 元数据，供后续 M4 发布事务加锁与对账使用。
+	"""
+
+	page_id = models.PositiveBigIntegerField(primary_key=True)
+	draft_body_version_id = models.CharField(max_length=128, null=True, blank=True)
+	draft_body_sha256 = models.CharField(max_length=64, null=True, blank=True)
+	draft_body_schema_version = models.PositiveIntegerField(null=True, blank=True)
+	published_body_version_id = models.CharField(max_length=128, null=True, blank=True)
+	published_body_sha256 = models.CharField(max_length=64, null=True, blank=True)
+	published_body_schema_version = models.PositiveIntegerField(null=True, blank=True)
+	publication_generation = models.PositiveBigIntegerField(default=0)
+	approved_revision_id = models.PositiveBigIntegerField(null=True, blank=True)
+	approved_revision_created_at = models.DateTimeField(null=True, blank=True)
+	approved_body_version_id = models.CharField(max_length=128, null=True, blank=True)
+	approved_body_sha256 = models.CharField(max_length=64, null=True, blank=True)
+	approved_body_schema_version = models.PositiveIntegerField(null=True, blank=True)
+	updated_at = models.DateTimeField(auto_now=True)
+
+	class Meta:
+		verbose_name = "博客发布状态"
+		verbose_name_plural = "博客发布状态"
+		indexes = [
+			models.Index(
+				fields=("approved_revision_id",),
+				name="blog_pub_state_approved_idx",
+			),
+		]
+
+	def __str__(self) -> str:
+		return f"page={self.page_id} generation={self.publication_generation}"
+
+
+class BlogPublicationConsistencyCheckpoint(models.Model):
+	"""保存只读对账周期的游标和租约，不参与页面发布或正文写入。"""
+
+	scope = models.CharField(max_length=64, primary_key=True)
+	cursor_page_id = models.PositiveBigIntegerField(default=0)
+	scan_upper_bound_page_id = models.PositiveBigIntegerField(null=True, blank=True)
+	cycle = models.PositiveBigIntegerField(default=0)
+	lease_owner = models.CharField(max_length=255, blank=True, default="")
+	lease_expires_at = models.DateTimeField(null=True, blank=True)
+	last_started_at = models.DateTimeField(null=True, blank=True)
+	last_completed_at = models.DateTimeField(null=True, blank=True)
+	last_scanned = models.PositiveBigIntegerField(default=0)
+	last_counts = models.JSONField(default=dict)
+	last_error = models.CharField(max_length=255, blank=True, default="")
+	updated_at = models.DateTimeField(auto_now=True)
+
+	class Meta:
+		verbose_name = "Blog 对账检查点"
+		verbose_name_plural = "Blog 对账检查点"
+
+
+class BlogRevisionBodyUnavailableError(RuntimeError):
+	"""表示指定 Wagtail Revision 的 Mongo 正文不可用，禁止显示其他版本正文。
+
+	参数：``code`` 是不包含正文的稳定失败代码；``retryable`` 表示稍后重试是否可能恢复。
+	副作用：由历史预览、比较和恢复调用链向上抛出，调用方必须停止当前操作，
+	不能把当前正式正文伪装为该 Revision 的正文。
+	"""
+
+	def __init__(self, code: str, *, retryable: bool = False) -> None:
+		super().__init__(f"历史版本正文不可用：{code}")
+		self.code = code
+		self.retryable = retryable
 
 
 # 自定义图片模型
@@ -338,27 +445,70 @@ class BlogPageForm(WagtailAdminPageForm):
 				content = None
 				content_source = "none"
 				
-			# 第一阶段：优先从最新 Revision 取得草稿指针，恢复编辑者最近保存的版本。
+				# 第一阶段：有历史指针时只能恢复该快照，避免草稿被正式正文污染。
 				latest_revision = instance.revisions.order_by('-created_at').first()
 				if latest_revision:
-					try:
-						# 从 Revision 元数据中读取 Mongo 草稿指针，而不是读取被清空的 body。
-						rev_data = latest_revision.content
-						if isinstance(rev_data, str):
-							rev_data = json.loads(rev_data)
-						
-						if isinstance(rev_data, dict):
-							draft_pointer = rev_data.get('mongo_draft_pointer')
-							if draft_pointer:
-								# 根据指针读取草稿正文；该路径优先于正式发布内容。
-								content = mongo_manager.get_blog_revision_body(draft_pointer)
-								if content:
-									content_source = "revision"
-					except Exception as e:
-						logger.error(f"BlogPageForm 穿透解析历史快照遭遇异常: {e}", exc_info=True)
+					# 从 Revision 元数据中读取 Mongo 草稿指针，而不是读取被清空的 body。
+					rev_data = latest_revision.content
+					if isinstance(rev_data, str):
+						rev_data = json.loads(rev_data)
+
+					if isinstance(rev_data, dict) and (
+						'mongo_body_version_id' in rev_data
+						or 'body_sha256' in rev_data
+						or 'body_schema_version' in rev_data
+					):
+						try:
+							content = mongo_manager.get_content_body_version(
+								"blog_page",
+								instance.pk,
+								rev_data.get('mongo_body_version_id'),
+								rev_data.get('body_sha256'),
+								rev_data.get('body_schema_version'),
+							)
+						except MongoRevisionReadError as exc:
+							logger.warning(
+								"blog_admin_body_version_unavailable page_id=%s error=%s",
+								instance.pk,
+								exc.code,
+							)
+							raise BlogRevisionBodyUnavailableError(
+								exc.code,
+								retryable=exc.retryable,
+							) from exc
+						if not isinstance(content.get('body'), list):
+							raise BlogRevisionBodyUnavailableError("body_version_invalid")
+						instance._validate_revision_body_data(content['body'])
+						content_source = "body_version"
+					elif isinstance(rev_data, dict) and 'mongo_draft_pointer' in rev_data:
+						draft_pointer = rev_data.get('mongo_draft_pointer')
+						try:
+							content = mongo_manager.get_blog_revision_body(draft_pointer)
+						except MongoRevisionReadError as exc:
+							logger.warning(
+								"blog_admin_revision_body_unavailable page_id=%s error=%s",
+								instance.pk,
+								exc.code,
+							)
+							raise BlogRevisionBodyUnavailableError(
+								exc.code,
+								retryable=exc.retryable,
+							) from exc
+						if not isinstance(content.get('body'), list):
+							raise BlogRevisionBodyUnavailableError("revision_body_invalid")
+						content_page_id = content.get('page_id')
+						if str(content_page_id) != str(instance.pk):
+							logger.warning(
+								"blog_admin_revision_body_page_mismatch page_id=%s",
+								instance.pk,
+							)
+							raise BlogRevisionBodyUnavailableError("revision_page_mismatch")
+						instance._validate_revision_body_data(content['body'])
+						content_source = "revision"
 				
-			# 第二阶段：草稿缺失时回退到 Mongo 正式内容，兼容新发布页面和旧数据。
-				if (not content or 'body' not in content) and getattr(instance, 'mongo_content_id', None):
+				# 第二阶段：只有从未保存 Revision 的页面才可读取正式正文。
+				# 已存在无指针 Revision 时必须保留它自己的 MySQL 正文或空状态。
+				if latest_revision is None and getattr(instance, 'mongo_content_id', None):
 					content = mongo_manager.get_blog_content(instance.mongo_content_id)
 					if content:
 						content_source = "live"
@@ -388,9 +538,8 @@ class BlogPageForm(WagtailAdminPageForm):
 					)
 				else:
 					logger.warning(
-						"blog_body_admin_missing page_id=%s mongo_content_id=%s",
+						"blog_body_admin_missing page_id=%s",
 						instance.pk,
-						getattr(instance, 'mongo_content_id', None),
 					)
 		
 		# 正文恢复完成后再绑定表单，保证 Wagtail 初始字段读取到完整内容。
@@ -624,11 +773,12 @@ class BlogPage(Page):
 			models.Index(fields=['date']),  # 为博客发布日期添加索引，优化时间筛选查询
 		]
 	
-	def _hydrate_streamfield_from_mongo(self, body_data: Any) -> Any:
+	def _hydrate_streamfield_from_mongo(self, body_data: Any, *, strict: bool = False) -> Any:
 		"""从 Mongo 字典重建后台编辑器需要的 StreamValue。
 
 		历史块缺少 Wagtail 动态 ID 时只在内存副本补 UUID；适配器失败则保留惰性
-		StreamValue，避免编辑页面因单个历史块无法转换而完全打不开。
+		StreamValue，避免编辑页面因单个历史块无法转换而完全打不开。历史 Revision
+		还原传入 ``strict=True`` 时必须向上抛异常，防止错误版本被伪装为可恢复正文。
 		"""
 		if not body_data or not isinstance(body_data, list):
 			logger.info(
@@ -668,8 +818,22 @@ class BlogPage(Page):
 			)
 			return stream_value
 		except Exception as e:
+			if strict:
+				raise
 			logger.error(f"StreamField 反序列化降级: {e}", exc_info=True)
 			return StreamValue(self.body.stream_block, body_data, is_lazy=True)
+
+	def _validate_revision_body_data(self, body_data: list[Any]) -> None:
+		"""在历史快照注入 StreamField 前校验块结构，防止适配器静默丢弃损坏块。"""
+		allowed_block_types = self.body.stream_block.child_blocks
+		for block in body_data:
+			if not isinstance(block, dict):
+				raise BlogRevisionBodyUnavailableError("revision_body_invalid")
+			block_type = block.get('type')
+			if not isinstance(block_type, str) or block_type not in allowed_block_types:
+				raise BlogRevisionBodyUnavailableError("revision_body_invalid")
+			if 'value' not in block:
+				raise BlogRevisionBodyUnavailableError("revision_body_invalid")
 	
 	# =========================================================================
 	# 网关 1：拦截快照序列化 (保存草稿、生成历史记录时自动触发)
@@ -694,18 +858,32 @@ class BlogPage(Page):
 		else:
 			draft_content = MongoDBStreamFieldAdapter.to_mongodb(self.body)
 		
-		# 先把当前 StreamField 转成 Mongo 结构，确保 Revision 与编辑器看到的是同一版本。
+		# 版本身份由持久化页面主键和规范化正文共同确定；保存失败时不得创建半成品 Revision。
 		mongo_manager = MongoManager()
+		body_version = mongo_manager.save_content_body_version(
+			"blog_page",
+			self.pk,
+			draft_content,
+		)
+		# 兼容期继续保存旧快照，确保尚未升级的新读路径仍可恢复这次草稿。
 		draft_pointer = mongo_manager.save_blog_revision_body(self.pk, draft_content)
 		
 		# MySQL Revision 只保存指针，避免把大段正文写入关系数据库。
 		data['mongo_draft_pointer'] = str(draft_pointer)
+		if (
+			isinstance(body_version, dict)
+			and isinstance(body_version.get('body_version_id'), str)
+			and isinstance(body_version.get('body_sha256'), str)
+			and isinstance(body_version.get('body_schema_version'), int)
+		):
+			data['mongo_body_version_id'] = body_version['body_version_id']
+			data['body_sha256'] = body_version['body_sha256']
+			data['body_schema_version'] = body_version['body_schema_version']
 		# 同时把 Revision 的 body 置为空字符串表示，保持历史行轻量。
 		data['body'] = '[]'
 		logger.info(
-			"blog_body_revision_done page_id=%s pointer=%s elapsed_ms=%s",
+			"blog_body_revision_done page_id=%s elapsed_ms=%s",
 			self.pk,
-			draft_pointer,
 			round((time.monotonic() - started_at) * 1000, 1),
 		)
 		
@@ -716,25 +894,96 @@ class BlogPage(Page):
 	# =========================================================================
 	@classmethod
 	def from_serializable_data(cls: type["BlogPage"], data: dict[str, Any]) -> "BlogPage":
-		"""反序列化 Revision，按草稿指针优先、正式内容回退的顺序恢复正文。"""
+		"""从 Wagtail Revision JSON 恢复页面，并保持历史正文版本边界。
+
+		带 ``mongo_draft_pointer`` 的 Revision 只能读取该指针对应的 Mongo 快照。
+		快照缺失或不可读取时抛出 :class:`BlogRevisionBodyUnavailableError`，防止
+		预览、比较或恢复把当前正式正文显示成历史版本。未带指针的早期 Revision
+		保留正式正文兼容读取，避免本批修复改变旧数据的既有范围。
+		"""
 		obj = super().from_serializable_data(data)
-		mongo_manager = MongoManager()
-		content = None
-		
-		# 第一阶段：优先读取 Revision 中的 Mongo 草稿指针。
-		draft_pointer = data.get('mongo_draft_pointer')
-		if draft_pointer:
-			content = mongo_manager.get_blog_revision_body(draft_pointer)
-		
-		# 第二阶段：草稿不存在或为空时，必须继续回退到正式内容，不能被 elif 截断。
-		is_content_empty = not content or 'body' not in content or not content['body']
-		if is_content_empty and obj.mongo_content_id:
-			content = mongo_manager.get_blog_content(obj.mongo_content_id)
-		
-		# 第三阶段：把恢复出的正文重新注入 StreamValue，供预览和历史页面使用。
-		if content and 'body' in content:
-			obj.body = obj._hydrate_streamfield_from_mongo(content['body'])
-		
+		# 新 Revision 优先按不可变版本读取；任何身份/哈希/模式错误都必须阻断恢复。
+		if 'mongo_body_version_id' in data or 'body_sha256' in data or 'body_schema_version' in data:
+			expected_page_id = obj.pk if obj.pk is not None else data.get('id')
+			try:
+				content = MongoManager().get_content_body_version(
+					"blog_page",
+					expected_page_id,
+					data.get('mongo_body_version_id'),
+					data.get('body_sha256'),
+					data.get('body_schema_version'),
+				)
+			except MongoRevisionReadError as exc:
+				logger.warning(
+					"blog_body_version_unavailable page_id=%s error=%s",
+					expected_page_id,
+					type(exc).__name__,
+				)
+				raise BlogRevisionBodyUnavailableError(
+					exc.code,
+					retryable=exc.retryable,
+				) from exc
+			body_data = content.get('body')
+			if not isinstance(body_data, list):
+				raise BlogRevisionBodyUnavailableError("body_version_invalid")
+			try:
+				obj._validate_revision_body_data(body_data)
+				obj.body = obj._hydrate_streamfield_from_mongo(body_data, strict=True)
+			except BlogRevisionBodyUnavailableError:
+				raise
+			except Exception as exc:
+				logger.warning(
+					"blog_body_version_deserialize_failed page_id=%s error=%s",
+					expected_page_id,
+				)
+				raise BlogRevisionBodyUnavailableError("body_version_deserialize_failed") from exc
+			return obj
+
+		has_revision_pointer = 'mongo_draft_pointer' in data
+		if has_revision_pointer:
+			draft_pointer = data.get('mongo_draft_pointer')
+			try:
+				content = MongoManager().get_blog_revision_body(draft_pointer)
+			except MongoRevisionReadError as exc:
+				logger.warning(
+					"blog_revision_body_unavailable page_id=%s error=%s",
+					obj.pk,
+					type(exc).__name__,
+				)
+				raise BlogRevisionBodyUnavailableError(
+					exc.code,
+					retryable=exc.retryable,
+				) from exc
+
+			expected_page_id = obj.pk if obj.pk is not None else data.get('id')
+			content_page_id = content.get('page_id')
+			if expected_page_id is None or content_page_id is None or str(content_page_id) != str(expected_page_id):
+				logger.warning("blog_revision_body_page_mismatch page_id=%s", expected_page_id)
+				raise BlogRevisionBodyUnavailableError("revision_page_mismatch")
+
+			body_data = content.get('body')
+			if not isinstance(body_data, list):
+				logger.warning(
+					"blog_revision_body_invalid page_id=%s",
+					obj.pk,
+				)
+				raise BlogRevisionBodyUnavailableError("revision_body_invalid")
+
+			try:
+				obj._validate_revision_body_data(body_data)
+				obj.body = obj._hydrate_streamfield_from_mongo(body_data, strict=True)
+			except BlogRevisionBodyUnavailableError:
+				raise
+			except Exception as exc:
+				logger.warning(
+					"blog_revision_body_deserialize_failed page_id=%s error=%s",
+					obj.pk,
+					type(exc).__name__,
+				)
+				raise BlogRevisionBodyUnavailableError("revision_deserialize_failed") from exc
+			return obj
+
+		# 没有草稿指针的旧 Revision 由 Wagtail 超类从其 MySQL JSON 正文还原。
 		return obj
 	
 	def get_latest_revision_as_object(self) -> "BlogPage":
@@ -746,7 +995,11 @@ class BlogPage(Page):
 		
 		# 同时检查布尔值和块数量，规避不同 Wagtail 版本对空 StreamValue 的 truthy 差异。
 		is_body_empty = not obj.body or (hasattr(obj.body, '__len__') and len(obj.body) == 0)
-		
+		latest_revision = self.revisions.order_by('-created_at').first()
+		if latest_revision is not None:
+			# 最新 Revision 已存在时，即使正文为空也必须保留它自身的历史状态。
+			return obj
+
 		if is_body_empty and self.mongo_content_id:
 			mongo_manager = MongoManager()
 			content = mongo_manager.get_blog_content_compatible(
@@ -839,50 +1092,60 @@ class BlogPage(Page):
 			except Exception:
 				pass
 	
-	def publish(self, *args: Any, **kwargs: Any) -> Any:
-		"""将 Wagtail 发布和搜索事件置于同一 MySQL 事务。"""
+	def publish(self, revision: Any, *args: Any, **kwargs: Any) -> Any:
+		"""发布前校验指定 Revision 的 Mongo 正文版本，再执行 Wagtail 发布。
+
+		校验发生在 ``super().publish`` 之前；Mongo 版本缺失或身份损坏时直接抛错，
+		因此不会改变页面的 ``live``、``live_revision`` 或其他发布字段。状态快照和
+		Wagtail 发布共享当前 MySQL 事务，外层回滚时一并撤销。
+		"""
+		if revision is None or getattr(revision, "pk", None) is None:
+			raise ValueError("revision_required")
+		from blog.services.publication import BlogPublicationService, _revision_content
+		if isinstance(kwargs.get("log_action"), str) and kwargs["log_action"] == "wagtail.publish.scheduled":
+			from blog.services.publication import validate_scheduled_revision
+
+			validate_scheduled_revision(revision)
+
 		with transaction.atomic():
-			return super().publish(*args, **kwargs)
+			candidate = BlogPublicationService.lock_and_validate_revision(self.pk, revision.pk)
+			# Revision.content 在 Wagtail 8.0 的历史数据中可能以 JSON 字符串返回，
+			# 排期判断必须与正文版本校验使用同一解析结果，避免过早切换正式指针。
+			content = _revision_content(candidate.revision)
+			go_live_at = content.get("go_live_at")
+			is_scheduled_execution = kwargs.get("log_action") == "wagtail.publish.scheduled"
+			is_future_schedule = bool(go_live_at and not is_scheduled_execution)
+			if not is_future_schedule:
+				BlogPublicationService.promote_published_candidate(candidate)
+			return super().publish(revision, *args, **kwargs)
 
 	def unpublish(self, *args: Any, **kwargs: Any) -> Any:
 		"""将取消发布和墓碑事件置于同一 MySQL 事务，事件只在提交后被唤醒。"""
 		with transaction.atomic():
-			return super().unpublish(*args, **kwargs)
+			# 与发布路径保持一致：先锁 BlogPage，再锁 BlogPublicationState，避免并发代次倒退。
+			locked_page = type(self).objects.select_for_update().get(pk=self.pk)
+			self.live = locked_page.live
+			self.live_revision_id = locked_page.live_revision_id
+			was_live = bool(self.live)
+			if was_live:
+				from blog.services.publication import BlogPublicationService
+
+				BlogPublicationService.advance_unpublish_generation(self.pk)
+			result = super().unpublish(*args, **kwargs)
+			if was_live:
+				BlogPublicationService.clear_published_pointer(self.pk)
+			return result
 
 	# =========================================================================
 	# 核心网关 4：物理删除与异构集群同步 (在后台点击“删除页面”时触发)
 	# =========================================================================
 	def delete(self, *args: Any, **kwargs: Any) -> Any:
-		"""删除页面实体后同步清理 Mongo 正式内容和历史草稿。
-
-		页面行删除前先在同一事务记录搜索墓碑，防止迟到 upsert 复活页面；关系库删除
-		完成后再按已知 content ID 和 page ID 清理 Mongo，清理失败只记录日志，不删除未知对象。
-		"""
-		page_id = self.pk
-		mongo_content_id = getattr(self, 'mongo_content_id', None)
-		
-		# 墓碑 State 和 Outbox 必须在 Page 行删除前写入同一事务，避免迟到 upsert 复活已删除页面。
+		"""删除页面并由 ``pre_delete`` 登记 Mongo 清理意图。"""
 		with transaction.atomic():
 			if settings.CONTENT_SEARCH_PRODUCER_ENABLED:
 				from search.services.outbox import ContentSearchOutboxService
 				ContentSearchOutboxService.record_delete(self)
-			deletion_result = super().delete(*args, **kwargs)
-		
-		# 再清理两个 Mongo 集合，保证正式内容和 Revision 快照都不残留。
-		try:
-			mongo_manager = MongoManager()
-			
-			# 清理线上正式版主内容
-			if mongo_content_id:
-				mongo_manager.delete_blog_content(mongo_content_id)
-			
-			# 【优雅调用】清理该页面对应的所有草稿历史快照
-			if page_id and hasattr(mongo_manager, 'delete_page_revisions'):
-				mongo_manager.delete_page_revisions(page_id)
-		
-		except Exception as e:
-			logger.error(f"级联清理 MongoDB 关联数据时遭遇异常: {e}", exc_info=True)
-		return deletion_result
+			return super().delete(*args, **kwargs)
 	
 	# =========================================================================
 	# 网关 4：前台数据读取网关 (用于博客详情页 serve 渲染时提取真实数据)

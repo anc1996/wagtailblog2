@@ -1,0 +1,29 @@
+{% extends "wagtailadmin/base.html" %}
+
+{% block titletag %}历史正文不可用{% endblock %}
+
+{% block content %}
+<header class="nice-padding">
+  <div class="row">
+    <div class="left">
+      <h1 class="icon icon-warning">历史正文不可用</h1>
+    </div>
+  </div>
+</header>
+<main class="nice-padding" role="main">
+  <section class="help-block help-warning" role="alert" aria-live="assertive">
+    <p>该历史版本的正文快照无法安全读取，因此没有加载、比较、恢复或保存该版本。</p>
+    {% if retryable %}
+      <p>正文存储暂时不可用。稍后可重试；在恢复前请确认快照已恢复。</p>
+    {% else %}
+      <p>该快照缺失、损坏或不属于当前页面。请联系管理员核对历史正文，不要继续恢复或保存。</p>
+    {% endif %}
+  </section>
+  <p>
+    <a class="button button-secondary" href="{{ history_url }}">返回历史</a>
+    {% if retryable %}
+      <a class="button" href="{{ retry_url }}">重试读取</a>
+    {% endif %}
+  </p>
+</main>
+{% endblock %}

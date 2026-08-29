@@ -353,6 +353,8 @@ MARKDOWN_IMPORT_PREPARE_MAX_MARKDOWN_BYTES = 5 * 1024 * 1024
 
 # Wagtail 设置
 WAGTAIL_SITE_NAME = "wagtailblog3"
+# BlogPage Workflow 完成动作必须校验审批 Revision，不能默认发布最新草稿。
+WAGTAIL_FINISH_WORKFLOW_ACTION = "blog.services.publication.finish_workflow_action"
 
 # 订阅源只缓存公开文章元数据；代次由发布信号主动切换，TTL用于异常兜底。
 BLOG_FEED_CACHE_ALIAS = "default"

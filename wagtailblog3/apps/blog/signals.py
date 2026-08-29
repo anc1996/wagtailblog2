@@ -8,7 +8,7 @@ from taggit.models import Tag
 from wagtail.models import PageViewRestriction, Revision, Site
 from wagtail.signals import page_published, page_unpublished
 
-from .models import Author, BlogCategory, BlogPage
+from .models import Author, BlogCategory, BlogPage, MongoCleanupIntent
 from .services.feed_cache import BlogFeedInvalidationService
 from wagtailblog3.mongo import MongoManager
 
@@ -24,28 +24,7 @@ logger = logging.getLogger(__name__)
 	dispatch_uid="blog.delete_blog_content_from_mongodb",
 )
 def delete_blog_content_from_mongodb(sender, instance, **kwargs):
-	"""当 BlogPage 实体被删除时，级联擦除 MongoDB 线上主集合与全量历史快照"""
-	page_id = instance.pk
-	mongo_content_id = instance.mongo_content_id
-	
-	try:
-		mongo_manager = MongoManager()
-		
-		# 先删除正式内容，再删除该页面所有草稿快照，避免页面删除后留下孤儿正文。
-		if mongo_content_id:
-			result_content = mongo_manager.delete_blog_content(mongo_content_id)
-			if not result_content:
-				logger.warning(f"信号防线提示：尝试删除正式 MongoDB 内容失败，ID: {mongo_content_id}")
-		
-		# 草稿集合按 page_id 批量清理，不需要从每条 Revision 再次解析正文。
-		if page_id:
-			deleted_snapshots = mongo_manager.delete_page_revisions(page_id)
-			if deleted_snapshots > 0:
-				logger.info(
-					f"天网防线成功拦截：跟随页面物理销毁，同步从 MongoDB 中连坐擦除了该页面的 {deleted_snapshots} 条草稿快照。")
-	
-	except Exception as e:
-		logger.error(f"信号清理异构集群残留遭遇致命异常: {e}", exc_info=True)
+	_record_page_cleanup_intents(instance)
 
 
 # =============================================================================
@@ -57,24 +36,7 @@ def delete_blog_content_from_mongodb(sender, instance, **kwargs):
 	dispatch_uid="blog.cascade_delete_single_mongo_revision",
 )
 def cascade_delete_single_mongo_revision(sender, instance, **kwargs):
-	"""当 Wagtail 单条 Revision 记录被抹除时，通过嵌入的暗号，联动引爆 MongoDB 里的单体大文本"""
-	try:
-		content = instance.content
-		if isinstance(content, str):
-			content = json.loads(content)
-		
-		# 读取 serializable_data 写入 Revision 的 Mongo 指针，定位对应草稿快照。
-		pointer = content.get('mongo_draft_pointer')
-		
-		if pointer:
-			mongo_manager = MongoManager()
-			# 优雅调用：清剿单条记录
-			success = mongo_manager.delete_single_revision(pointer)
-			if success:
-				logger.info(f"单体拦截成功：跟随 MySQL 历史行，同步清剿了 MongoDB 的历史快照实体 [{pointer}]")
-	
-	except Exception as e:
-		logger.error(f"信号防线清理单体 Revision 失败: {e}", exc_info=True)
+	_record_revision_cleanup_intent(instance)
 
 
 # =============================================================================
@@ -200,3 +162,44 @@ def invalidate_feed_on_restriction_changed(sender, instance, **kwargs):
 def invalidate_feed_on_site_changed(sender, instance, **kwargs):
 	"""站点域名或根页面变更后，刷新该站点的所有语言Feed。"""
 	BlogFeedInvalidationService.schedule_site(instance.pk)
+
+
+def _schedule_mongo_cleanup(intent_id):
+	"""事务提交后将 Mongo 清理意图投递到 maintenance 队列。"""
+	from .tasks import cleanup_mongo_intent
+	def dispatch() -> None:
+		try:
+			cleanup_mongo_intent.apply_async(args=(str(intent_id),), queue="maintenance")
+		except Exception:
+			# 意图已经随事务提交，队列唤醒失败只能等待补偿扫描，不能反向影响删除结果。
+			logger.exception("blog_mongo_cleanup_dispatch_failed intent_id=%s", intent_id)
+	transaction.on_commit(dispatch)
+
+
+def _record_page_cleanup_intents(instance):
+	"""页面删除阶段仅记录正式正文；Revision 信号负责每个历史快照。"""
+	entries = []
+	if instance.mongo_content_id:
+		entries.append(("formal", str(instance.mongo_content_id), f"formal:{instance.mongo_content_id}"))
+	for kind, pointer, dedupe_key in entries:
+		intent, _ = MongoCleanupIntent.objects.get_or_create(
+			dedupe_key=dedupe_key,
+			defaults={"page_id": instance.pk, "pointer": pointer, "kind": kind},
+		)
+		_schedule_mongo_cleanup(intent.intent_id)
+
+
+def _record_revision_cleanup_intent(instance):
+	"""单 Revision 删除记录幂等意图，任务执行前再检查共享引用。"""
+	try:
+		content = json.loads(instance.content) if isinstance(instance.content, str) else instance.content
+	except (TypeError, ValueError, json.JSONDecodeError):
+		return
+	pointer = content.get("mongo_draft_pointer") if isinstance(content, dict) else None
+	if not pointer:
+		return
+	intent, _ = MongoCleanupIntent.objects.get_or_create(
+		dedupe_key=f"revision:{pointer}",
+		defaults={"page_id": int(instance.object_id), "pointer": str(pointer), "kind": "revision"},
+	)
+	_schedule_mongo_cleanup(intent.intent_id)

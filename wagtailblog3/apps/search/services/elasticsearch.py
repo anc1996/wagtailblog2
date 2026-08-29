@@ -189,22 +189,35 @@ def verify_content_search_index(target: Any) -> bool:
 def read_content_search_documents(
     target: Any,
     page_ids: Sequence[int],
+    *,
+    include_identity: bool = False,
 ) -> dict[int, Mapping[str, Any]]:
     """按页面 ID 批量读取最小字段，用于只读一致性检查。"""
 
     if not page_ids:
         return {}
     try:
-        response = get_content_search_client(target).mget(
-            index=target.index_name,
-            ids=[str(page_id) for page_id in page_ids],
-            source_includes=(
+        source_includes = (
+            "page_id",
+            "content_version",
+            "content_hash",
+            "searchable",
+            "operation",
+        )
+        if include_identity:
+            source_includes = (
                 "page_id",
                 "content_version",
                 "content_hash",
+                "body_version_id",
+                "publication_generation",
                 "searchable",
                 "operation",
-            ),
+            )
+        response = get_content_search_client(target).mget(
+            index=target.index_name,
+            ids=[str(page_id) for page_id in page_ids],
+            source_includes=source_includes,
         )
     except ContentSearchElasticsearchError:
         raise
@@ -231,23 +244,36 @@ def scan_content_search_documents(
     target: Any,
     after_page_id: int,
     limit: int,
+    *,
+    include_identity: bool = False,
 ) -> list[tuple[int, Mapping[str, Any]]]:
     """通过 page_id 的 search_after 游标读取最小字段，不使用深 offset。"""
 
     try:
+        source_includes = (
+            "page_id",
+            "content_version",
+            "content_hash",
+            "searchable",
+            "operation",
+        )
+        if include_identity:
+            source_includes = (
+                "page_id",
+                "content_version",
+                "content_hash",
+                "body_version_id",
+                "publication_generation",
+                "searchable",
+                "operation",
+            )
         response = get_content_search_client(target).search(
             index=target.index_name,
             query={"match_all": {}},
             sort=[{"page_id": "asc"}],
             search_after=[after_page_id],
             size=limit,
-            source_includes=(
-                "page_id",
-                "content_version",
-                "content_hash",
-                "searchable",
-                "operation",
-            ),
+            source_includes=source_includes,
             track_total_hits=False,
         )
     except ContentSearchElasticsearchError:
@@ -281,7 +307,9 @@ def _bulk_operations(target: Any, documents: Iterable[Mapping[str, Any]]) -> lis
                     "index": {
                         "_index": target.index_name,
                         "_id": str(document["page_id"]),
-                        "version": document["content_version"],
+                        # 新事件以公开代际作为 ES external version；旧事件继续使用 content_version。
+                        "version": document.get("publication_generation")
+                        or document["content_version"],
                         "version_type": "external",
                     }
                 },
@@ -380,11 +408,15 @@ def write_content_search_document(
     target: Any,
     document: Mapping[str, Any],
     content_version: int,
+    *,
+    publication_generation: int | None = None,
 ) -> ContentSearchWriteResult:
     """以 ES 外部版本写入单页文档，迟到事件只能得到冲突而不能覆盖新版本。"""
 
     document = dict(document)
     document["content_version"] = content_version
+    if publication_generation is not None:
+        document["publication_generation"] = publication_generation
     try:
         result = write_content_search_documents(target, [document])
     except ContentSearchElasticsearchError as error:

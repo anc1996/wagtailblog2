@@ -288,10 +288,18 @@ def rebuild_content_search_batch(target_id: str, batch_size: int, max_batch_byte
     try:
         formal_contents = read_formal_contents_by_id(mongo_ids, page_ids=page_ids)
         versions = {page_id: states[page_id].content_version for page_id in page_ids}
+        body_version_ids = {
+            page_id: states[page_id].body_version_id for page_id in page_ids
+        }
+        publication_generations = {
+            page_id: states[page_id].publication_generation for page_id in page_ids
+        }
         formal_documents, missing_page_ids = build_formal_content_documents(
             pages,
             versions,
             formal_contents,
+            body_version_ids=body_version_ids,
+            publication_generations=publication_generations,
         )
     except ContentSearchMongoReadError:
         _mark_build_failed(build.pk, "mongo_formal_content_batch_read_failed", failed=len(pages))
@@ -317,6 +325,12 @@ def rebuild_content_search_batch(target_id: str, batch_size: int, max_batch_byte
         if state.content_hash != document["content_hash"]:
             _mark_build_failed(build.pk, "content_search_state_hash_mismatch", failed=len(pages))
             raise ContentSearchRebuildError("content_search_state_hash_mismatch")
+        if state.body_version_id != document.get("body_version_id"):
+            _mark_build_failed(build.pk, "content_search_state_body_version_mismatch", failed=len(pages))
+            raise ContentSearchRebuildError("content_search_state_body_version_mismatch")
+        if state.publication_generation != document.get("publication_generation"):
+            _mark_build_failed(build.pk, "content_search_state_generation_mismatch", failed=len(pages))
+            raise ContentSearchRebuildError("content_search_state_generation_mismatch")
 
     succeeded = 0
     superseded = 0

@@ -2,10 +2,13 @@
 
 from copy import deepcopy
 from datetime import date
+import hashlib
+import json
 from unittest.mock import patch
 from uuid import uuid4
 
 from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.db import connection
 from django.db.models.signals import pre_delete
 from django.test import TestCase, TransactionTestCase
@@ -13,7 +16,13 @@ from wagtail.models import Locale, Page, PageViewRestriction
 from wagtail.signals import page_published, page_unpublished
 from modelsearch.index import get_indexed_models
 
-from blog.models import BlogIndexPage, BlogPage
+from blog.models import (
+    BlogIndexPage,
+    BlogPage,
+    BlogPageForm,
+    BlogRevisionBodyUnavailableError,
+)
+from wagtailblog3.mongo import MongoBodyVersionBodyError, MongoRevisionNotFoundError
 
 
 class _LiveCollection:
@@ -34,7 +43,9 @@ class InMemoryMongoManager:
     def __init__(self):
         self.live_documents = {}
         self.revision_documents = {}
+        self.body_versions = {}
         self.revision_reads = []
+        self.body_version_reads = []
         self.live_sequence = 0
         self.revision_sequence = 0
         self.blog_content = _LiveCollection(self)
@@ -70,10 +81,75 @@ class InMemoryMongoManager:
         }
         return pointer
 
+    @classmethod
+    def _body_sha256(cls, body_data):
+        """按生产仓储相同规则计算正文摘要，保证测试替身的幂等键一致。"""
+        canonical = json.dumps(
+            cls._copy_for_storage(body_data),
+            sort_keys=True,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    def save_content_body_version(
+        self, aggregate_type, aggregate_id, body_data, *, body_schema_version=1
+    ):
+        """模拟不可变正文版本的 insert-once 语义，不访问真实 MongoDB。
+
+        同一聚合、模式版本和正文哈希只生成一个版本；正文变化则插入新版本，
+        既有版本不会被更新。返回值与 ``MongoManager`` 的版本身份契约一致。
+        """
+        prepared_body = self._copy_for_storage(body_data)
+        body_sha256 = self._body_sha256(prepared_body)
+        key = (str(aggregate_type), str(aggregate_id), body_sha256, body_schema_version)
+        existing = self.body_versions.get(key)
+        if existing is not None:
+            return deepcopy(existing["identity"])
+        identity = {
+            "body_version_id": f"body-version-{len(self.body_versions) + 1}",
+            "body_sha256": body_sha256,
+            "body_schema_version": body_schema_version,
+        }
+        self.body_versions[key] = {
+            "aggregate_type": str(aggregate_type),
+            "aggregate_id": str(aggregate_id),
+            "body_schema_version": body_schema_version,
+            "body": prepared_body,
+            "identity": identity,
+        }
+        return deepcopy(identity)
+
+    def get_content_body_version(
+        self, aggregate_type, aggregate_id, body_version_id, body_sha256, body_schema_version
+    ):
+        """按完整聚合身份读取不可变正文，并校验版本 ID、模式和哈希。"""
+        self.body_version_reads.append(body_version_id)
+        for document in self.body_versions.values():
+            if (
+                document["aggregate_type"] == str(aggregate_type)
+                and document["aggregate_id"] == str(aggregate_id)
+                and document["identity"]["body_version_id"] == body_version_id
+            ):
+                if (
+                    document["identity"]["body_sha256"] != body_sha256
+                    or document["identity"]["body_schema_version"] != body_schema_version
+                ):
+                    raise MongoBodyVersionBodyError("正文版本身份校验失败")
+                result = deepcopy(document)
+                result.pop("identity", None)
+                result["body_version_id"] = body_version_id
+                result["body_sha256"] = body_sha256
+                result["body_schema_version"] = body_schema_version
+                return result
+        raise MongoRevisionNotFoundError("MongoDB 中不存在对应不可变正文版本")
+
     def get_blog_revision_body(self, pointer):
         self.revision_reads.append(pointer)
         document = self.revision_documents.get(pointer)
-        return deepcopy(document) if document is not None else None
+        if document is None:
+            raise MongoRevisionNotFoundError("MongoDB 中不存在对应历史正文快照")
+        return deepcopy(document)
 
     def delete_blog_content(self, content_id):
         return self.live_documents.pop(content_id, None) is not None
@@ -149,7 +225,13 @@ class BlogLifecycleFixtureMixin:
         )
         revision_object = revision.as_object()
         self.assertIsInstance(revision_object, BlogPage)
-        self.assertIn(revision_pointer, self.mongo.revision_reads)
+        body_version_id = revision.content["mongo_body_version_id"]
+        self.assertTrue(
+            any(
+                item["identity"]["body_version_id"] == body_version_id
+                for item in self.mongo.body_versions.values()
+            )
+        )
         self.assertEqual(
             len(revision_object.body),
             1,
@@ -209,6 +291,167 @@ class BlogLifecycleBaselineTests(BlogLifecycleFixtureMixin, TestCase):
             {"mongo_content_id": page.mongo_content_id, "live_documents": self.mongo.live_documents},
         )
         self.assertNotIn("第一版正式正文", page.body_text)
+
+    def test_missing_revision_snapshot_never_uses_current_live_body(self):
+        """Wagtail ``Revision.as_object`` 必须因缺失快照失败，不能伪造历史内容。"""
+        page = self._create_draft_page("草稿历史正文")
+        revision = page.save_revision()
+        pointer = revision.content["mongo_draft_pointer"]
+        del self.mongo.revision_documents[pointer]
+        body_version_id = revision.content["mongo_body_version_id"]
+        self.mongo.body_versions = {
+            key: value
+            for key, value in self.mongo.body_versions.items()
+            if value["identity"]["body_version_id"] != body_version_id
+        }
+
+        with self.assertRaises(BlogRevisionBodyUnavailableError):
+            revision.as_object()
+
+    def test_revision_snapshot_must_belong_to_its_page(self):
+        """跨页面指针不能把另一篇文章正文注入当前 Revision。"""
+        page = self._create_draft_page("本页历史正文")
+        revision = page.save_revision()
+        pointer = revision.content["mongo_draft_pointer"]
+        self.mongo.revision_documents[pointer]["page_id"] = page.pk + 1
+        body_version_id = revision.content["mongo_body_version_id"]
+        for value in self.mongo.body_versions.values():
+            if value["identity"]["body_version_id"] == body_version_id:
+                value["aggregate_id"] = str(page.pk + 1)
+
+        with self.assertRaises(BlogRevisionBodyUnavailableError):
+            revision.as_object()
+
+    def test_admin_form_rejects_empty_latest_revision_pointer(self):
+        """编辑表单不能把空指针草稿替换为当前正式正文后再保存。"""
+        page = self._create_draft_page("待编辑的草稿正文")
+        revision = page.save_revision()
+        revision_content = dict(revision.content)
+        revision_content["mongo_draft_pointer"] = ""
+        revision_content.pop("mongo_body_version_id")
+        revision_content.pop("body_sha256")
+        revision_content.pop("body_schema_version")
+        revision.content = revision_content
+        revision.save(update_fields=["content"])
+        page.refresh_from_db()
+
+        with self.assertRaises(BlogRevisionBodyUnavailableError):
+            BlogPageForm(instance=page)
+
+    def test_admin_form_prefers_new_body_version_over_broken_legacy_pointer(self):
+        """兼容期旧指针损坏时，后台表单仍必须读取同一 Revision 的新版本。"""
+        page = self._create_draft_page("不可变正文版本")
+        revision = page.save_revision()
+        revision_content = dict(revision.content)
+        revision_content["mongo_draft_pointer"] = "missing-legacy-pointer"
+        revision.content = revision_content
+        revision.save(update_fields=["content"])
+        page.refresh_from_db()
+
+        form_class = page.get_edit_handler().get_form_class()
+        form = form_class(instance=page)
+
+        self.assertEqual(form.instance.body_text, "不可变正文版本")
+
+    def test_admin_form_rejects_cross_page_latest_revision_pointer(self):
+        """编辑表单必须执行与历史预览相同的正文归属校验。"""
+        page = self._create_draft_page("本页草稿正文")
+        revision = page.save_revision()
+        pointer = revision.content["mongo_draft_pointer"]
+        self.mongo.revision_documents[pointer]["page_id"] = page.pk + 1
+        body_version_id = revision.content["mongo_body_version_id"]
+        for value in self.mongo.body_versions.values():
+            if value["identity"]["body_version_id"] == body_version_id:
+                value["aggregate_id"] = str(page.pk + 1)
+        page.refresh_from_db()
+
+        with self.assertRaises(BlogRevisionBodyUnavailableError) as error:
+            BlogPageForm(instance=page)
+
+        self.assertEqual(error.exception.code, "revision_snapshot_missing")
+
+    def test_latest_revision_without_pointer_keeps_its_empty_mysql_body(self):
+        """无指针的空 Revision 不能被当前正式 Mongo 正文覆盖。"""
+        page = self._create_draft_page("当前正式正文")
+        revision = page.save_revision()
+        revision_content = dict(revision.content)
+        revision_content.pop("mongo_draft_pointer")
+        revision_content.pop("mongo_body_version_id")
+        revision_content.pop("body_sha256")
+        revision_content.pop("body_schema_version")
+        revision_content["body"] = "[]"
+        revision.content = revision_content
+        revision.save(update_fields=["content"])
+        page.refresh_from_db()
+
+        revision_object = page.get_latest_revision_as_object()
+
+        self.assertEqual(len(revision_object.body), 0)
+
+    def test_admin_form_without_pointer_keeps_latest_empty_mysql_body(self):
+        """后台表单不能把无指针空 Revision 替换为当前正式正文。"""
+        page = self._create_draft_page("当前正式正文")
+        revision = page.save_revision()
+        revision_content = dict(revision.content)
+        revision_content.pop("mongo_draft_pointer")
+        revision_content.pop("mongo_body_version_id")
+        revision_content.pop("body_sha256")
+        revision_content.pop("body_schema_version")
+        revision_content["body"] = "[]"
+        revision.content = revision_content
+        revision.save(update_fields=["content"])
+        page.refresh_from_db()
+
+        form_class = page.get_edit_handler().get_form_class()
+        form = form_class(instance=page)
+
+        self.assertEqual(len(form.instance.body), 0)
+
+    def test_authenticated_admin_blocks_preview_compare_and_revert_before_writing(self):
+        """真实后台请求遇到缺失快照时返回 409，恢复 POST 不得新增 Revision。"""
+        page = self._create_draft_page("第一版历史正文")
+        first_revision = page.save_revision()
+        page.body = self._markdown_body("第二版历史正文")
+        second_revision = page.save_revision()
+        first_pointer = first_revision.content["mongo_draft_pointer"]
+        del self.mongo.revision_documents[first_pointer]
+        first_body_version_id = first_revision.content["mongo_body_version_id"]
+        self.mongo.body_versions = {
+            key: value
+            for key, value in self.mongo.body_versions.items()
+            if value["identity"]["body_version_id"] != first_body_version_id
+        }
+
+        user = get_user_model().objects.create_superuser(
+            username=f"revision-body-admin-{page.pk}",
+            email=f"revision-body-admin-{page.pk}@example.test",
+            password="test-password",
+        )
+        self.client.force_login(user)
+        preview_url = f"/admin/pages/{page.pk}/revisions/{first_revision.pk}/view/"
+        compare_url = (
+            f"/admin/pages/{page.pk}/revisions/compare/"
+            f"{first_revision.pk}...{second_revision.pk}/"
+        )
+        revert_url = f"/admin/pages/{page.pk}/revisions/{first_revision.pk}/revert/"
+        revision_count = page.revisions.count()
+
+        # 测试环境没有收集后的 manifest；本测试改用开发静态存储，不执行 collectstatic。
+        test_storages = {
+            **settings.STORAGES,
+            "staticfiles": {
+                "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+            },
+        }
+        with self.settings(STORAGES=test_storages):
+            preview_response = self.client.get(preview_url)
+            compare_response = self.client.get(compare_url)
+            revert_response = self.client.post(revert_url)
+
+        self.assertEqual(preview_response.status_code, 409)
+        self.assertEqual(compare_response.status_code, 409)
+        self.assertEqual(revert_response.status_code, 409)
+        self.assertEqual(page.revisions.count(), revision_count)
 
     def test_unpublished_and_restricted_pages_are_excluded_by_wagtail_public_queryset(self):
         unpublished_page = self._create_draft_page("未发布正文")

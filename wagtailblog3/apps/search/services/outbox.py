@@ -42,6 +42,7 @@ class ContentSearchOutboxService:
         if not cls._is_public(page.pk):
             return cls._record_tombstone(page)
 
+        body_version_id, publication_generation = cls._publication_metadata(page.pk)
         snapshot = build_formal_content_snapshot(page)
         if snapshot is None:
             # Mongo 暂时不可读时保留 pending 事件，后续消费者只能重试，绝不能用空正文覆盖旧文档。
@@ -52,6 +53,8 @@ class ContentSearchOutboxService:
                 searchable=True,
                 mongo_content_id=getattr(page, "mongo_content_id", None),
                 content_hash=None,
+                body_version_id=body_version_id,
+                publication_generation=publication_generation,
             )
 
         return cls._record_change(
@@ -60,6 +63,8 @@ class ContentSearchOutboxService:
             searchable=True,
             mongo_content_id=snapshot.mongo_content_id,
             content_hash=snapshot.content_hash,
+            body_version_id=body_version_id,
+            publication_generation=publication_generation,
         )
 
     @classmethod
@@ -103,12 +108,15 @@ class ContentSearchOutboxService:
 
     @classmethod
     def _record_tombstone(cls, page: Any) -> Any:
+        body_version_id, publication_generation = cls._publication_metadata(page.pk)
         return cls._record_change(
             page_id=page.pk,
             operation=ContentSearchOperation.TOMBSTONE,
             searchable=False,
             mongo_content_id=None,
             content_hash=None,
+            body_version_id=body_version_id,
+            publication_generation=publication_generation,
         )
 
     @classmethod
@@ -119,6 +127,8 @@ class ContentSearchOutboxService:
         searchable: bool,
         mongo_content_id: str | None,
         content_hash: str | None,
+        body_version_id: str | None = None,
+        publication_generation: int | None = None,
     ) -> ContentSearchOutbox:
         with transaction.atomic():
             # 首次发布时 State 尚不存在，先锁定 Page 行可避免两个发布请求并发创建不同初始版本。
@@ -136,6 +146,8 @@ class ContentSearchOutboxService:
             state.searchable = searchable
             state.mongo_content_id = mongo_content_id
             state.content_hash = content_hash
+            state.body_version_id = body_version_id
+            state.publication_generation = publication_generation
             state.save()
 
             event = ContentSearchOutbox.objects.create(
@@ -145,6 +157,8 @@ class ContentSearchOutboxService:
                 content_hash=content_hash,
                 mongo_content_id=mongo_content_id,
                 searchable=searchable,
+                body_version_id=body_version_id,
+                publication_generation=publication_generation,
                 status=ContentSearchStatus.PENDING,
             )
             transaction.on_commit(lambda: schedule_content_search_wakeup(event.event_id))
@@ -153,3 +167,24 @@ class ContentSearchOutboxService:
     @staticmethod
     def _is_public(page_id: int) -> bool:
         return Page.objects.live().public().filter(pk=page_id).exists()
+
+    @staticmethod
+    def _publication_metadata(page_id: int) -> tuple[str | None, int | None]:
+        """读取已提交的 BlogPage 正式正文身份；兼容尚未建立发布状态的旧页面。"""
+        try:
+            from blog.models import BlogPublicationState
+
+            state = BlogPublicationState.objects.filter(page_id=page_id).values(
+                "published_body_version_id", "publication_generation"
+            ).first()
+        except Exception:
+            # 搜索事件不能因兼容状态表不可用而阻断页面发布，旧字段仍可驱动投影。
+            return None, None
+        if not state:
+            return None, None
+        body_version_id = state.get("published_body_version_id")
+        generation = state.get("publication_generation")
+        return (
+            body_version_id if isinstance(body_version_id, str) and body_version_id else None,
+            generation if isinstance(generation, int) and generation > 0 else None,
+        )

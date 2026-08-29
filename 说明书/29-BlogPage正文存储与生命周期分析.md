@@ -1798,3 +1798,11 @@ Wagtail 的历史页本身主要读取 MySQL 的 `PageLogEntry`、`Revision` 元
 - 结果：10 篇全部 `status=registered`。每篇均生成唯一 Mongo `body_version_id`，MySQL `BlogPublicationState` 的 published 指针与 hash/schema 一致，`publication_generation=1`；Search State `content_version=2`、`upsert`、`searchable=true`，Outbox id=28–37 创建。
 - 搜索验收：生产 v005 read alias 中 10 篇文档全部存在，`content_version=2`、`body_version_id`、`publication_generation=1` 与 MySQL/Mongo 对齐，`searchable=true`。旧 v003 目标仍会产生 `dead/es_http_400`，未重试或清理；v005 投递成功不受影响。
 - 服务与回滚：四个 systemd 服务保持 active/enabled，未重启；未删除 Mongo 正文、Revision、Outbox 或索引。回滚仅允许恢复代码/alias 或依据批次备份处理，禁止直接删除新正文版本。
+### 72. 生产存量正文全量登记（2026-08-29）
+
+- 范围：在 page 38 及首批 10 篇验证基础上，对剩余 1087 篇 `BlogPage`（page 21–1191 中实际存在的页面）完成登记；全部页面经 dry-run 确认为 live、Mongo 正文非空、State 缺失且无现代正文版本。
+- 执行：由于 `--apply` 是受控单页接口，使用每批 10 篇、每批最多 10 个并行进程；每页携带 dry-run 计算的 64 位 expected-hash，批间 flush，任一失败即停止。实际 1087/1087 返回 `registered`，无 hash 不匹配、Mongo 或 MySQL 失败。
+- 备份与回滚：批次目录 `/home/source/Django/wagtail/backups/wagtailblog3-registration-all-20260829-160000/` 保存全量 dry-run、MySQL 页面/State/Search 快照、apply 结果、对账报告及 SHA-256；ES v005 snapshot 为 `wagtailblog3-search-snapshots/pre-register-all-20260829-162500`（SUCCESS）。未删除 Mongo 正文、Revision、Outbox、旧索引或快照。
+- 对账结果：`BlogPublicationState` 共 1098 行，`content_body_versions` 共 1098 个对应版本，Search State 共 1101 行（含 3 个既有 tombstone），Outbox 共 1120 行；所有 upsert 的 body_version/hash/schema/generation 与 Mongo/MySQL 对齐，v005 read alias 的 upsert 文档数为 1098，索引 green。`state_missing`、`mongo_missing`、`live_pointer_missing`、`outbox_missing`、`search_identity_mismatch` 均为 0。
+- 残余风险：只读一致性命令仍报告 1098 条 `revision_body_mismatch`，原因是旧 Wagtail live Revision 未写入 `mongo_body_version_id`；本批未改写历史 Revision，避免破坏预览/比较/恢复语义。后续应单独设计 Revision 绑定迁移和逐页验收，不能把该告警静默视为正文登记失败。
+- 服务：四个应用 systemd 服务持续 active/enabled，未重启；v005 alias 未切换。文档-only 提交已同步生产仓库，回滚边界为恢复代码/alias 或依据批次备份重建投影，禁止删除新正文版本。

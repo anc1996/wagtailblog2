@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from collections import defaultdict
 from typing import Any
 
@@ -16,9 +17,12 @@ import pymongo
 from bson import json_util
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
+from django.db import transaction
 
 from blog.models import BlogPage, BlogPublicationState
 from wagtail.models import Revision
+
+logger = logging.getLogger(__name__)
 
 
 def _revision_content(revision: Revision) -> dict[str, Any] | None:
@@ -53,6 +57,7 @@ class Command(BaseCommand):
 	help = "只读检查旧 BlogPage 的 Mongo 正文、Revision 和不可变版本登记状态"
 
 	def add_arguments(self, parser):
+		parser.add_argument("--expected-hash", help="旧 Mongo 正文规范化 JSON 的 SHA-256")
 		parser.add_argument("--page-id", type=int, help="仅检查一个 BlogPage 主键")
 		parser.add_argument("--after-page-id", type=int, default=0, help="批量检查时跳过不大于此主键的页面")
 		parser.add_argument("--limit", type=int, default=1000, help="最多检查页面数（1-5000）")
@@ -61,7 +66,7 @@ class Command(BaseCommand):
 
 	def handle(self, *args, **options):
 		if options.get("apply"):
-			raise CommandError("register_legacy_blog_page 当前仅支持只读 dry-run，未实现 --apply")
+			return self._handle_apply(options)
 		limit = max(1, min(int(options.get("limit") or 1000), 5000))
 		page_id = options.get("page_id")
 		if page_id is not None:
@@ -83,6 +88,60 @@ class Command(BaseCommand):
 		report["read_only"] = True
 		report["dry_run"] = True
 		self.stdout.write(json.dumps(report, ensure_ascii=False, sort_keys=True))
+
+	def _handle_apply(self, options: dict[str, Any]) -> None:
+		"""受控登记单篇旧正文；校验哈希后写入 Mongo 版本与 MySQL State。"""
+		page_id = options.get("page_id")
+		expected_hash = options.get("expected_hash")
+		if page_id is None or not isinstance(expected_hash, str) or len(expected_hash) != 64 or any(char not in "0123456789abcdefABCDEF" for char in expected_hash):
+			raise CommandError("--apply 必须同时提供有效的 --page-id 和 --expected-hash")
+		page = BlogPage.objects.filter(pk=page_id).only("pk", "live").first()
+		if page is None:
+			raise CommandError(f"未找到 BlogPage id={page_id}")
+		legacy_docs, _ = self._read_mongo([int(page.pk)])
+		body = (legacy_docs.get(int(page.pk)) or {}).get("body")
+		if not isinstance(body, list) or _body_sha256(body) != expected_hash:
+			raise CommandError("旧正文缺失或哈希不匹配，已拒绝登记")
+		try:
+			from wagtailblog3.mongo import MongoManager
+			version = MongoManager().save_content_body_version("blog_page", page.pk, body)
+		except Exception as exc:
+			logger.error("legacy_registration_mongo_failed page_id=%s error=%s", page.pk, type(exc).__name__)
+			raise CommandError("Mongo 正文版本写入失败，未创建 State") from exc
+		try:
+			with transaction.atomic():
+				locked = BlogPage.objects.select_for_update().get(pk=page.pk)
+				state = BlogPublicationState.objects.select_for_update().filter(page_id=locked.pk).first()
+				version_id = str(version["body_version_id"])
+				if state is not None and (state.draft_body_version_id == version_id or state.published_body_version_id == version_id):
+					result = {"status": "already_registered", "page_id": locked.pk, **version}
+				else:
+					if state is None:
+						state = BlogPublicationState(page_id=locked.pk)
+					state.draft_body_version_id = version_id
+					state.draft_body_sha256 = str(version["body_sha256"])
+					state.draft_body_schema_version = int(version["body_schema_version"])
+					if locked.live:
+						state.published_body_version_id = version_id
+						state.published_body_sha256 = str(version["body_sha256"])
+						state.published_body_schema_version = int(version["body_schema_version"])
+						state.publication_generation = max(1, int(state.publication_generation or 0))
+					state.save()
+					if locked.live:
+						from search.services.outbox import ContentSearchOutboxService
+						ContentSearchOutboxService.record_publication(locked)
+					result = {"status": "registered", "page_id": locked.pk, **version}
+		except Exception as exc:
+			logger.error(
+				"legacy_registration_mysql_failed page_id=%s body_version_id=%s error=%s",
+				page.pk,
+				version.get("body_version_id"),
+				type(exc).__name__,
+			)
+			raise CommandError(
+				"MySQL 登记失败，事务已回滚；Mongo 版本保留，可按相同 hash 重试"
+			) from exc
+		self.stdout.write(json.dumps(result, ensure_ascii=False, sort_keys=True))
 
 	def _build_report(self, pages: list[BlogPage]) -> dict[str, Any]:
 		"""读取页面关联数据并按登记风险分类，整个过程只执行数据库查询。"""

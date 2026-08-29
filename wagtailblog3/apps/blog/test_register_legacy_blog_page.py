@@ -37,3 +37,19 @@ class RegisterLegacyBlogPageCommandTests(SimpleTestCase):
 		payload = json.loads(output.getvalue())
 		self.assertTrue(payload["read_only"])
 		self.assertTrue(payload["dry_run"])
+
+	def test_apply_rejects_hash_mismatch_before_mongo_write(self):
+		command = __import__(
+			"blog.management.commands.register_legacy_blog_page",
+			fromlist=["Command"],
+		).Command()
+		page = SimpleNamespace(pk=38, live=True)
+		with patch(
+			"blog.management.commands.register_legacy_blog_page.BlogPage.objects"
+		) as objects, patch.object(command, "_read_mongo", return_value=({38: {"body": []}}, {})), patch(
+			"wagtailblog3.mongo.MongoManager.save_content_body_version"
+		) as save_version:
+			objects.filter.return_value.only.return_value.first.return_value = page
+			with self.assertRaises(CommandError):
+				command._handle_apply({"page_id": 38, "expected_hash": "0" * 64})
+			save_version.assert_not_called()

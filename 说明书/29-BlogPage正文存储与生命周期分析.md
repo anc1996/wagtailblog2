@@ -1747,3 +1747,11 @@ Wagtail 的历史页本身主要读取 MySQL 的 `PageLogEntry`、`Revision` 元
 - 测试环境实跑：`WAGTAILBLOG_ENV=test conda run -n wagtailblog-test python manage.py register_legacy_blog_page --page-id 38 --dry-run` 成功；Page 38 输出 `state_missing`、`legacy_revision_unbound`，Mongo 正文 12 块，哈希为 `3764642ad3f11928ea48d63ad134794c6ed835b6f21f51a3584f4ab5f5920f53`，未产生 MySQL/Mongo/Outbox/ES 写入。
 - 自动化验证：新增命令测试 3 项通过；既有发布、工作流和搜索回归共 55 项通过；`compileall`、`manage.py check`、`makemigrations --check --dry-run`、`migrate --plan blog/search` 与 `git diff --check` 通过。保留既有 Wagtail 条件唯一约束警告。
 - 后续门禁：正式登记仍需单独实现 `--apply`、expected-hash、幂等锁与 Outbox 补偿，并先在隔离测试数据上小批量验证；本批次不执行 State 回填、Mongo 版本写入、搜索投影或生产操作。回滚边界为移除新增命令/测试文件，既有业务数据未改变。
+
+### 65. 受控登记 apply、幂等与失败补偿（2026-08-29）
+
+- 实现：`--apply` 仅允许单页并强制提供 64 位十六进制 `--expected-hash`。命令先读取旧 Mongo 正文并校验哈希，再调用 `MongoManager.save_content_body_version()` 的 insert-once 语义创建不可变版本。
+- MySQL 一致性：Mongo 成功后进入 MySQL `transaction.atomic()`，按 BlogPage → BlogPublicationState 顺序 `select_for_update()`；已绑定相同版本时返回 `already_registered`，否则写入 draft/published 指针和 generation，live 页面随后在同一事务记录 Search State/Outbox。
+- 失败补偿：Mongo 写入失败时不创建 State；MySQL 事务失败时自动回滚 State/Outbox，Mongo 版本保留为安全孤儿版本并记录错误日志，后续重试依靠相同正文 hash 幂等复用。当前未建立持久化审计表，正式批量运行前应补充审计/对账记录。
+- 测试：新增 hash 不匹配拒绝测试；`register_legacy_blog_page` 定向测试 4 项通过，既有发布/工作流/搜索回归 55 项通过，`compileall`、`manage.py check`、迁移检查和 `git diff --check` 通过。
+- 安全边界：本批次只在测试环境验证命令契约，未对真实页面执行 `--apply`，未修改生产 MySQL、Mongo、Outbox 或 Elasticsearch。正式登记仍需先备份、单页试运行，再小批量推进并观察搜索投递。

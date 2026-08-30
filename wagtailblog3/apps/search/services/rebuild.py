@@ -201,6 +201,51 @@ def _mark_build_failed(build_id: int, error_code: str, *, missing: int = 0, fail
         )
 
 
+def _backfill_missing_content_hashes(
+    states: dict[int, ContentSearchState],
+    documents: list[dict[str, object]],
+) -> None:
+    """仅为不可变正文版本补齐缺失 hash，并拒绝覆盖并发产生的新状态。"""
+
+    missing_documents = [
+        document
+        for document in documents
+        if not states[int(document["page_id"])].content_hash
+        and states[int(document["page_id"])].body_version_id
+    ]
+    if not missing_documents:
+        return
+
+    page_ids = [int(document["page_id"]) for document in missing_documents]
+    with transaction.atomic():
+        locked_states = (
+            ContentSearchState.objects.select_for_update()
+            .filter(page_id__in=page_ids)
+            .in_bulk(field_name="page_id")
+        )
+        for document in missing_documents:
+            page_id = int(document["page_id"])
+            expected = states[page_id]
+            current = locked_states.get(page_id)
+            if (
+                current is None
+                or current.content_version != expected.content_version
+                or current.desired_operation != ContentSearchOperation.UPSERT
+                or not current.searchable
+                or current.body_version_id != document.get("body_version_id")
+                or current.publication_generation != document.get("publication_generation")
+            ):
+                raise ContentSearchRebuildError("content_search_state_changed")
+
+            content_hash = str(document["content_hash"])
+            if current.content_hash and current.content_hash != content_hash:
+                raise ContentSearchRebuildError("content_search_state_hash_mismatch")
+            if not current.content_hash:
+                current.content_hash = content_hash
+                current.save(update_fields=("content_hash", "updated_at"))
+            expected.content_hash = content_hash
+
+
 def _checkpoint_build(
     build_id: int,
     page_id: int,
@@ -343,15 +388,24 @@ def rebuild_content_search_batch(target_id: str, batch_size: int, max_batch_byte
         if state.mongo_content_id != getattr(page, "mongo_content_id", None):
             _mark_build_failed(build.pk, "content_search_state_content_id_mismatch", failed=len(pages))
             raise ContentSearchRebuildError("content_search_state_content_id_mismatch")
-        if state.content_hash != document["content_hash"]:
-            _mark_build_failed(build.pk, "content_search_state_hash_mismatch", failed=len(pages))
-            raise ContentSearchRebuildError("content_search_state_hash_mismatch")
         if state.body_version_id != document.get("body_version_id"):
             _mark_build_failed(build.pk, "content_search_state_body_version_mismatch", failed=len(pages))
             raise ContentSearchRebuildError("content_search_state_body_version_mismatch")
         if state.publication_generation != document.get("publication_generation"):
             _mark_build_failed(build.pk, "content_search_state_generation_mismatch", failed=len(pages))
             raise ContentSearchRebuildError("content_search_state_generation_mismatch")
+
+    try:
+        _backfill_missing_content_hashes(states, documents)
+    except ContentSearchRebuildError as error:
+        _mark_build_failed(build.pk, error.code, failed=len(pages))
+        raise
+
+    for document in documents:
+        state = states[document["page_id"]]
+        if state.content_hash != document["content_hash"]:
+            _mark_build_failed(build.pk, "content_search_state_hash_mismatch", failed=len(pages))
+            raise ContentSearchRebuildError("content_search_state_hash_mismatch")
 
     succeeded = 0
     superseded = 0

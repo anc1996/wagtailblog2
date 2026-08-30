@@ -1208,8 +1208,15 @@ class BlogPage(Page):
 		"""删除页面并由 ``pre_delete`` 登记 Mongo 清理意图。"""
 		with transaction.atomic():
 			if settings.CONTENT_SEARCH_PRODUCER_ENABLED:
+				from blog.services.publication import BlogPublicationService
 				from search.services.outbox import ContentSearchOutboxService
-				ContentSearchOutboxService.record_delete(self)
+
+				# 删除路径不保证先经过本项目的取消发布代次推进，需在写墓碑前补齐，
+				# 让删除墓碑可靠地压过所有迟到的发布事件。
+				locked_page = type(self).objects.select_for_update().get(pk=self.pk)
+				if locked_page.live:
+					BlogPublicationService.advance_unpublish_generation(self.pk)
+				ContentSearchOutboxService.record_delete(locked_page)
 			return super().delete(*args, **kwargs)
 	
 	# =========================================================================

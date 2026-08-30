@@ -120,6 +120,24 @@ class ContentSearchProducerLifecycleTests(BlogLifecycleFixtureMixin, TestCase):
         self.assertEqual(delete_event.operation, ContentSearchOperation.TOMBSTONE)
         self.assertFalse(BlogPage.objects.filter(pk=state.page_id).exists())
 
+    def test_direct_delete_of_live_page_advances_generation_and_writes_tombstone(self):
+        """直接删除仍在线页面时，墓碑必须拥有更高公开代次，避免迟到 upsert 复活。"""
+        with patch("search.services.outbox.schedule_content_search_wakeup"):
+            page = self._publish(self._create_draft_page("直接删除在线正文"))
+            state_before = BlogPublicationState.objects.get(page_id=page.pk)
+            self.assertEqual(state_before.publication_generation, 1)
+
+            page.delete()
+
+        state = ContentSearchState.objects.get(page_id=page.pk)
+        delete_event = ContentSearchOutbox.objects.filter(
+            page_id=page.pk,
+            operation=ContentSearchOperation.TOMBSTONE,
+        ).order_by("-content_version").first()
+        self.assertFalse(BlogPage.objects.filter(pk=page.pk).exists())
+        self.assertEqual(delete_event.publication_generation, 2)
+        self.assertEqual(state.publication_generation, 2)
+
     def test_celery_enqueue_failure_keeps_pending_event(self):
         page = self._create_draft_page("唤醒失败正文")
         with patch(

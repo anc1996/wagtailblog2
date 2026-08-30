@@ -100,6 +100,9 @@ class ContentSearchOutboxService:
                 .first()
             )
             if active_job is not None:
+                if active_job.status == ContentSearchScopeJobStatus.PROCESSING:
+                    active_job.rescan_requested = True
+                    active_job.save(update_fields=("rescan_requested", "updated_at"))
                 return active_job
 
             job = ContentSearchScopeJob.objects.create(root_page_id=root_page_id)

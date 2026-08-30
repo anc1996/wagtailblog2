@@ -805,6 +805,8 @@ WP8 只删除应用内影子与旧 DSL 代码，不新增服务、不改 unit、
 
 `CONTENT_SEARCH_QUERY_ENABLED`、`CONTENT_SEARCH_FEDERATED_ALL_ENABLED` 与 `CONTENT_SEARCH_SHADOW_*` 是 WP8 前的历史开关。WP8 部署后 Django 不再读取它们；不得将其写入 unit、drop-in 或开机恢复脚本。producer/consumer、内容 alias、maintenance Worker 和 Beat 的既有启动依赖保持不变。
 
+访问限制变更会在事务提交后创建 `ContentSearchScopeJob`，由 Beat 每 30 秒向 `maintenance` 队列投递 `search.tasks.dispatch_pending_content_search_scope_jobs`，Worker 执行 `search.tasks.consume_content_search_scope_job`。该任务按 BlogPage 子树和主键检查点重算公开状态，生成必要的 tombstone/upsert；租约过期可重试，失败仅记录脱敏错误。部署包含该任务或迁移时需确认 maintenance Worker、Beat 均已注册新任务并按既有顺序重启；回滚时停止 Worker/Beat，保留 ScopeJob、State 与 Outbox，不清理任务或搜索索引。
+
 ## Wagtail 8.0 与正文生命周期迁移 runbook
 
 本节前半适用于 Wagtail 7.4.3 -> 8.0 的依赖、迁移和默认 Page 搜索索引升级；根据 `说明书/27-Wagtail 8.0升级可行性方案.md` 的实施记录，Wagtail 8.0 升级已在 2026-08-27 完成。正文生命周期迁移（`blog.0029`-`blog.0033`、`search.0006`-`search.0007`）仍未执行，不能把历史 Wagtail 8 部署记录视为本批迁移授权；现场状态必须以生产 `showmigrations`、commit、服务和数据库检查为准。

@@ -415,6 +415,11 @@ def get_celery_config(time_zone, redis_host, redis_port, redis_password):
 				'schedule': 30,
 				'options': {'queue': maintenance_queue},
 			},
+			'dispatch-pending-content-search-scope-jobs': {
+				'task': 'search.tasks.dispatch_pending_content_search_scope_jobs',
+				'schedule': 30,
+				'options': {'queue': maintenance_queue},
+			},
 			'cleanup-blog-analytics-details': {
 				'task': 'blog.tasks.cleanup_analytics_details',
 				'schedule': 60 * 60 * 24,

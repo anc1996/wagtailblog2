@@ -1,5 +1,6 @@
 import json
 import os
+from types import SimpleNamespace
 from io import StringIO
 from unittest.mock import patch
 
@@ -88,6 +89,53 @@ class ContentSearchRebuildTests(BlogLifecycleFixtureMixin, TestCase):
         document = write_documents.call_args.args[1][0]
         self.assertEqual(document["content_version"], self.state.content_version)
         self.assertNotIn("mongo_content_id", document)
+
+    def test_rebuild_backfills_missing_hash_for_immutable_body_version(self):
+        """旧登记 State 缺少 hash 时，仅按不可变正文版本补齐并继续回填。"""
+        self.state.content_hash = None
+        self.state.body_version_id = "body-version-modern"
+        self.state.publication_generation = 7
+        self.state.save(update_fields=("content_hash", "body_version_id", "publication_generation", "updated_at"))
+        publication_state = SimpleNamespace(
+            published_body_version_id="body-version-modern",
+            published_body_sha256="a" * 64,
+            published_body_schema_version=1,
+        )
+        formal_contents = {
+            f"page:{self.page.pk}": {"body": self._markdown_body("immutable modern body")}
+        }
+
+        with (
+            patch("search.services.rebuild.verify_content_search_index", return_value=True),
+            patch(
+                "search.services.rebuild.BlogPublicationState.objects.in_bulk",
+                return_value={self.page.pk: publication_state},
+            ),
+            patch(
+                "search.services.rebuild.read_published_body_versions_by_page",
+                return_value=formal_contents,
+            ),
+            patch(
+                "search.services.rebuild.read_formal_contents_by_id",
+                return_value={},
+            ),
+            patch(
+                "search.services.rebuild.write_content_search_documents",
+                return_value=ContentSearchBulkWriteResult(succeeded=1, superseded=0),
+            ) as write_documents,
+        ):
+            start_content_search_build(self.target.target_id)
+            _build, _batches, last_batch = rebuild_content_search_index(
+                self.target.target_id,
+                batch_size=1,
+                max_batch_bytes=4096,
+            )
+
+        self.assertTrue(last_batch.done)
+        self.state.refresh_from_db()
+        document = write_documents.call_args.args[1][0]
+        self.assertEqual(self.state.content_hash, document["content_hash"])
+        self.assertEqual(document["body_version_id"], "body-version-modern")
 
     def test_bulk_failure_keeps_previous_checkpoint_and_resume_continues(self):
         with patch("search.services.outbox.schedule_content_search_wakeup"):

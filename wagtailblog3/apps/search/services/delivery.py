@@ -261,39 +261,61 @@ def _claim_content_search_delivery(delivery_id: int):
         )
 
 
-def _load_current_event_and_state(lease: DeliveryLease):
-    """比较事件与最新 State，决定 ready、retry、superseded 或 dead。"""
-    event = ContentSearchOutbox.objects.get(pk=lease.event_id)
-    state = ContentSearchState.objects.filter(page_id=event.page_id).first()
+def classify_content_search_event(
+    event: ContentSearchOutbox, state: ContentSearchState | None
+) -> str:
+    """按消费者的版本围栏分类一个 Outbox 事件。
+
+    参数：``event`` 是待投递事件，``state`` 是同一页面的当前搜索状态。
+    返回：仅返回 ``ready``、``retry``、``superseded`` 或 ``dead``，供消费者与
+    受控运维命令共享，避免 dry-run 预判与实际消费采用不同版本规则。
+    副作用：无；不读取正文、不领取租约，也不修改 Outbox、Delivery 或 State。
+    """
     if state is None:
-        return event, state, "dead"
+        return "dead"
     if event.content_version < state.content_version:
-        return event, state, "superseded"
+        return "superseded"
     if event.content_version > state.content_version:
-        return event, state, "retry"
+        return "retry"
     if event.operation != state.desired_operation:
-        return event, state, "retry"
+        return "retry"
     if bool(event.searchable) != bool(state.searchable):
-        return event, state, "retry"
+        return "retry"
     if event.content_hash and state.content_hash and event.content_hash != state.content_hash:
-        return event, state, "retry"
-    if event.mongo_content_id and state.mongo_content_id and event.mongo_content_id != state.mongo_content_id:
-        return event, state, "retry"
+        return "retry"
+    if (
+        not event.body_version_id
+        and not state.body_version_id
+        and event.mongo_content_id
+        and state.mongo_content_id
+        and event.mongo_content_id != state.mongo_content_id
+    ):
+        return "retry"
     if event.body_version_id and event.body_version_id != state.body_version_id:
-        return event, state, "superseded"
+        return "superseded"
     if state.body_version_id and not event.body_version_id:
         # 新状态已有不可变正文身份时，旧格式事件不得再索引未知正文。
-        return event, state, "superseded"
+        return "superseded"
     if event.publication_generation is not None:
         if state.publication_generation is None:
-            return event, state, "retry"
+            return "retry"
         if event.publication_generation < state.publication_generation:
-            return event, state, "superseded"
+            return "superseded"
         if event.publication_generation > state.publication_generation:
-            return event, state, "retry"
+            return "retry"
     if state.publication_generation is not None and event.publication_generation is None:
-        return event, state, "superseded"
-    return event, state, "ready"
+        return "superseded"
+    return "ready"
+
+
+def _load_current_event_and_state(
+    lease: DeliveryLease,
+) -> tuple[ContentSearchOutbox, ContentSearchState | None, str]:
+    """读取租约事件及当前 State，并返回与实际消费一致的版本分类。"""
+
+    event = ContentSearchOutbox.objects.get(pk=lease.event_id)
+    state = ContentSearchState.objects.filter(page_id=event.page_id).first()
+    return event, state, classify_content_search_event(event, state)
 
 
 def _confirm_formal_content(lease: DeliveryLease, formal_document: object) -> str:
@@ -316,17 +338,21 @@ def _confirm_formal_content(lease: DeliveryLease, formal_document: object) -> st
             or not state.searchable
         ):
             return "retry"
-        if state.mongo_content_id != formal_document.mongo_content_id:
+        document_body_version_id = getattr(formal_document, "body_version_id", None)
+        if state.body_version_id and document_body_version_id != state.body_version_id:
             return "retry"
         if state.content_hash and state.content_hash != formal_document.content_hash:
             return "retry"
         if event.content_hash and event.content_hash != formal_document.content_hash:
             return "retry"
-        if event.mongo_content_id and event.mongo_content_id != formal_document.mongo_content_id:
-            return "retry"
-        document_body_version_id = getattr(formal_document, "body_version_id", None)
         if event.body_version_id and document_body_version_id != event.body_version_id:
             return "retry"
+        if not document_body_version_id:
+            # 只有旧 blog_content 路径使用 mongo_content_id；现代正文由版本 ID/hash/schema 定位。
+            if state.mongo_content_id != formal_document.mongo_content_id:
+                return "retry"
+            if event.mongo_content_id and event.mongo_content_id != formal_document.mongo_content_id:
+                return "retry"
         if (
             event.publication_generation is not None
             and getattr(formal_document, "publication_generation", None)
@@ -341,8 +367,11 @@ def _confirm_formal_content(lease: DeliveryLease, formal_document: object) -> st
             state.save(update_fields=("content_hash", "updated_at"))
         if update_event:
             event.content_hash = formal_document.content_hash
-            event.mongo_content_id = formal_document.mongo_content_id
-            event.save(update_fields=("content_hash", "mongo_content_id", "updated_at"))
+            update_fields = ["content_hash", "updated_at"]
+            if not document_body_version_id:
+                event.mongo_content_id = formal_document.mongo_content_id
+                update_fields.append("mongo_content_id")
+            event.save(update_fields=tuple(update_fields))
     return "ready"
 
 
@@ -489,7 +518,7 @@ def refresh_content_search_outbox_status(event_id: int):
     return event.status
 
 
-def process_content_search_delivery(delivery_id: int):
+def process_content_search_delivery(delivery_id: int) -> str:
     """消费一个 Delivery；ES 写入在事务外执行，最终状态由租约 owner 保护。"""
     """消费一个 Delivery；外部 ES 写入始终在事务外，完成状态通过租约 owner 防止迟到覆盖。"""
 
@@ -533,8 +562,8 @@ def process_content_search_delivery(delivery_id: int):
         else:
             page = BlogPage.objects.live().public().filter(pk=event.page_id).first()
             if page is None:
-                # 访问限制刚改变时宁可暂不写入；范围任务会在后续版本生成 tombstone 或 upsert。
-                return _complete_delivery(lease, ContentSearchStatus.SUCCEEDED)
+                # 权限范围消费者尚未收敛前不能伪成功，否则旧 ES 正文可能继续公开。
+                return _retry_or_dead_delivery(lease, "content_search_page_not_public")
             formal_document = build_formal_content_document(
                 page,
                 event.content_version,

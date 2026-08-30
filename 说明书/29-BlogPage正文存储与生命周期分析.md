@@ -1,1890 +1,625 @@
-# BlogPage 正文存储与生命周期分析
+# BlogPage 正文存储与生命周期改造最终记录
 
-> **统一执行版（架构师 / 数据库工程师 / Django-Wagtail 工程师）**
+> 状态：截至 2026-08-30 的统一基线。
 >
-> 本文不是生产变更授权，而是把当前代码证据、测试数据证据和千万级演进目标整理成一份可分批验收的改造基线。任何迁移、回填、索引重建、快照回收、发布或服务重启，都必须在对应工作包单独取得授权。
+> 本文把早期调研、分批实现、测试、生产迁移和后续设计合并为一份最终记录。它不是新的生产变更授权。数据库迁移、正文回填、Elasticsearch 重建或 alias 切换、数据清理、服务重启和回滚，仍须针对准确目标单独确认。
 
-## 0. 总体决策与执行顺序
+## 1. 文档目的与结论
 
-### 0.1 一句话架构
+### 1.1 最终架构
 
-采用“**MySQL/Wagtail 目录与事务状态 + Mongo 不可变正文版本 + Elasticsearch 已发布搜索投影 + MySQL Outbox 异步投递**”四层架构：MySQL 决定文章是否公开以及当前正文版本，Mongo 保存正文和历史快照，Elasticsearch 只保存可重建的公开搜索文档，Outbox 负责跨库副作用的至少一次投递和补偿。
+项目采用以下四层架构：
 
-当前 `blog_content` 和 `blog_page_revision_bodies` 保留为兼容层；目标不是用 Mongo 取代 Wagtail，而是让 Wagtail 的 Revision、权限和发布流程继续存在，同时停止正文的原地覆盖和跨库无门槛双写。
+```text
+MySQL / Wagtail
+  页面树、元数据、权限、Workflow、Revision 元数据
+  当前草稿/审批/正式正文指针、publication_generation、Outbox
+             |
+             | 版本 ID + SHA-256 + schema
+             v
+MongoDB
+  不可变正式正文版本、草稿和历史 Revision 正文快照
+             |
+             | MySQL Outbox 至少一次投递
+             v
+Elasticsearch
+  仅保存可重建的已发布搜索投影
+             |
+             v
+Redis / 页面缓存 / 前台查询
+```
 
-### 0.2 必须先锁定的业务边界
+核心原则是：MySQL 决定内容是否公开以及公开哪个正文版本；Mongo 保存大正文；Elasticsearch 不是权威库，只是可重建投影。跨库不追求分布式事务，而使用不可变版本、MySQL 事务内状态与 Outbox、幂等 Delivery、版本围栏和只读对账实现最终一致性。
 
-| 决策项 | 本方案默认选择 | 不能含糊的原因 |
+### 1.2 当前结论
+
+- MySQL `blog_blogpage.intro` 应保留。它是列表、SEO、RSS、后台和搜索元数据，不是正文冗余。
+- MySQL `blog_blogpage.body` 字段定义应保留，以维持 Wagtail `StreamField` 的表单、校验、序列化和 Revision 契约；持久值保持 `[]` 是当前正文分离设计。
+- `BlogPage.mongo_content_id` 明确允许 `NULL`，只是旧 Mongo `blog_content` 的兼容指针，不是新版正式正文的必填身份。
+- 新版正式正文身份是 `BlogPublicationState.published_body_version_id`、`published_body_sha256`、`published_body_schema_version` 三元组。
+- 13 篇测试文章虽然 `mongo_content_id=NULL`，但 State 完整、Mongo 不可变正文可读、正文块完整；这不是空正文或登记失败。搜索代码不得把旧 ID 当作必填条件。
+- 早期文章没有草稿或历史 Revision 是正常历史状态。正式正文登记和搜索恢复不要求补造草稿，也不要求回写历史 Revision。
+- 精选、人工运营内容继续使用 `BlogPage`。未来千万级采集文章不应全部进入 Wagtail Page 树，应在容量和产品边界明确后建设独立 `Article` 目录。
+
+### 1.3 未来数据的唯一执行方案（历史数据不作为门槛）
+
+从本节方案启用之后，新增文章和后续编辑只按新版链路处理。早期文章缺少草稿、Revision、旧 `mongo_content_id` 或存在状态不一致时，统一归类为历史兼容数据，不阻塞新文章写入、发布或搜索；历史数据是否补登记另立只读核对和迁移批次。
+
+未来一篇文章的生命周期固定为：
+
+```text
+创建/编辑草稿
+  -> Mongo 写入不可变 body_version
+  -> MySQL Revision + BlogPublicationState.draft 指针
+  -> 提交 Workflow（可选）/定时发布（可选）
+  -> 发布事务：校验正文版本，切换 published 指针和 generation，写 Outbox
+  -> maintenance Worker：Outbox -> Delivery -> ES v005 当前 serving 索引
+  -> 搜索读取：read alias + MySQL live().public() 二次过滤
+```
+
+- 保存草稿只产生 Mongo 版本和 Wagtail Revision，不写公开 ES。
+- 发布时必须校验批准版本仍等于待发布版本；校验通过后在同一 MySQL 事务内更新 State 和 Outbox。
+- 编辑已发布文章不会原地修改旧正文，而是创建新版本；新版本发布后 generation 单调递增，旧 Delivery 自动 superseded。
+- 取消发布、删除或权限收紧均写 tombstone Outbox；ES 删除/墓碑投影成功前，MySQL 前台查询继续作为防线。
+- Outbox/Delivery 失败只进入 retry/dead 和告警，不回写空正文、不使用旧 `mongo_content_id` 顶替新版正文。
+- 搜索索引只保留已发布内容投影，物理索引采用版本化名称（例如 `content-v005-<build>`），通过 read alias 原子切换；索引损坏时重建新物理索引，不在 serving 索引上做破坏性重建。
+
+100 万篇规模下的运行规则：
+
+1. MySQL 保存目录和状态，不保存大正文；所有列表查询必须走索引字段（站点、状态、日期、generation），正文按需从 Mongo 批量读取。
+2. Mongo 正文按 `aggregate_id + created_at`、`body_version_id` 建索引，正文版本不可变；GC 只能依据清理意图、Revision/发布指针和备份引用执行。
+3. Outbox、Delivery、State 使用 `(page_id, content_version)` 和 `(target_id, event_id)` 幂等键；消费者按稳定主键分页、租约和 checkpoint 扫描，禁止逐篇全表无界扫描。
+4. ES 使用 alias、单调 generation 和 hash/body_version 围栏；批量导入采用 bulk + 游标断点，单批失败可重试，不阻塞其他批次。
+5. 对账任务只读扫描 State→Mongo→ES 三元组，按时间窗口和 page_id checkpoint 分片；发现差异生成补偿事件，不直接修改正文。
+6. 当 BlogPage 页面树、权限或后台操作成为瓶颈时，先用 1 万、10 万、100 万脱敏数据压测并记录 p95/p99、写入吞吐、ES bulk 错误、Mongo/ MySQL 磁盘和锁等待，再决定独立 Article catalog、读副本、Mongo/ES 分片；不预先改造 Wagtail 核心 Page 表。
+
+## 2. 数据权威与不变量
+
+### 2.1 数据归属
+
+| 数据 | 权威位置 | 说明 |
 | --- | --- | --- |
-| `blog_content` 语义 | 仅表示已发布正文；草稿和历史正文不进入其中 | 否则前台、搜索和后台预览会混淆公开内容与工作副本 |
-| MySQL `intro` | 继续作为元数据权威字段 | 列表、SEO、RSS、Wagtail 页面搜索和权限过滤都需要低延迟读取 |
-| MySQL `body` | 保留字段和 StreamField 契约，持久值继续压缩为空值表示 | Wagtail 表单、校验、Revision 反序列化和比较依赖该字段；删列不是简单去重 |
-| Mongo `title`/`intro` | 过渡期保留镜像，禁止立即清理 | 先完成读取方审计、双读观察和可恢复迁移，再收缩双写面 |
-| Wagtail Page 范围 | 精选/人工运营内容继续使用；海量导入文章进入独立 `Article` 目录 | 千万级页面树、权限、Revision 和后台浏览不应未经压测全部承载 |
-| 分布式事务 | 不引入 MySQL-Mongo 两阶段提交 | 以 MySQL 事务提交为公开可见性门槛，用 Outbox 和对账处理跨库失败 |
+| 页面树、站点、标题、摘要、日期 | MySQL/Wagtail | 用于列表、权限、路由和后台管理 |
+| 发布、Workflow、定时发布状态 | MySQL/Wagtail | 公开可见性的唯一判定来源 |
+| 当前正文版本和公开代际 | `BlogPublicationState` | 保存草稿、审批、正式指针和 `publication_generation` |
+| 正式正文 | Mongo `content_body_versions` | 不可变，按版本 ID/hash/schema 精确读取 |
+| 草稿/历史正文 | Mongo Revision 快照 | 与 Wagtail Revision 对应，不进入公开搜索 |
+| 旧正式正文 | Mongo `blog_content` | 仅供未登记旧页面兼容读取，不再作为新版身份 |
+| 搜索状态与事件 | MySQL Search State/Outbox/Delivery | 可审计、可重试、按 Target 分发 |
+| 搜索文档 | Elasticsearch 版本化物理索引 | 可重建，只保存公开投影 |
+| 图片和附件 | Wagtail/MinIO | 不把二进制资源塞入正文版本 |
 
-### 0.3 数据不变量（所有实现和测试的共同契约）
+### 2.2 不可破坏的不变量
 
-1. 公开页面必须同时满足：MySQL 页面为公开状态、`published_body_version_id` 非空、Mongo 版本存在且哈希校验通过。
-2. Mongo 正文版本不可变；编辑、恢复和再发布都生成或引用版本，不原地覆盖已发布正文。
-3. Wagtail Revision 不可变；恢复旧版本只能生成新 Revision，不能改写旧 Revision 的 JSON 或快照。
-4. Revision 指针必须按原始 `_id` 类型读取，同时兼容历史 ObjectId 和 `rev_<page>_<uuid>` 字符串；非法、缺失、超时、空正文和反序列化失败必须是不同状态。
-5. 正文读取失败不得静默回退为正常空正文，也不得把历史预览静默替换成当前正式正文。
-6. 公开搜索只接受已发布版本；草稿、预览和历史版本永远不能进入公开索引。
-7. 每个公开变更在同一个 MySQL 事务内更新页面状态、正文版本指针、`publication_generation` 和 Outbox 事件。
-8. 搜索、缓存和媒体清理由提交后的消费者执行，并以内容身份、版本和 generation 做幂等围栏；旧事件不能覆盖新版本。
-9. 删除先写 MySQL 墓碑和 Outbox，再在提交后延迟清理 Mongo；只要仍有 Revision、正式指针、备份或审计引用，就不得物理回收。
-10. 所有重建任务必须可暂停、可重试、可对账和可回滚；Elasticsearch 是投影，不是正文或元数据权威库。
+1. 已登记公开页面必须有可读取的正式正文三元组；缺失或哈希不一致必须显式失败，不能静默回退旧正文或空正文。
+2. Mongo 正式正文版本不可变。编辑、恢复和再次发布只能创建或引用新版本，不能原地覆盖已发布版本。
+3. Wagtail Revision 不可变。恢复历史版本应产生新的工作 Revision，不能改写旧 Revision 的 JSON 或正文快照。
+4. `body=[]` 只表示 MySQL 不保存正文，不等于文章正文为空；Mongo 正文数组本身为空则是允许的有效内容。
+5. 公开搜索只接受已发布版本，草稿、预览和历史 Revision 永远不能进入公开索引。
+6. 页面状态、正式指针、`publication_generation` 和搜索 Outbox 必须在同一个 MySQL 事务边界内更新。
+7. Delivery 必须以内容版本和 generation 做幂等围栏；迟到 upsert 不得覆盖较新版本或复活 tombstone。
+8. 取消发布和删除必须生成 tombstone。不能只修改 Wagtail `live` 状态而留下公开搜索文档。
+9. 删除流程先在 MySQL 记录墓碑和清理意图，再在事务提交后回收 Mongo；只要仍有 Revision、正式指针、备份或审计引用，就不得物理删除。
+10. `ContentSearchState` 的 tombstone 永久保留。ES、缓存和 Delivery 均可重建或归档，但不能删除用于防复活的状态围栏。
+11. 所有回填、重建和清理任务必须可 dry-run、可断点、可重试、可对账，并在写入前核对目标、manifest/hash 和备份。
 
-### 0.4 四个专业视角的分工
+## 3. 当前数据模型
 
-| 视角 | 负责的设计问题 | 交付门禁 |
-| --- | --- | --- |
-| 架构 | 权威来源、跨库边界、版本代际、Article 与 BlogPage 分层 | ADR、状态机、故障矩阵、回滚设计 |
-| 数据库 | 表/集合/索引、唯一性、引用、容量、备份和对账 | DDL 评审、执行计划、备份恢复演练、数据抽样 |
-| Django/Wagtail | `serializable_data`、`from_serializable_data`、表单、预览/比较/恢复、保存删除钩子 | 单元/集成测试、Wagtail 8.0 后台验收、类型化错误呈现 |
-| 搜索与运维 | Outbox、Delivery、ES alias、重建、监控、服务顺序 | 版本围栏测试、重放演练、SLO、systemd/日志/告警检查 |
+### 3.1 MySQL Blog 模型
 
-### 0.5 推荐执行顺序
+`BlogPage` 继续保留：
 
 ```text
-M0 只读基线与备份门禁
-  -> M1 Revision 读取兼容与错误分类（先修 P0，不改数据）
-  -> M2 Mongo 正文版本双写和引用登记
-  -> M3 Wagtail 发布/恢复与 MySQL Outbox 原子编排
-  -> M4 搜索投影、generation 围栏和在线重建
-  -> M5 Article 目录与批量导入通道
-  -> M6 对账、GC、旧字段和旧集合收缩
+page_ptr_id
+date
+intro
+mongo_content_id     可空；旧 blog_content 兼容指针
+body                 Wagtail StreamField 契约；MySQL 持久值通常为 []
 ```
 
-每个阶段都必须有“旧路径可读、失败可重试、指标可观察、上一阶段可回退”的验收结果；未通过上一阶段，不得进入下一阶段。
-
-### 0.6 风险优先级总表
-
-| 优先级 | 当前问题 | 目标动作 | 允许的回滚边界 |
-| --- | --- | --- | --- |
-| P0 | 字符串 Revision 指针被 ObjectId-only 读取器拒绝；历史预览静默回退正式正文 | 先实现类型安全读取和显式错误状态，再开放恢复/比较 | 只回滚读取适配器；不删除旧快照 |
-| P0 | `pre_delete` 在 MySQL 提交前删除 Mongo，且与 `BlogPage.delete()` 重复 | 信号只记录事务内意图，提交后消费者清理 | 保留 Mongo 正文和墓碑，停止消费者即可 |
-| P1 | Mongo 先写、MySQL 后写，失败后产生孤儿或正文漂移 | 不可变版本 + MySQL 指针 + Outbox + 对账 | 双写期间保留旧字段和旧读路径 |
-| P1 | 正文快照被多个 Revision 共享，物理删除会破坏历史 | 引用登记/审计 + 延迟 GC | GC 前可停止回收，不做在线删除 |
-| P1 | 恢复旧 Revision 或迟到搜索事件覆盖新版本 | `publication_generation`、`body_version_id`、哈希围栏 | ES 使用旧 alias/索引回退，MySQL 指针不回退数据 |
-| P2 | Mongo 元数据镜像、旧 MySQL 正文和 Revision 没有收缩策略 | 完成读取方审计、备份和观察期后再收缩 | 只删除兼容代码，不直接删数据 |
-| P2 | 千万篇全部作为 Wagtail Page 的后台和树性能风险 | 独立 Article 目录，按压测结果决定分片 | Article 通道与 BlogPage 通道可独立停用 |
-
-### 0.7 本文阅读和实施映射
-
-- 第 1-4 节：当前事实、字段权威、生命周期和基础风险。
-- 第 5-21 节：MySQL、Mongo、ES、Outbox、容量、备份、工作包和测试门禁。
-- 第 22-34 节：`apps/search` 专项兼容和千万级搜索演进。
-- 第 35-37 节：Wagtail 8.0 历史、真实测试数据和浏览器验收证据。
-- 本节 0：跨章节统一决策；若专项章节与本节冲突，以最新实测证据和本节不变量为准，并在实施记录中登记变更。
-
-### 0.8 整个项目的唯一主线与子代理分工
-
-后续不再把 M0-M6、WP0-WP8、S0-S5 当成三套独立计划。**M 主线是唯一依赖顺序**；WP 和 S 只是交付包映射。每一批必须有唯一 owner、明确前置条件、可验收产物、自动化测试、回滚开关和“是否需要生产授权”标记。
-
-| 主线 | 风险/目标 | 唯一 owner | 协作角色与文件边界 | 前置条件 | 交付物与验收门禁 | 回滚开关 | 生产授权 |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| M0 基线与容量 | 只读盘点，建立事实和容量基线 | `arch` | `data` 查 MySQL/Mongo/ES；`ops` 查备份、服务和监控；`qa` 固化测试数据 | 无 | 指针类型/孤儿/共享引用/Outbox/ES alias 报表；正文只输出长度、字节和 hash；备份恢复点记录 | 停止报告任务，不改业务 | 否；生产只读采集另行授权 |
-| M1 Revision 读取兼容 | 修复字符串/ObjectId 指针和静默回退 P0 | `backend` | `arch` 定义错误状态；`qa` 做 Wagtail 8 预览/比较/恢复；`review` 审查异常边界 | M0 报表；禁止触碰真实数据 | `mongo.py` 统一 pointer resolver；`models.py` 显式 `invalid/missing/unavailable/empty/deserialize`；Page 38/544 回归通过；缺失正文不再伪装为空或正式正文 | feature flag 回到旧只读路径；不删快照 | 否，测试环境先行 |
-| M2 删除与引用保护 | 消除事务回滚丢正文和共享快照误删 P0/P1 | `backend` | `data` 设计 manifest/ref；`ops` 设计重试/租约；`review` 做事务审查 | M1 读取可定位；M0 已知共享指针 | `pre_delete` 只写 MySQL intent；提交后 Delivery/GC；共享指针删除安全；外层回滚 Mongo 不变 | 停止 GC/Delivery，保留墓碑和快照 | 测试通过后再申请生产灰度 |
-| M3 正文版本化 | 建立不可变 `body_version_id`、hash、schema | `data` | `backend` repository/Revision；`arch` 版本契约；`qa` 故障注入 | M1/M2 通过；新字段和集合设计评审 | 新旧双读双写、正文不可变、Revision 引用可审计；`makemigrations --check` 和迁移演练通过 | 停止新写，继续旧字段双读；不物理删除 | 需要 DDL/回填授权 |
-| M4 Wagtail 发布编排 | 发布/恢复/定时任务与 MySQL 指针、generation、Outbox 对齐 | `backend` | `arch` 状态机；`search` Outbox 消费；`qa` 并发和回滚；`review` 事务边界 | M3 版本可读；发布场景清单完成 | 首发/再发/取消发布/旧 Revision 恢复/并发发布通过；Mongo 失败或 MySQL 回滚不改变旧公开版本 | 关闭新发布编排，保留旧发布入口和 Outbox | 需要发布灰度授权 |
-| M5 搜索身份与投影 | typed identity、generation 围栏、ES 在线重建 | `search` | `data` 正文批量读取；`backend` Article producer；`qa` 召回/延迟；`ops` alias/监控 | M4 稳定；先完成 S0 只读一致性 | `content_kind/namespace + aggregate_id + body_version_id + generation + hash`；旧事件拒绝；BUILDING/CATCHING_UP/SERVING 和 alias 回滚演练通过 | alias 切回旧 serving；停止消费者，保留 Outbox | 需要索引创建、回填和切 alias 授权 |
-| M6 Article 海量通道 | 将千万级采集内容从 Wagtail Page 树分离 | `arch` | `backend` Article/导入；`data` 表和索引；`search` Producer；`qa` 峰值压测；`ops` 资源评估 | M5 identity 契约；百万级压测和权限/租户决策 | source_key 幂等、批量导入断点、无半成品公开、独立路由和唯一编辑入口；禁止逐篇 `add_child()` | Article feature flag 关闭，BlogPage 独立运行 | 需要新表、回填和容量资源授权 |
-| M7 对账、GC 与收缩 | 在观察期后停旧写、回收无引用版本 | `data` | `backend` 删除引用；`search` ES 对账；`ops` 备份/告警；`review` 不可逆操作审查 | M1-M6 连续稳定；恢复演练通过 | 连续观察期零 P0/P1 漂移；GC 仅处理墓碑、无引用、过保留期且已备份对象；MySQL `body` 字段仍保留 | 立即停止 GC，恢复双读和旧 alias；不恢复已物理删除数据 | 每个收缩动作单独确认 |
-
-**子代理执行协议：**
-
-- `arch` 负责主线编排、ADR、不变量、状态机、namespace、依赖和回滚；不得代替 backend 直接修改运行时代码。
-- `backend` 负责 `wagtailblog3/apps/blog/models.py`、`signals.py`、`mongo.py` 和新增正文/清理服务及测试；修改 Django/Wagtail 运行时代码前必须阅读第 22 号方案，新增中文 docstring/类型标注，并报告 `compileall`、`check`、迁移检查和测试结果。
-- `data` 负责 MySQL DDL、Mongo 集合/索引、引用审计、回填和 GC 设计；默认只读，任何真实数据写入、迁移或清理都必须由主 agent 单独授权。
-- `search` 负责 `apps/search` 的 State、Outbox、Delivery、document、rebuild、Mongo 批量读取和 ES alias；不得把草稿/历史正文送入公开索引。
-- `qa` 负责单元、集成、故障注入、Wagtail 历史预览/比较/恢复、性能基线和浏览器验收；浏览器产物统一写入 `output/playwright/`，用户指定使用 `browser-skill` 时按其生命周期执行。
-- `ops` 负责备份、readiness、systemd、日志、队列、alias 和发布观察；不自行执行生产迁移、重启、回滚或删除。
-- `review` 必须独立审查并发、权限、敏感数据、迁移和回滚；发现证据不足时退回批次，不以静态检查替代数据或浏览器证据。
-
-旧编号映射：WP0 对应 M0，WP1 对应 M2，WP2 对应 M3，WP3 对应 M4，WP4 对应 M1-M3 的兼容迁移，WP5 对应 M6，WP6 对应 M5，WP7 对应 M6-M7，WP8 对应 M7；S0-S5 作为 M5 内部交付包执行，不能提前绕过 M1-M4 的正文身份和发布契约。
-
-## 背景与现状证据
-
-- 用户关注 MySQL `blog_blogpage.intro`、`body` 与 MongoDB `blog_content`、`blog_page_revision_bodies` 的重复与一致性问题。
-- `BlogPage` 在 `wagtailblog3/apps/blog/models.py` 中声明 `intro`、`mongo_content_id` 和 `StreamField body`。`body` 必须作为 Wagtail 模型字段存在，但项目保存逻辑的目标是使 MySQL 中的值为 `[]`。
-- `BlogPage.save()` 先尝试写入 `blog_content`，再临时将 `body` 设为 `[]` 调用父类保存并恢复内存正文；`post_save` 信号和 `after_edit_page` hook 也会额外清空 MySQL `body`。
-- Revision 序列化会将正文写入 `blog_page_revision_bodies`，在 MySQL Revision JSON 中仅保存 `mongo_draft_pointer` 和 `body: []`。恢复 Revision 时优先读取草稿快照，缺失时回退到正式 Mongo 正文。
-- 当前 WSL2 测试环境实际为 Django 5.2.8、Wagtail 8.0。Wagtail `Page.add_child()` 会保存新节点；当前 `BlogPage.save()` 未以 `live` 或发布状态作为正式 Mongo 写入条件。
-- 后台 URL `/admin/pages/3/?q=...` 是 Wagtail 页面浏览器自动补全，不搜索 Mongo 正文或 `intro`；独立前台内容搜索才从 MySQL 投影 `title`、`intro`，并从 Mongo 正文生成 `body_text`。
-
-## 目标与非目标
-
-目标：厘清字段权威来源、保存/发布/修改/删除顺序，并提出不丢失正文和草稿的优化方向。
-
-非目标：本次不删除列、数据、Revision 或索引；不执行迁移、回填、重建搜索索引、发布或服务操作。
-
-## 字段归属结论
-
-| 数据 | 权威来源 | 是否可直接删除 | 原因 |
-| --- | --- | --- | --- |
-| MySQL `body` | 无正式业务正文，持久值应为 `[]` | 否 | `StreamField` 仍是 Wagtail 编辑、校验、序列化和 Revision 对象重建的模型契约。删除列不是去重，而是模型结构改造。 |
-| Mongo `blog_content.body` | 已发布/正式正文 | 否 | 详情页渲染和正文搜索均读取它。 |
-| Mongo `blog_page_revision_bodies.body` | 每个草稿/历史 Revision 的正文快照 | 否 | 用于后台编辑、预览与历史版本恢复。 |
-| MySQL `intro` | 文章元数据 | 否 | 列表、详情页、SEO/OG、RSS、普通 Wagtail 搜索及独立内容搜索均读取 MySQL `intro`。 |
-| Mongo `title`、`intro` 副本 | 当前为镜像 | 不应立即删除 | 当前主要读取方未依赖该副本，但必须先完成兼容核验和存量迁移方案，不能把“看似未读”当作可直接删数据。 |
-| MySQL `mongo_content_id` | 正式 Mongo 文档指针 | 否 | 正式正文读取、搜索投影与删除清理均依赖它。 |
-
-用户提供的旧行中 MySQL `body` 非空，而较新的行是 `[]`，与上述演进一致：前者应视为历史或绕过现有保存网关的残留，而非当前的双写设计目标。
-
-## 当前生命周期
-
-### 草稿和历史版本
-
-1. Wagtail 调用 `BlogPage.serializable_data()`。
-2. 当前内存 `StreamField` 正文写入 Mongo `blog_page_revision_bodies`。
-3. MySQL 的 Wagtail Revision `content` 保存草稿指针，`body` 固定为 `[]`。
-4. 打开编辑页、预览或历史版本时，先按指针恢复草稿；草稿不存在时回退到 `blog_content` 正式正文。
-
-### 常规新建、保存和发布
-
-1. 新页面经 `parent.add_child(instance=page)` 保存到 MySQL；Wagtail 8 的实现明确该方法会保存节点。
-2. 当前 `BlogPage.save()` 在该保存中写 `blog_content`，即使页面尚未发布；Mongo 先得到 `page_id=None`，MySQL 获得主键后再回填 `page_id`。
-3. 后续 `save_revision()` 保存草稿快照；Revision 发布时由 Wagtail 将该 Revision 应用于页面。
-4. 发布后的页面详情通过 `serve()` 读取正式 Mongo 正文；独立内容搜索读取 MySQL 标题/摘要和 Mongo 正文投影。
-
-Markdown 导入是特例：它设置 `_markdown_import_draft_only`，在 `add_child()` 阶段跳过正式 Mongo 写入，只保存草稿 Revision。这证明目前普通后台新建与 Markdown 导入的“正式内容”语义并不一致。
-
-### 修改、取消发布和删除
-
-- 完整 `save()` 会先写 Mongo，再写 MySQL；`update_fields` 不含 `body` 时会跳过正式 Mongo 写入。
-- `unpublish()` 仅执行 Wagtail 取消发布并记录搜索墓碑；正式 Mongo 正文保留，供再次发布或恢复。
-- `BlogPage.delete()` 在 MySQL 事务中记录搜索删除事件并删除页面，事务块结束后再尝试清理 Mongo 正式正文和该页全部 Revision 快照。
-- 但 `blog.signals.delete_blog_content_from_mongodb` 是 `pre_delete` 信号，也会在 MySQL 删除提交前清理相同 Mongo 数据，造成重复清理和跨库回滚风险。
-
-## 风险与优化设计
-
-### P0：删除前清理 Mongo 可能不可恢复
-
-`pre_delete` 里的 Mongo 删除发生在 MySQL 删除最终提交前。若之后数据库删除失败或外层事务回滚，页面仍在 MySQL，但正文和草稿已经被删除。`BlogPage.delete()` 后续的清理也与信号重复。
-
-建议：只保留一个删除编排服务，但保留 `pre_delete` 作为单页、子树和级联删除的事件捕获器。捕获器只能在 MySQL 事务内记录删除意图/搜索墓碑，不能访问 Mongo；提交后由 outbox/Delivery 按精确 `page_id`、正文版本和哈希清理，失败必须保留可审计的重试状态。
-
-### P1：保存跨 MySQL/Mongo 无原子事务
-
-现有顺序是 Mongo 在前、MySQL 在后，且 Mongo 异常只记录日志后仍继续 MySQL 保存。新页面 MySQL 保存失败会留下 Mongo 孤儿；旧页面 MySQL 保存失败则可能形成“Mongo 正文新、MySQL 元数据/Revision 旧”。失效 `mongo_content_id` 再遇到同页已有 Mongo 文档时，也可能撞上 Mongo 的 `page_id` 唯一索引。
-
-建议：把“正式正文已写入”的版本、哈希和待确认状态纳入可重试的事务外盒（outbox/补偿记录），以 MySQL 成功提交为可见性门槛。过渡期先显式处理旧 `page_id` 唯一文档的指针失效和重复键；目标态改为幂等插入不可变正文版本，不能再原地覆盖，也不能把“记录日志后继续”当成一致性方案。
-
-### P1：正式正文与草稿正文边界不一致
-
-普通后台新建的未发布页会提前写正式 Mongo，Markdown 导入则不会。若“正式”定义为已发布内容，则普通路径不符合定义；若定义为当前工作副本，则 `blog_content` 不能再被视为只包含公开正文，前台/搜索的读取和权限边界需重新审计。
-
-建议：先由产品确认 `blog_content` 的语义，再统一两条创建路径。推荐语义是“仅已发布正文”，草稿只进入 Revision 集合；实施前必须补齐新建草稿、首次发布、编辑草稿、取消发布、再发布的回归测试。
-
-### P2：元数据副本和 Revision 保留策略
-
-Mongo 的 `title`、`intro` 是 MySQL 元数据镜像，增加双写面和漂移可能；`blog_page_revision_bodies` 当前没有可见的保留策略，会随 Revision 增长。
-
-建议：最终把 `blog_content` 收敛为 `page_id`、`body`、`schema_version`、`content_hash`、`updated_at` 等正文必要字段，元数据只保留在 MySQL；Revision 快照保持不可变，并另行设计保留、备份和恢复策略。不得在未备份和未获授权前清理任何存量快照。
-
-## 建议实施步骤
-
-1. 先做只读一致性审计：统计非空 MySQL `body`、空或重复 `mongo_content_id`、Mongo 孤儿、MySQL 悬空指针，以及两端正文哈希/长度差异；不得输出正文。
-2. 写测试锁定生命周期和故障补偿，特别是 MySQL 回滚、Mongo 失败、重复删除、首次草稿和首次发布。
-3. 保留 `pre_delete` 作为级联删除捕获器，但其中只写 MySQL 清理意图，禁止 Mongo I/O；提交后由可重试任务清理，先灰度验证，不删除历史数据。
-4. 统一正式/草稿写入语义并引入幂等版本号或哈希。
-5. 仅在审计、备份、迁移方案和生产授权完成后，处理历史非空 MySQL `body` 与 Mongo 元数据副本；列删除应是最后一步，并且需验证 Wagtail StreamField 契约是否有可替代实现。
-
-## 面向千万文章的企业演进方向
-
-### 总体原则：每份数据只有一个权威来源
-
-| 层 | 职责 | 不能承担的职责 |
-| --- | --- | --- |
-| MySQL / Wagtail | 页面树、文章目录、标题、摘要、日期、发布状态、权限、分类标签、编辑工作流、当前正文指针、事务 Outbox | 大正文、全文检索主库、跨库同步的最终确认 |
-| MongoDB | 正文及其不可变版本、草稿和 Revision 正文快照 | 页面树、发布权限、列表查询和搜索排序的权威来源 |
-| Elasticsearch | 已发布内容的可再生搜索投影 | 正文或元数据的权威存储、草稿存储 |
-| Redis / CDN | 页面、摘要、正文片段和热点查询缓存 | 永久数据或一致性来源 |
-| MinIO | 图片、附件和超大二进制资源 | Markdown/StreamField 正文的默认替代品 |
-
-千万级规模下，MySQL `intro` 留在 MySQL 是正确的：它是高频列表和元数据查询的一部分，长度远小于正文。应停止的是把完整 `body` 落回 MySQL，而不是删除 Wagtail 的 `body` 字段定义。
-
-### 推荐数据模型：正文不可变，MySQL 只切换指针
-
-当前 `blog_content` 是每页一份可原地更新的文档。长期建议 BlogPage 与 Article 共用一个不可变正文契约，例如逻辑上的 `content_body_versions`：
+`BlogPublicationState` 是新版生命周期状态：
 
 ```text
-Mongo body version
-  body_version_id     全局唯一且不可变
-  aggregate_type      blog_page / article
-  aggregate_id        MySQL 内容聚合 ID
-  body_version        聚合内单调递增正文版本
-  body                StreamField 原始块数据
-  body_sha256         用于幂等、校验和检索版本比对
-  schema_version      块结构升级门槛
-  created_at
-  source_revision_id  可选，连接 Wagtail Revision
-
-MySQL BlogPage / 文章目录
-  aggregate_id
-  title, intro, date, 发布状态、关系、SEO 元数据
-  published_body_version_id
-  publication_generation
+page_id
+draft_body_version_id / sha256 / schema_version
+approved_revision_id / approved_revision_created_at
+approved_body_version_id / sha256 / schema_version
+published_body_version_id / sha256 / schema_version
+publication_generation
+created_at / updated_at
 ```
 
-发布流程变为“先写入并校验一个不可变正文版本，再在 MySQL 事务中原子切换已发布指针”。若 MySQL 事务失败，Mongo 只会留下未引用版本，不会覆盖已发布内容；之后由对账任务在保留期后处理。草稿 Revision 可继续是独立不可变快照，或与正文版本共享底层存储，但前提是保留语义和权限边界完全清楚。
+其他已实现的 Blog 持久模型：
 
-这比当前的“按 ObjectId 原地更新 + Mongo 先写 + MySQL 后写”更能抵抗重试、并发编辑和跨库故障。它不要求分布式事务；目标是至少一次投递加版本围栏，而非不现实的跨 MySQL/Mongo exactly-once。
+- `MongoCleanupIntent`：事务后 Mongo 清理意图、状态、租约、owner、重试和错误信息。
+- `BlogPublicationConsistencyCheckpoint`：稳定游标、扫描上界、租约和周期对账状态。
+- `LegacyBlogRegistrationAudit`：按页面、正文 hash 和 schema 唯一记录旧文章登记尝试，支持幂等和失败审计。
 
-### 写入、发布、删除必须走 Outbox
+对应迁移为 `blog.0029` 至 `blog.0034`。
 
-1. 编辑草稿：生成新的 Mongo 草稿版本，MySQL Revision 仅保存指针和版本号。
-2. 发布：Mongo 正文版本成功且哈希校验通过后，在 MySQL 同一事务内更新发布指针、版本号和 Outbox 事件。
-3. 异步消费者：按稳定内容 ID、`publication_generation` 和 `body_sha256` 幂等地建立 Elasticsearch 文档、刷新缓存和记录处理结果；正文版本与公开投影 generation 分离。
-4. 删除：MySQL 先写删除墓碑和 Outbox；提交后消费者删除搜索投影并标记 Mongo 版本可回收。真正物理清理必须经过保留期、备份和对账。
-5. 重试：每个消费者保存状态、次数、最后错误和租约；失败进入明确的 retry/dead 状态，不能静默吞掉。
+### 3.2 Mongo 集合
 
-这也意味着应移除运行时 `MongoManager()` 初始化时创建/删除索引的副作用。索引变更必须是独立、受控、可审计的运维操作，不能随着一次页面读取或保存触发。
-
-### 千万级目录与 Wagtail 的边界
-
-Wagtail `Page` 适合编辑型 CMS，但不应假定“千万条全都作为常规后台可浏览 Page”仍有良好管理体验：页面树、权限过滤、Revision、日志和后台浏览查询都会成为成本中心。推荐分层：
-
-- 编辑型/精选内容继续使用 `BlogPage` 和完整 Wagtail 工作流。
-- 海量导入文章先在同一 Django 项目内建立独立的 MySQL `Article` 目录模型，保留必要的 `wagtail_page_id` 可选关联；第一阶段不拆文章目录微服务，也不为每篇批量文章执行 `add_child()`、后台钩子和逐条 ORM `save()`。
-- 前台列表、归档和 API 读取文章目录；Wagtail 负责站点页面、专题、内容编辑和运营入口。
-- 若业务坚持全部文章都是 Wagtail Page，必须先完成百万级压测和容量验证，并接受后台浏览与 Revision 表的额外成本；不要直接对 Wagtail 核心 `Page` 表做未经验证的分区或分片。
-
-这不是立即重写架构的建议，而是千万级目标下必须尽早确认的产品边界。最重要的问题是：千万篇文章是否都需要 Wagtail 的人工编辑、页面树和 Revision 能力？若答案是否定的，独立文章目录是更稳的方向。
-
-### 存储、索引与读路径
-
-- Mongo 正式正文由 MySQL 的稳定 `body_version_id` 定点读取，按文章列举版本则必须携带 `article_id`；索引与未来分片键必须覆盖这两条路径。Revision 至少需要唯一 Revision 指针及 `(page_id/article_id, created_at)` 索引。
-- 正文单文档接近 MongoDB 16 MiB 限制时，不应继续扩展单文档；改用可分块正文版本或经设计评估后改由对象存储承载超大正文，MySQL/Mongo 保留指针和哈希。
-- MySQL 列表查询使用覆盖索引、发布时间/主键游标分页和预取关系，避免深度 OFFSET、全表排序和正文查询。读副本只在复制延迟、发布可见性和回退策略明确后使用。
-- Elasticsearch 只索引已发布版本的标题、摘要、正文纯文本和筛选字段；文档带稳定内容 ID、`publication_generation`、`body_version_id` 和 `body_sha256`，消费者拒绝旧 generation。索引使用版本化物理索引加 read alias，容量达到阈值时在线重建，不把 ES 当主库。
-- 热点详情可缓存“元数据版本 + 正文版本”组合；发布/删除事件按版本精确失效，缓存不能绕过发布权限。
-
-### 容量、备份和可观测性门槛
-
-容量不能只按“1000 万篇”估算，必须先从真实样本获得：平均/95/99 分位正文 BSON 大小、每篇平均 Revision 数、附件量、索引倍数、峰值写入与查询 QPS。粗略容量模型为：
+`content_body_versions` 保存不可变正文：
 
 ```text
-Mongo 物理容量 ≈ 正文版本总大小 × 索引系数 × 副本数 × 预留空间
-Elasticsearch 容量 ≈ 已发布纯文本与筛选字段大小 × 分词/倒排倍数 × 副本数 × 预留空间
-MySQL 容量 ≈ Page/Article 元数据 + 关系表 + Revision 元数据 + Outbox/审计记录 + 索引
-```
-
-至少建立以下监控和只读对账：MySQL 指针缺失、Mongo 孤儿版本、页面/正文版本不匹配、Outbox 延迟和死信、Elasticsearch 版本落后、缓存命中率、单文档大小接近上限、Mongo 分片热点、MySQL 复制延迟与慢查询。备份必须覆盖 MySQL 的时间点恢复、Mongo 的快照/Oplog 恢复和 MinIO 媒体；Elasticsearch 可重建但也需要索引快照用于恢复速度。
-
-### 分阶段路线
-
-1. **当前到百万级前**：保持 MySQL 元数据 + Mongo 正文；先修复删除顺序、保存幂等性、Mongo 索引初始化副作用，并补齐生命周期故障测试和对账任务。
-2. **百万级验证**：采用生产等比例样本压测目录查询、详情读取、发布、Revision、搜索回填和恢复演练；据测量结果决定 Mongo 副本集、ES 分片和 MySQL 读副本，不凭文章数预设分片数。
-3. **千万级建设**：将海量文章目录从 Wagtail Page 工作流中明确分离，建立批量导入、版本化正文、Outbox 消费、版本化 ES alias、软删除和延迟回收。
-4. **分片触发条件**：当单 Mongo 副本集的磁盘、写吞吐、工作集或恢复窗口已无法满足容量门槛时，再以与定点读取一致的稳定键实施分片；分片前必须完成全量备份、迁移演练和回滚设计。
-
-## 企业方案 V2：可实施的详细设计
-
-### 1. 架构决策与适用范围
-
-本方案按“最终累计约一千万篇文章、读多写少、存在批量采集和少量人工运营”设计，不假定当前单机配置可直接承载该规模，也不按文章数量直接推导节点数或分片数。
-
-一千万篇文章不能全部平铺为同一个 `BlogIndexPage` 的直接子页面。当前 Wagtail 8 使用 Treebeard 物化路径，`steplen=4`、36 字符 alphabet，单父节点理论直接子项上限约为 `36^4 - 1 = 1,679,615`。即使通过多层目录绕开硬上限，页面树、权限、Revision 和后台浏览成本仍然存在。因此本方案明确采用两条内容通道，而不只是把独立 Article 当作可选优化：
-
-| 内容类型 | 存储入口 | 适用场景 |
-| --- | --- | --- |
-| 精选运营内容 | Wagtail `BlogPage` | 需要页面树、权限、预览、工作流、定时发布和人工运营 |
-| 海量文章 | 同一 Django 项目内的独立 `Article` 模型 | 采集、同步、机器生成、批量导入、低比例人工编辑 |
-
-第一阶段不拆微服务。独立 `Article` 与 Wagtail 共用当前 Django 项目、认证、MySQL、Mongo、ES、Redis、MinIO 和 maintenance 队列，先降低运维和跨服务契约复杂度。
-
-两条通道不得同时编辑同一文章。Article 提升为 BlogPage 时必须记录来源映射、唯一编辑入口、唯一公开 URL、重定向和搜索去重状态。
-
-### 2. 实施前必须取得的容量事实
-
-| 指标 | 决策用途 |
-| --- | --- |
-| 正文 BSON 大小的平均、P95、P99、最大值 | Mongo 容量、网络流量、单文档上限风险 |
-| 每篇正式版本数、Revision 数和保留年限 | 正文版本总量，不能只按文章数估算 |
-| 日新增、峰值导入/发布速率 | 批量写、Outbox、Worker 吞吐 |
-| 详情、列表、搜索 QPS 与冷热分布 | 缓存、读副本、索引策略 |
-| 标签、分类、作者关系基数 | MySQL 关系表和 ES 筛选成本 |
-| RPO、RTO、删除隔离期、合规保留 | 备份、恢复和物理回收 |
-| BlogPage 与 Article 的预计比例 | Wagtail 容量边界和后台规模 |
-
-测试库只读小样本只能用于量级感知，不能作为采购依据。后续采样只输出数量、字节、长度和哈希，不输出正文。
-
-### 3. 目标逻辑架构
-
-```text
-人工运营                          批量采集/导入
-   |                                   |
-Wagtail BlogPage                  Article Import Job
-   |                                   |
-   +------------ MySQL 目录与状态 -----+
-                        |
-         body_version_id + publication_generation
-                        |
-                 Mongo 不可变正文
-                        |
-          +-------------+--------------+
-          |                            |
-     MySQL Outbox                 详情读取/缓存
-          |
- maintenance Worker + Beat 补偿扫描
-          |
- Elasticsearch / Redis / Feed / 延迟 GC
-```
-
-权威规则：
-
-- MySQL 决定文章是否存在、是否公开、当前公开正文指针、路由、权限和元数据。
-- Mongo 保存不可变正文版本，不决定哪个版本公开。
-- Elasticsearch、Redis 和 Feed 都是可重建投影。
-- Celery 只负责唤醒和执行；事件存在与完成状态必须由 MySQL 持久记录证明。
-
-### 4. 三种版本必须分离
-
-```text
-body_version_id
-    Mongo 不可变正文身份；正文相同也可以属于不同 Revision。
-
-publication_generation / aggregate_version
-    MySQL 单调递增的公开投影版本；标题、intro、标签、权限、正文、发布和删除变化都递增。
-
-schema_version
-    StreamField 块结构/序列化契约版本；用于兼容读取和内容迁移。
-```
-
-不能只用正文哈希控制 ES 和缓存。只修改 `title`、`intro`、标签或权限时，正文哈希不变，但公开投影必须更新。现有 `ContentSearchState.content_version` 已体现公开版本围栏，后续应复用该模式。
-
-### 5. MySQL 详细数据模型
-
-#### 5.1 Article 目录
-
-```text
-id                         BIGINT 主键
-site_id, locale_id         站点和语言
-source_type, source_key    来源和导入幂等键
-route_key / slug           稳定路由
-title, intro               权威元数据
-visibility                 public/private/restricted
-workflow_state             draft/in_review/approved
-publication_state          never_published/published/unpublished/archived/deleting/deleted
-draft_body_version_id      当前草稿正文指针，可空
-published_body_version_id  当前公开正文指针，可空
-published_body_sha256
+_id / body_version_id
+aggregate_type       当前为 blog_page，未来可扩展 article
+aggregate_id         BlogPage 主键
+body                 原始 StreamField block 数组
+body_sha256
 body_schema_version
-publication_generation     公开投影单调版本
-first_published_at, last_published_at, scheduled_at
-deleted_at, created_at, updated_at
-wagtail_page_id            可选精选映射，不代表双重编辑权
+source_revision_id   可选
+created_at
 ```
 
-建议约束：
+同一聚合、hash 和 schema 的重复写入复用已有版本；读取时校验 `_id`、aggregate、hash 和 schema。
 
-- `(site_id, locale_id, source_type, source_key)` 唯一，保证重复导入幂等。
-- `(site_id, locale_id, route_key)` 对有效记录唯一；删除后 URL 是否复用必须单独决定。
-- `publication_state=published` 时必须有公开正文指针；跨库存在性由发布服务和对账保证。
-- 工作流状态与公开状态分开，支持“审核新草稿但继续展示旧正式版”。
+兼容集合：
 
-候选索引必须用真实 SQL 和 `EXPLAIN` 决定：
+- `blog_content`：旧的每页一份可变正式正文。仅无新版 State 指针的旧页面允许读取。
+- `blog_page_revision_bodies`：旧 Revision 正文快照，兼容 ObjectId 和 `rev_<page>_<uuid>` 字符串 ID。
 
-```text
-(site_id, locale_id, publication_state, last_published_at DESC, id DESC)
-(site_id, locale_id, route_key)
-(source_type, source_key)
-(publication_state, deleted_at)
-```
+目前不删除兼容集合，不清理 Mongo 中的 `title`/`intro` 镜像，也不启用不可变正文版本 GC。任何收缩都要先完成读取方审计、备份和恢复演练。
 
-列表统一使用 `(last_published_at, id)` 或主键游标，禁止深 OFFSET。`intro` 是 RichText/Text，不承诺加入覆盖索引；应设业务长度上限并保持列表索引窄小。
+### 3.3 MySQL Search 模型
 
-#### 5.2 ArticleRevision
+现有搜索链路包括：
 
-```text
-id, article_id, revision_number
-body_version_id, body_sha256, body_schema_version
-metadata_snapshot
-created_by_id, created_at
-submitted_at, approved_at, superseded_at, deleted_at
-```
+- `ContentSearchState`：每页当前搜索状态、content version、正文版本、generation、hash 和 tombstone。
+- `ContentSearchOutbox`：不可变 upsert/tombstone 事件。
+- `ContentSearchTarget`：物理索引目标及 building/serving 角色。
+- `ContentSearchDelivery`：每个事件到每个 Target 的状态、租约、重试和错误。
+- `ContentSearchBuild`：固定扫描上界、checkpoint、catch-up 和 READY 门禁。
+- `ContentSearchScopeJob`：页面权限范围变化任务；当前只有创建端，消费者尚未实现。
 
-建议唯一约束 `(article_id, revision_number)`。Revision 身份和正文去重是两回事；第一阶段采用“一条 Revision 一个不可变正文版本”，不引入引用计数复杂度。
+对应扩展迁移为 `search.0006` 和 `search.0007`。
 
-#### 5.3 BlogPage 过渡字段
+### 3.4 Elasticsearch 文档
 
-采用只增不删的 expand 阶段增加可空字段：
+独立内容索引使用 strict mapping 和版本化物理索引。公开文档至少携带：
 
 ```text
-live_body_version_id
-live_body_sha256
-live_body_schema_version
+content_kind / namespace
+page_id 或稳定 aggregate_id
+title / intro / body_text
+content_version
+body_version_id / body_sha256 / body_schema_version
 publication_generation
-```
-
-现有 `mongo_content_id` 保留为兼容指针；MySQL `body` 保留并继续持久为 `[]`。只有双读、回填、影子比对、切换和完整回滚窗口通过后，才停止旧指针写入。
-
-#### 5.4 无外键生命周期状态与删除清单
-
-Article 软删除后目录行仍在，可以直接核验状态；Wagtail BlogPage 硬删除后 Page 行不存在，因此需要不引用 Page 外键的持久清理依据：
-
-```text
-ContentLifecycleState
-  aggregate_type, aggregate_id       联合唯一
-  final_publication_generation
-  desired_state                      active/deleted/purged
-  tombstoned_at, updated_at
-
-ContentDeletionManifest
-  manifest_id
-  aggregate_type, aggregate_id
-  final_publication_generation
-  status, retain_until
-  created_at, completed_at
-
-ContentDeletionItem
-  manifest_id
-  item_type                          live_body/revision_body/media_reference
-  body_version_id / legacy_pointer
-  body_sha256                        可空，旧数据兼容
-  status, attempts, last_error_code
-```
-
-这些表不对 `Page` 或 `BlogPage` 建外键，避免页面级联删除时清理依据一起消失。BlogPage `pre_delete` 在同一 MySQL 事务内固化聚合 ID、最终 generation 和已知正式指针；每条 Revision 的 `pre_delete` 把其 JSON 中的精确草稿 pointer 追加到清单。单条 Revision 删除也使用同类清理项。捕获器只解析 MySQL 已有元数据，不查询或删除 Mongo。事件回滚时清单一并回滚；重复 signal 依靠唯一约束幂等。
-
-### 6. MongoDB 详细数据模型
-
-#### 6.1 不可变正文集合
-
-建议 BlogPage 和 Article 共用新集合 `content_body_versions`，通过聚合类型隔离身份，避免为两条内容通道维护两套正文仓储契约：
-
-```javascript
-{
-  _id: <应用预生成的稳定 version_id>,
-  aggregate_type: <"blog_page" | "article">,
-  aggregate_id: <int64>,
-  body_version: <int64>,
-  body: <StreamField 块数组>,
-  body_sha256: <64 位十六进制>,
-  schema_version: <int>,
-  source_revision_id: <可空 MySQL Revision ID>,
-  idempotency_key: <稳定重试键>,
-  created_at: <UTC BSON datetime>
-}
-```
-
-规则：
-
-- 正文只插入，不原地更新。
-- `version_id` 在写 Mongo 前生成；重试必须使用相同 ID 和哈希。
-- 同 ID 且哈希一致是幂等成功；聚合类型、聚合 ID 或哈希不同是永久契约错误。
-- 哈希基于规范化原始块 JSON，固定键排序和编码；Markdown 保持字符串，`markdown_block` key 不变。
-- 时间使用 BSON UTC datetime，不再以 ISO 字符串作为主要查询字段。
-- Mongo 不复制权威标题、摘要、权限和发布状态。
-- 图片、音视频、附件仍在 MinIO，正文只存引用；接近 Mongo 16 MiB 上限时明确拒绝并进入专门处理流程。
-
-建议初始索引：
-
-```text
-unique(_id)
-unique(aggregate_type, aggregate_id, body_version)
-unique(aggregate_type, aggregate_id, idempotency_key)
-index(aggregate_type, aggregate_id, created_at DESC)
-index(source_revision_id)  仅在确有反查需求时建立
-```
-
-#### 6.2 当前 Revision 指针 P0 风险
-
-当前 `save_blog_revision_body()` 会为连续相同正文复用同一 Mongo OID，但删除任一 Wagtail Revision 时，`pre_delete` 会无引用检查删除该 OID，其他 Revision 因此可能失去正文。
-
-推荐修复：以后每条 Revision 独占不可变正文版本；现有共享指针不做立即清理。若坚持内容去重，则必须新增显式引用关系并在零引用、隔离期和备份门禁后 GC，不能继续“共享指针 + 单条直接删除”。
-
-Revision 集合至少需要 `(page_id/article_id, created_at DESC)` 索引，并直接保存 `body_sha256`，避免每次读取上一份完整正文重新计算 MD5。运行时建连不得创建或删除索引，索引变更改为独立管理命令和 runbook。
-
-#### 6.3 分片决策
-
-一千万篇不是自动分片条件。先建设三成员副本集和恢复能力；当未来 12 个月容量超过可用空间 70%、P99 在正确索引/缓存后仍超 SLO、复制延迟/IOPS/缓存持续饱和，或恢复时间超过 RTO 时，再进入分片评审。
-
-候选 shard key 是 hashed `aggregate_id`，因为主要路径按内容聚合定点读且可避免连续 ID 写热点。分片后按正文版本 ID 读取也必须同时携带 `aggregate_type + aggregate_id`，避免只按全局 `_id` 形成 scatter-gather。最终选择前必须验证唯一索引约束、按聚合列举版本、延迟 GC 和 reshard 回滚；不得使用单调时间作为正文主分片键。
-
-### 7. Elasticsearch 投影契约
-
-```text
-aggregate_type, aggregate_id
-publication_generation
-body_version_id, body_sha256
 searchable
-title, intro, body_text
-published_at, locale_id, category_ids, tag_ids
 ```
 
-当前仓库已有 `ContentSearchState -> ContentSearchOutbox -> ContentSearchDelivery`，包括提交后唤醒、独立目标 Delivery、租约、重试、死信、superseded 和 external version。Article 接入时应采用 expand-contract 把 `page_id` 演进为 `aggregate_type + aggregate_id`，旧 BlogPage 事件在兼容期仍可处理；不要另建第二套 ES 队列。
+`mongo_content_id` 不写入公开搜索文档，也不应成为文档构建前置条件。查询通过 read alias，命中后仍须按 MySQL `live().public()` 和权限进行二次过滤。
 
-写入规则：
+## 4. 生命周期与事务边界
 
-- ES 文档 ID 使用带类型的稳定内容 ID；
-- publication generation 作为版本围栏，旧事件不得覆盖新文档；
-- tombstone 版本高于历史 upsert，迟到事件不能复活删除内容；
-- 回填使用固定扫描上界、主键游标和增量追平；
-- 查询命中后批量回 MySQL 验证公开和权限状态；
-- 新索引追平并校验后切 read alias，旧索引保留为回滚点。
+### 4.1 保存草稿和 Revision
 
-### 8. 保存、发布和删除状态机
+1. 编辑器得到 `StreamField` 正文。
+2. `serializable_data()` 把正文写入不可变版本和兼容 Revision 快照。
+3. MySQL Revision JSON 保持 `body=[]`，保存 Mongo 正文指针及 hash/schema。
+4. 打开编辑、预览、比较或恢复时，`from_serializable_data()` 按 Revision 自身指针读取正文。
+5. 非法指针、快照缺失、正文损坏和 Mongo 暂不可用分别呈现明确错误；不可恢复冲突返回 409，暂时不可用返回 503。
 
-#### 8.1 批量导入 Article
+历史 Revision 没有新版指针时保留兼容读取。不得用当前已发布正文冒充历史草稿。可选的 Revision 绑定命令只做只读审计，不属于旧文章登记或搜索门禁。
+
+### 4.2 常规发布
 
 ```text
-1. 按 source_key 在 MySQL 幂等取得/创建不可见 Article
-2. 生成固定 body_version_id 和 idempotency_key
-3. Mongo bulk insert/upsert-on-insert 写不可变正文
-4. 批量读取 ID、归属、hash、schema 做最小校验
-5. MySQL 分批锁定 Article，写草稿或待发布指针
-6. 需要公开时切 published 指针并递增 publication_generation
-7. 同一 MySQL 事务写搜索和生命周期事件
-8. 提交后只发送 Celery 唤醒
+锁定 Page + Revision + BlogPublicationState
+  -> 读取并校验 Mongo 正文归属/hash/schema
+  -> 切换 published 指针
+  -> publication_generation + 1
+  -> 同一 MySQL 事务写 Search State + Outbox
+  -> 事务提交
+  -> Delivery 异步写 ES / 失效缓存
 ```
 
-Mongo 失败时 Article 保持不可见；Mongo 成功而 MySQL 失败只留下安全孤儿，由隔离期后的 GC 处理。导入不得逐篇调用 `add_child()`、Wagtail hooks 和普通 ORM `save()`。
+Mongo 在 MySQL 提交前只产生不可变候选版本。MySQL 回滚时，旧公开指针不会改变，未引用 Mongo 版本留给后续对账处理。
 
-#### 8.2 保存草稿
+### 4.3 Workflow 审批
 
-```text
-1. 应用预生成 `revision_token/idempotency_key`、正文版本 ID 和规范化 hash
-2. Mongo 幂等插入不可变正文版本
-3. 读回最小字段验证归属、hash、schema_version
-4. MySQL 事务写 Revision 元数据和 draft 指针
-5. 不改变公开指针，不产生公开搜索 upsert
-```
+审批完成时冻结批准的 Revision ID、创建时间和正文三元组。实际发布前再次锁定并校验批准 Revision；审批后产生的新草稿不能悄悄替换已批准正文。项目配置的 Workflow 完成动作进入统一发布服务，而不是只依赖 `page_published` 信号。
 
-Mongo 不可用时草稿保存明确失败，不能生成指向空正文的成功 Revision。Wagtail Revision 使用数据库生成的主键，不能为了预先取得 ID 插入空 Revision；MySQL Revision 落库后再把其主键记录到映射元数据。MySQL Revision 保存失败只留下带稳定 token 的未引用版本，不得立即删除可能已被并发流程引用的正文。
+### 4.4 定时发布
 
-#### 8.3 发布
+定时发布以 Wagtail 调度器传入且已到期的批准 Revision 为准，不能简单采用页面最新 Revision。执行时重新校验批准时间、正文三元组和 generation，再进入与常规发布相同的指针切换和 Outbox 事务。
 
-```text
-1. 从待发布 Revision 取得精确 body_version_id
-2. 校验发布权限、审核状态和预期 publication_generation
-3. 读取 Mongo 最小字段，确认正文存在、归属、hash、schema
-4. MySQL select_for_update 锁定目录行
-5. 再次比较期望 generation，拒绝并发旧发布
-6. 原子切换 published 指针、状态和发布时间
-7. publication_generation + 1
-8. 同事务插入 Search Outbox/领域 Outbox
-9. 提交后唤醒 Worker
-```
+### 4.5 取消发布和删除
 
-Wagtail BlogPage 仍必须通过 `Revision.publish()`；不能直接修改 `live`、`live_revision` 或页面树。当前 Wagtail 8 发布 Action 先保存 Revision 重建出的页面对象，再发送 `page_published`，而搜索 receiver 也会读取正式 Mongo，因此不能只增加一个 receiver 并依赖 signal 注册顺序。实施时必须建立唯一、可测试的 BlogPage 发布编排入口，并专项覆盖定时发布、工作流、别名页和历史 Revision 发布。
+取消发布：
 
-#### 8.3.1 Workflow 审批：批准版本必须冻结
+1. 锁定状态并递增 generation。
+2. 写 tombstone State/Outbox。
+3. 清除公开正文指针或更新公开状态。
+4. 提交后由 Delivery 把 ES 文档改为 `searchable=false`。
 
-Wagtail Workflow 的“批准”不是“已经发布”。审批完成时应把以下值作为不可变审批快照写入 MySQL 审计/状态：`revision_id`、`body_version_id`、`body_sha256`、`schema_version`、页面的 `publication_generation` 以及审批人和时间。审批通过后仍允许编辑新草稿，但新草稿不能悄悄改变已批准版本。
+删除：
 
-实际发布前必须在同一发布编排入口重新读取并锁定页面状态，校验批准 Revision 仍是目标 Revision，Mongo 正文存在且归属、hash、schema 均匹配，页面权限和发布时间仍有效，generation 也未被更高版本占用。任一校验失败都标记为“审批过期/需重新审核”，不得自动发布或回退到当前正式正文。审批动作、发布动作和 Outbox 写入必须使用幂等键，保证重试不会产生第二次代际推进。
+1. 在 MySQL 事务内记录 tombstone 和 `MongoCleanupIntent`。
+2. Wagtail/MySQL 删除成功提交后才唤醒 maintenance 消费者。
+3. 消费者再次核对引用，使用租约、owner、重试和失败状态执行旧正式正文/Revision 快照清理。
+4. 新版不可变正式正文目前保留，不执行物理 GC。
 
-最小验收场景包括：提交审核后编辑、批准后编辑、批准时 Mongo 不可用、驳回后重新提交、审批与发布并发、批准版本预览，以及批准版本被恢复后再次发布。后台页面可以继续使用 Wagtail 原生 Workflow URL，版本冻结和一致性校验放在 BlogPage 发布服务中。
+该顺序消除了旧 `pre_delete` 在 MySQL 提交前删除 Mongo、事务回滚后正文丢失的风险。
 
-#### 8.3.2 Scheduled Publishing：两个异步执行上下文
+### 4.6 公开读取
 
-Wagtail 的预约发布由 `PublishPageRevisionAction` 及其调度任务执行；搜索/内容 Outbox Worker 是另一条异步链路。两者不共享事务、队列或重试状态，不能假设“定时任务成功”就已经完成搜索投影。
+- 已登记页面只按 `published_body_version_id/hash/schema` 读取不可变正文；读取失败不得回退旧 `blog_content`。
+- 没有 `BlogPublicationState` 正式指针的旧页面才允许通过 `mongo_content_id` 兼容读取。
+- `mongo_content_id=NULL` 对已登记页面完全合法。
+- 搜索批量重建应批量读取 State 指针对应正文，避免逐页 N+1；只有无新版指针的旧页面才读取 `blog_content`。
 
-到期任务必须选定精确 Revision，并在执行前重新校验 go-live 时间、当前批准状态、`body_version_id`、正文 hash/schema、页面权限和期望 generation，然后调用 Wagtail 的 `Revision.publish()`。发布成功后应在可控的 MySQL 事务边界内写入 publication Outbox；如果 Wagtail 核心动作无法被外层事务包裹，则将 `page_published` 仅作为通知，并由对账任务发现“已发布但缺 Outbox”的记录。定时任务重复执行、Worker 暂停或进程在发布后崩溃都必须依靠 `(content_kind, aggregate_id, generation, operation)` 幂等键恢复，不能重复推进公开版本。
+## 5. 已完成改造汇总
 
-定时发布验收还要覆盖时区和时钟漂移、取消后残留任务、改期、重复到期、发布后 Outbox 延迟以及 Worker 长时间不可用；Outbox 延迟只能造成搜索最终一致，不能阻塞 Wagtail 页面发布。
+早期逐轮编码记录已压缩为以下可验证里程碑。表中的“完成”表示代码或指定环境证据已存在，不自动表示当前工作区未提交改动已经部署。
 
-#### 8.3.3 `page_published` 信号：通知和修复入口
-
-`page_published` receiver 只负责缓存/搜索唤醒、审计或对账提示，不负责写入或删除 Mongo，也不负责推进正式指针。不能依赖 receiver 注册顺序，因为 Wagtail 8 的发布 Action 会先保存由 Revision 重建的页面对象，再发送信号，信号实例也不保证包含外部投影所需的最新提交状态。
-
-发布服务应先完成 Wagtail `Revision.publish()`，再在可控的 MySQL 事务中切换 `body_version_id`、递增 generation 并写 Outbox；`transaction.on_commit()` 只用于唤醒消费者。receiver 若需要生成投影，必须重新读取已提交的页面和版本状态，不能把信号携带对象当作唯一事实来源。必须增加“已发布但无 Outbox/状态未对齐”的定期修复扫描，并保留可审计的补偿结果。
-
-#### 8.3.4 `with_content_json()` / `Revision.as_object()` 契约
-
-Wagtail 8 的历史预览、比较和恢复依赖 Revision 的 JSON 序列化/还原契约。`serializable_data()` 应输出完整页面 JSON：`body` 保持逻辑上的空占位，同时携带 `mongo_body_version_id`、兼容期的旧指针字段、`body_sha256` 和 `body_schema_version`。实际实现不能凭字符串形式猜测 Wagtail 类型；当前代码写入字符串 `'[]'`，必须通过 Wagtail 8 的 `with_content_json()`、`Revision.as_object()` 契约测试确认该字段应为字符串还是列表，并固定版本化格式。
-
-`from_serializable_data()` 使用统一指针解析器，同时支持 ObjectId 和兼容期的 `rev_<page>_<uuid>` 字符串；成功时返回完整 StreamValue。指针缺失、归属不符、hash/schema 不符、Mongo 不可用或反序列化失败时，必须返回明确的领域错误/不可用状态，不能静默回退到 `body=[]` 或当前正式正文。预览、比较和恢复都要显示可诊断的不可用结果，并记录 Revision ID 与正文版本 ID。
-
-直接调用 `with_content_json()`、`Revision.as_object()` 的往返测试，以及新旧指针格式、空 body 占位、hash/schema 保持和旧 Revision 恢复测试，属于切换新实现前的发布门禁。
-
-#### 8.3.5 Wagtail 8.0 专项发布门禁
-
-| 门禁 | 失败处理 |
-| --- | --- |
-| Workflow 批准快照与实际 Revision/body_version 不一致 | 阻止发布，标记需重新审核 |
-| 预约发布重复执行或取消后残留任务 | 幂等吸收并写审计，不推进第二代 |
-| Wagtail 发布完成但缺 publication Outbox | 对账任务补建，搜索投影保持待处理 |
-| `page_published` receiver 触发 Mongo I/O | 测试失败，禁止上线 |
-| `with_content_json()` 往返 hash/pointer 不一致 | 阻止兼容层切换，保留旧读路径 |
-
-以上改造不改变 Wagtail 历史列表、权限和现有 URL；只在 BlogPage 的序列化、发布编排、对账和正文仓储边界增加一致性适配。
-
-#### 8.4 编辑、定时和取消发布
-
-- 编辑已发布文章只产生新草稿；公开详情继续读旧 published 指针。
-- 预约发布时不切正式指针；到期执行 Wagtail 发布 Action 时重新校验版本、正文和状态。
-- 取消发布在 MySQL 事务内递增 generation 并写 tombstone；Mongo 正文和 Revision 保留。
-
-#### 8.5 删除和物理回收
-
-默认状态：
-
-```text
-published/unpublished -> deleting -> deleted -> purge_eligible -> purged
-```
-
-正确流程：MySQL 先写删除状态、永久 tombstone 和生命周期事件；ES/缓存先停止公开；Mongo 进入隔离期；GC 到期后再次核对 MySQL 状态、最终 generation、全部 Revision/媒体引用和备份覆盖，最后按精确 ID/hash 删除并记录审计。
-
-不能简单移除 `pre_delete`：Wagtail 删除子树时可能绕过具体 `BlogPage.delete()`，但 Django 仍发送级联 `pre_delete`。因此保留 `pre_delete` 捕获器，其中只能写 MySQL cleanup intent/outbox，禁止 Mongo I/O。`transaction.on_commit()` 只用于唤醒；真正可靠性来自已提交 Outbox。
-
-### 9. Outbox 与消费者契约
-
-#### 9.1 搜索投递复用现有实现
-
-现有搜索 Outbox 继续负责 ES：
-
-- `ContentSearchState` 保存期望公开版本；
-- `ContentSearchOutbox` 保存已提交的 upsert/tombstone；
-- `ContentSearchDelivery` 保存每个 ES 目标的租约、重试和结果；
-- Beat 扫描 pending/retry/过期租约，Celery 只负责唤醒和执行；
-- Delivery 比较最新 State、正文 ID 和哈希，旧事件进入 superseded。
-
-#### 9.2 内容生命周期独立投递
-
-正文清理、缓存失效、引用投影等动作不能共用一个完成状态。建议采用“一个领域事件 + 每个目标一条 Delivery”，字段至少包括：
-
-```text
-event_id
-aggregate_type, aggregate_id, publication_generation
-event_type
-body_version_id, body_sha256
-status, attempts, available_at
-locked_by, lock_expires_at
-last_error_code, 脱敏截断消息
-created_at, completed_at
-```
-
-消费者统一要求：
-
-- 至少一次投递，所有操作幂等；
-- 领取时使用行锁、跳过已锁行和有限租约；
-- ES/缓存执行前读取最新状态，旧 generation 标为 superseded；
-- Mongo GC 不以 generation 过旧直接跳过或删除，而是按精确正文 ID/hash 重新检查所有当前引用、隔离期和备份条件；仍被引用时取消/延后该清理项；
-- 删除 tombstone 保存永久单调围栏，任何较低 generation 的 upsert 都不能复活内容；
-- 429、5xx 和网络错误指数退避，契约错误进入 dead；
-- 死信告警，人工重放精确到一条 Delivery 并记录原因；
-- 全部必需目标完成并超过审计期后，Outbox/Delivery 才可归档；
-- 事件和错误记录只保存 ID、版本、哈希和错误码，不保存正文或凭据。
-
-恢复消费者所需吞吐应满足：
-
-```text
-恢复吞吐 > 实时事件速率 + backlog / 目标追平时间
-```
-
-### 10. 读取、缓存与降级
-
-#### 10.1 详情页
-
-```text
-1. MySQL 按 route_key 读取公开目录和 published_body_version_id
-2. Redis 按 aggregate_id:publication_generation 读取组合缓存
-3. 未命中时按 version_id 从 Mongo 定点读取正文
-4. 校验 article/page ID、hash、schema_version
-5. 渲染并写有限 TTL 缓存
-```
-
-权限文章不得与公开缓存混用。Mongo 暂时不可用时，只能在明确时效和权限边界内返回最近一次已验证缓存；无缓存则返回可观察的 503，不能用任意草稿、空正文或旧 MySQL `body` 返回 200。
-
-#### 10.2 列表、归档和 Feed
-
-只读 MySQL 元数据，不读取 Mongo 正文。模板和 serializer 禁止隐式访问 `body`；使用游标分页和批量关系预取。Feed 只包含公开摘要和链接，并由 publication generation 事件失效。
-
-#### 10.3 搜索
-
-ES 返回稳定 ID、高亮和投影字段；应用批量回 MySQL 验证公开性、权限和删除状态，再按 ES 顺序组装结果。搜索结果页不能为每条命中读取 Mongo 完整正文。
-
-### 11. 正文引用、媒体与 GC
-
-StreamField 正文包含图片、文档、音视频、嵌入和内部页面引用。Mongo 没有外键，不可变正文版本会使历史引用长期存在，因此需要可重建的正文引用投影：
-
-```text
-body_version_id
-reference_type
-reference_id
-block_id / path
-```
-
-引用清单可在正文写入时生成并在异步任务中复核。媒体或内部对象物理删除前必须检查所有仍在保留期、正式、草稿或历史 Revision 的引用；不能只检查当前公开版本。
-
-GC 使用主键/时间游标、固定扫描上界和 checkpoint。版本只有同时满足以下条件才可删除：
-
-- 超过隔离期；
-- MySQL 无公开、草稿、Revision 或精选映射引用；
-- 无未完成 Outbox/Delivery；
-- 备份已覆盖该版本；
-- 不处于恢复、审计或法律保留状态。
-
-GC 先标记候选，下一独立批次再次核验后物理删除。不得直接给受保护 Revision 集合添加 TTL。若未来有短期自动保存，应拆到明确不承担历史恢复责任的 `ephemeral_autosaves` 集合后再评估 TTL。
-
-### 12. 一致性对账
-
-所有扫描只输出计数、ID、长度、哈希和错误码，不输出正文：
-
-- MySQL 公开指针在 Mongo 是否存在；
-- Mongo 的聚合 ID、正文版本、hash、schema 是否匹配；
-- Wagtail/Article Revision 指针是否存在；
-- Mongo 未引用版本按隔离期分类；
-- ES publication generation 是否落后、超前或哈希不一致；
-- tombstone 后是否仍有 searchable 文档；
-- Outbox pending/retry/processing/dead、最老延迟和 lease reclaim；
-- Mongo 单文档大小、索引大小、磁盘水位和分片热点。
-
-禁止自动用任意草稿修复正式正文。公开指针缺失时先停止该文章公开或使用已经确认的旧正式版本；任何修复均需精确目标、审计和数据操作授权。
-
-### 13. 容量模型与当前小样本
-
-定义：
-
-```text
-N   = 文章数
-Vf  = 每篇保留的正式正文版本数
-Vr  = 每篇保留的 Revision 数
-Bc  = 正式正文平均物理字节
-Br  = Revision 平均物理字节
-R   = Mongo 副本数
-H   = 运维余量系数
-Be  = 每篇 ES primary 平均字节
-E   = ES 数据份数（primary + replicas）
-G   = 同时保留的 ES 索引代数
-```
-
-```text
-Mongo = N × (Vf × Bc + Vr × Br) × R × H
-ES    = N × Be × E × G ÷ 目标最大磁盘使用率
-MySQL = 目录 + 关系 + Revision 元数据 + State/Outbox/Delivery + 二级索引
-```
-
-本次 data agent 对测试库做了只读小样本测量：156 篇 live BlogPage；Mongo 正式正文约 160 条、约 15.8 KB/条；Mongo Revision 约 191 条、约 8.56 KB/条；精简 ES 约 12.76 KB/篇 primary；MySQL Wagtail Revision 237 行、约 33.6 KB/行。样本很小且不代表未来语料，只说明把一千万篇全部放进完整 Wagtail Revision 流程成本很高。
-
-仅作量级示例：若 `N=1000 万、Vf=2、Vr=3`，按该小样本估算，Mongo 单份约 573 GB，三副本加 30% 余量约 2.2 TB；ES primary 约 128 GB，一副本、在线重建保留两代、磁盘最多使用 70% 时约需 730 GB。不得据此直接采购，必须用真实 P95/P99 和版本分布重算。
-
-ES primary 分片数按以下方式从实测目标分片大小推导：
-
-```text
-ceil(预计 primary 总量 / 经压测确定的目标分片大小)
-```
-
-当前生产单节点 ES 即使配置副本也不具备节点级高可用；进入千万级前必须先建设多节点和故障域，不应把增加 replica 数当作已经高可用。
-
-### 14. 建议 SLO 与压测阶梯
-
-以下只是待业务确认的起始验收值，不是当前能力声明：
-
-- 公开详情可用性不低于 99.9%；
-- 缓存命中详情 P95 小于 200 ms，未命中 P95 小于 500 ms；
-- 列表/归档 P95 小于 300 ms；
-- 搜索 P95 小于 800 ms；
-- 正常发布到 ES 可见 P95 小于 30 秒；
-- 无死信时 Outbox 最老积压小于 5 分钟；
-- 故障解除后的消费速度持续高于事件产生速度；
-- 备份恢复满足已确认 RPO/RTO。
-
-压测按 `10 万 -> 100 万 -> 300 万 -> 1000 万目录行` 递增，保留真实正文大小、语言、标签和 Revision 分布，覆盖：
-
-- 冷/热详情、列表游标、标签/分类筛选、搜索；
-- 峰值批量导入、草稿、发布和并发编辑；
-- ES 在线回填与实时增量并行；
-- Mongo/ES/Redis/Celery 分别故障，ES 429/503；
-- Worker 被杀死、租约过期、MySQL 回滚和节点切换；
-- 备份恢复、索引重建、alias 回滚和磁盘高水位。
-
-采集 P50/P95/P99、QPS、错误率、慢查询、复制延迟、WiredTiger cache eviction、ES heap/GC/merge、Outbox lag、死信率和恢复时间。测试数据必须是合成数据或经授权的测试样本。
-
-### 15. 跨库备份与恢复检查点
-
-- MySQL：物理全备 + binlog PITR，千万级不能只依赖 `mysqldump`。
-- Mongo：副本集快照 + Oplog/PITR；逻辑导出只用于小范围迁移。
-- Elasticsearch：可从 MySQL + Mongo 重建，快照用于缩短 RTO。
-- MinIO：版本化、对象清单和独立备份。
-- Redis：可丢失缓存，按版本键重建。
-
-每次一致性检查点应记录：
-
-```text
-checkpoint_id
-MySQL binlog / backup position
-Mongo clusterTime / oplog position
-最后完成的 publication_generation / Outbox 水位
-ES serving alias 和索引 generation
-MinIO 清单版本
-```
-
-恢复原则是 Mongo 恢复点不能早于 MySQL 可见正文指针；不可变 Mongo 恢复到稍晚时间只会多出安全孤儿。若 Mongo 无法恢复到不早于 MySQL 指针的时间点，必须把 MySQL 回退到兼容检查点，或将受影响文章暂时设为不可用并执行精确恢复，不能继续启动公开读取。恢复时先冻结消费者和写入，恢复 MySQL/Mongo/MinIO，运行指针/hash 对账，确认 ES alias，重放检查点后的 Outbox，最后依次恢复 Django、maintenance Worker、Beat 和 Filebeat。不能只以备份命令成功或 unit active 宣称恢复完成。
-
-### 16. 安全与删除边界
-
-- Mongo 正文读取必须先经过 MySQL 站点、公开状态和权限判断，不能凭 version ID 直接对外暴露。
-- 草稿、历史正文和删除隔离区使用独立权限边界；日志、ES 和 Outbox 不保存原始正文。
-- 合规删除与普通 GC 分开，前者需明确对象范围、法定保留、备份例外、执行证据和不可逆授权。
-- 批量修复、GC、恢复和重放命令默认 dry-run，要求环境门禁、精确 ID/游标和显式 `--confirm`。
-
-### 17. 分阶段实施工作包
-
-#### WP0：只读基线与容量采样
-
-新增只读一致性/容量命令、checkpoint 和测试，不修改数据。验收是获得正文/Revision 大小分布、指针完整性、Outbox/ES 差异和真实查询计划，且不输出正文。
-
-#### WP1：先消除当前数据丢失路径
-
-- `pre_delete` 改为只写 MySQL cleanup intent，禁止 Mongo I/O；
-- 所有物理清理由持久 Delivery 在提交后执行；
-- 修复共享 Revision pointer 删除问题；
-- Mongo 索引管理移出应用启动。
-
-验收：外层事务回滚时 Mongo 不变；Wagtail 单页、子树和 QuerySet/级联删除都生成精确意图；重复删除幂等；Worker 停机后任务不丢；存量 Revision 均可恢复。
-
-#### WP2：BlogPage 不可变正文版本
-
-新增版本集合、可空兼容字段、正文 repository、规范化 SHA-256、双写/双读和生命周期测试，不删除旧集合。
-
-验收：草稿不影响正式正文；发布失败不改变在线版本；并发发布只有期望 generation 成功；历史版本可重新发布；Mongo/MySQL/Celery 分别故障时结果明确。
-
-#### WP3：Wagtail 发布编排与 Outbox 对齐
-
-建立唯一发布编排入口，覆盖立即发布、定时首发、定时更新、撤回计划、工作流批准、历史版本回滚和别名页。正文确认、MySQL 指针切换、publication generation 和搜索 Outbox 必须形成一个可测试事务契约，不依赖 signal 顺序。
-
-#### WP4：在线兼容迁移
-
-1. 加可空新字段和新集合，旧读写不变；
-2. 开启受控双写，新代码同时生成新版本和保留旧文档；
-3. 按主键游标、限速、固定上界回填，保存 checkpoint；
-4. 只比较 ID、hash、长度和 schema；
-5. 开启影子读，对比新旧但仍返回旧路径；
-6. 特性开关切到新读路径；
-7. 保留旧读路径和旧文档一个完整回滚观察窗口；
-8. 停止旧写；旧数据清理另行授权。
-
-验收：中断可续跑，无 N+1，无正文输出；任一阶段均可关闭开关回到旧读路径；回滚不删除新旧正文。
-
-#### WP5：独立 Article 目录与批量导入
-
-新增 Article、Revision、关系、staging、专用路由和最小后台，保持精选 BlogPage URL 不变。验收：来源重试不重复、无公开半成品、批量导入不逐篇触发 Wagtail Page 保存，权限/slug/locale/分类/删除均有测试。
-
-#### WP6：统一搜索投影
-
-BlogPage 与 Article 生成同一公开文档契约；创建新物理索引、回填、增量追平、校验后切 alias。验收：全量可重建；旧事件不能复活内容；read alias 只指向一个 serving 索引；旧索引可立即回滚。
-
-#### WP7：百万到千万级验证与基础设施演进
-
-用代表性数据完成压测、容量预测、备份恢复和单节点故障演练。只有证据触发时才引入 MySQL 读副本、Mongo 分片或 ES 扩容。
-
-#### WP8：收缩旧结构
-
-新链路稳定运行完整观察窗口且恢复演练通过后，才停止旧 Mongo 镜像元数据写入、归档旧指针并评估清理。MySQL `body` 字段本方案仍不删除。
-
-### 18. 预计修改与明确不在同批完成的范围
-
-后续预计涉及：
-
-- `blog/models.py`、`signals.py`、正文 repository/生命周期服务和定向测试；
-- `mongo.py` 职责拆分，移除启动索引副作用；
-- `search/models.py`、Outbox/Delivery/document/rebuild 服务及迁移；
-- 新 Article 模型、服务、路由、后台、导入和测试；
-- maintenance/Beat 路由及 `systemctl.md`；
-- 每个工作包独立方案记录和生产 runbook。
-
-不能在同一个发布批次中同时完成生产数据修复、Mongo 分片、ES 全量重建、Article 上线、旧数据清理和服务拓扑变化。每项必须有独立备份、压测、回滚点与生产授权。
-
-### 19. 测试矩阵
-
-| 范围 | 必测场景 |
-| --- | --- |
-| 草稿 | 新建、相同正文连续保存、不同正文、Mongo 失败、MySQL Revision 失败、历史恢复 |
-| 发布 | 首次/再次发布、发布旧 Revision、并发、定时首发/更新、撤回计划、工作流、别名页、MySQL 回滚 |
-| 编辑 | 已发布页保存草稿但在线正文不变、仅元数据发布、正文与元数据同时发布 |
-| 删除 | 单页、子树、级联、外层事务回滚、重复事件、Worker 停机、隔离期、精确 GC |
-| 搜索 | 旧 upsert 晚于 tombstone、回填与增量并发、alias 切换、ES 不可用、MySQL 二次过滤 |
-| 导入 | 重复 source_key、部分批次失败、断点恢复、无 Wagtail hook 放大、峰值吞吐 |
-| 兼容 | 旧 `mongo_content_id`、旧 Revision pointer、旧块缺 ID、Markdown key/字符串不变 |
-| 恢复 | 两库时间线不齐、Redis 全丢、ES 重建、Celery 租约恢复、Outbox 水位重放 |
-
-### 20. 发布与回滚门禁
-
-所有结构变化采用 expand -> 双写/双读 -> 影子校验 -> 切换 -> 观察 -> contract：
-
-1. 先增加表、字段、集合和索引，不删除旧结构；
-2. 测试环境按哈希/长度对账并运行故障测试；
-3. 新代码兼容旧指针，旧代码仍能读取旧正式集合；
-4. 测试通过后提交精确 commit，推送并核对 GitHub 检查；
-5. 生产前另行说明 MySQL/Mongo/ES/MinIO 备份、容量、时长和回滚；
-6. 生产迁移、回填、索引创建、alias 切换、服务重启和 GC 分别授权；
-7. 验收失败先关闭新读路径或切回旧 alias，不删除新旧正文；
-8. 观察窗口和恢复演练通过后才讨论旧结构清理。
-
-内容回滚通过重新指向已验证的不可变版本完成，不改写历史正文；ES 回滚只切 read alias；永久 tombstone 和事件审计不能随正文删除。
-
-### 21. 最终决策摘要
-
-1. `intro` 继续由 MySQL 权威保存；MySQL `body` 保留字段定义并持久为 `[]`。
-2. 正式正文从 Mongo 单文档原地覆盖演进为“不可变版本 + MySQL 公开指针”。
-3. 精选内容使用 BlogPage；一千万海量文章使用同项目独立 Article。
-4. ES 复用现有搜索 Outbox/Delivery；正文回收使用独立生命周期 Delivery。
-5. `pre_delete` 保留为 MySQL 意图捕获器，禁止跨库物理删除。
-6. 一条 Revision 对应一个正文版本，先消除共享 pointer 删除风险。
-7. 先修复数据丢失路径，再迁移；先压测再分片；所有生产数据操作独立授权。
-
-## 实际修改与不修改的文件
-
-- 修改：仅本文档。
-- 不修改：`BlogPage`、Mongo 管理器、信号、搜索代码、迁移、环境文件、服务配置与任何数据库数据。
-
-## 数据和服务影响
-
-本次仅阅读源码和测试环境已安装的 Wagtail 实现，不执行数据写入、迁移、索引操作、队列投递、服务重启或生产操作。`systemctl.md` 无需更新。
-
-## 测试与验收
-
-- 已核对 WSL2 `wagtailblog-test` 中 Django 5.2.8、Wagtail 8.0，以及 `Page.add_child`、`save_revision`、`save` 的实际源码。
-- 已核对 BlogPage、Mongo 管理器、删除信号、Markdown 导入和搜索文档构建调用点。
-- 未运行写入型生命周期测试或数据库一致性审计，以避免在当前分析阶段改变数据。
-
-## 回滚点与残余风险
-
-本次只有文档变更，V2 方案的回滚点为移除本轮新增章节并恢复对应早期摘要。残余风险是现有跨库保存/删除的一致性问题仍未修复；不得据本文档直接执行数据清理、迁移或生产改动。
-
-## 模型/推理强度建议
-
-- 事实收集：`gpt-5.6-luna` 低到中推理，适用于只读代码、配置和聚合审计。
-- 设计与实现：`gpt-5.6-terra` 高推理，适用于跨文件的 Wagtail 生命周期和 outbox 改造。
-- 升级条件：迁移、Mongo/MySQL 一致性修复、历史正文清理、生产发布或回滚使用 `gpt-5.6-sol` 高到 xhigh 推理，并要求独立复核。
-- 验证门禁：生命周期故障测试、只读一致性审计、备份恢复演练、测试环境验证、生产操作的单独书面授权。
-- 实际使用：主 agent 汇总实际仓库证据，并安排 `arch`、`data`、`review` 三个只读角色独立复核。Context7 成功解析 Wagtail 文档库但查询阶段连接失败，因此版本契约改由 WSL2 已安装 Wagtail 8.0 源码核对；未向外部发送项目源码、正文、凭据或日志。
-
-## 实施记录
-
-### 2026-08-27：只读分析完成
-
-- 状态：完成分析，未实施运行时代码或数据改动。
-- 实际修改文件：新增本文档。
-- 验证：已读取实际模型、信号、Mongo 管理器、搜索投影与 Wagtail 8 已安装源码；未执行写入型测试。
-- 数据/服务影响：无；未提交 Git。
-- 回滚点：删除本文档。
-- 残余风险：跨库保存和 `pre_delete` 清理风险仍存在，需独立方案和授权后处理。
-
-### 2026-08-27：千万级企业方案 V2 完成
-
-- 状态：完成详细架构、数据模型、状态机、Outbox、迁移、容量、压测、备份恢复和回滚设计；未实施运行时代码。
-- 实际修改文件：仅更新本文档。
-- 独立复核：`arch`、`data`、`review` 均完成只读审查；据此补入 Treebeard 单父节点边界、共享 Revision pointer 删除风险、级联删除捕获器、三种版本分离、在线迁移和跨库恢复水位。
-- 验证：核对 BlogPage/Mongo/搜索 Outbox/Delivery 代码及 Wagtail 8 已安装发布源码；`git diff --check` 通过，未跟踪文档的 `git diff --no-index --check` 未报告空白错误。未运行写入型生命周期测试、迁移、压测或生产检查。
-- 数据/服务影响：无；未写 MySQL、MongoDB、Elasticsearch、Redis 或 MinIO，未投递 Celery，未重启服务；`systemctl.md` 无需更新。
-- Git：工作区未提交；原有 28 号说明书保持未跟踪，29 号说明书为本任务文档。
-- 回滚点：移除 V2 章节及本实施记录，不影响运行时行为。
-- 残余风险：当前同步 Mongo 保存、同步删除和共享 Revision pointer 风险仍在代码中；只有 WP1 获得实现授权并通过测试后才能宣称修复。
-
-## 企业方案 V2 补充：搜索改造影响分析
-
-### 22. 结论：保留搜索底座，扩展内容身份与结果适配层
-
-面向 `BlogPage + Article` 和千万级公开文章，当前搜索模块不需要推倒重写。版本化物理索引、read alias、严格 mapping、MySQL State/Outbox/Delivery、租约与重试、外部版本、批量 Mongo 读取、固定上界回填、checkpoint、PIT/search-after 和高亮处理都应继续复用。
-
-但这也不是只在查询中增加一个 `Article.objects` 分支即可完成。当前独立内容搜索从状态表、事件、ES `_id`、重建游标、查询回填到模板，均把内容身份写死为 `BlogPage.page_id`。引入 Article 时需要一次中等偏大的兼容性改造，主要修改数据契约和适配层，不修改 Elasticsearch 作为可重建投影的定位。
-
-搜索相关链路必须先分清：
-
-| 链路 | 当前用途 | 千万级目标 |
+| 里程碑 | 完成内容 | 主要结果 |
 | --- | --- | --- |
-| Wagtail Page Explorer `/admin/pages/<id>/?q=` | 按 Page 标题自动补全，并叠加页面树和后台权限 | 只继续管理精选 Wagtail Page/BlogPage；不承载 Article 正文搜索 |
-| 独立内容索引 | 公开 BlogPage 的标题、摘要、Mongo 正文全文搜索 | 扩展为 BlogPage 与 Article 的统一公开内容索引 |
-| Wagtail 默认 Page 索引 | 普通非 BlogPage 页面搜索 | 第一阶段保持不变，与统一内容索引组成全站搜索 |
-| 独立标题建议索引 | 公开 BlogPage 标题联想 | 增加类型化身份和增量投递，覆盖 BlogPage 与 Article |
+| Revision 兼容 | 指针类型适配、严格正文恢复、409/503 错误分类 | 历史预览不再把缺失正文静默替换为正式正文 |
+| 删除安全 | CleanupIntent、事务后唤醒、lease/retry/reclaim | MySQL 回滚不会因 `pre_delete` 提前清理而丢正文 |
+| 正文版本化 | `content_body_versions`、hash/schema、insert-once | 已发布正文不再原地覆盖 |
+| 发布状态 | `BlogPublicationState`、草稿/审批/正式指针、generation | 正文身份与 Wagtail 页面状态可对账 |
+| 发布编排 | 常规、Workflow、scheduled 校验 | 审批版本和调度 Revision 有围栏 |
+| 发布一致性 | State 与 Outbox 同事务、取消发布/删除 tombstone | 公开变更可异步重放且可审计 |
+| 搜索投递 | State/Outbox/Target/Delivery、external version、generation | 迟到事件可标记 superseded |
+| 在线重建 | 固定上界、checkpoint、catch-up、strict consistency、alias | 可构建新物理索引并保留旧索引回滚 |
+| 对账 | 页面、State、Mongo、Search State/Outbox 的只读扫描 | 支持稳定游标、租约和周期执行 |
+| 旧文章登记 | dry-run、expected-hash、单页 apply、审计锁和幂等 | 可把旧 `blog_content` 安全登记为不可变正式版本 |
+| 生产迁移 | Blog 0029-0033、Search 0006-0007、v005 | 生产已完成 schema 和搜索投影迁移 |
+| 存量登记 | 生产 1098 篇、测试 156 篇 | State、不可变正文和搜索身份完成登记与对账 |
 
-因此，最重要的边界是：不能为了让海量 Article 出现在 Page Explorer 中而把它们重新建成 Page。Article 应有独立后台列表；后台正文检索若确有业务需要，应使用与公开索引隔离的受权限保护索引，不能把草稿或非公开正文写入公开 read alias。
+核心运行代码最初集中提交于 `726978aaf1c2394167185c4ff45037de2a3ba3d5`；生产 ES v005 mapping/search 修复提交为 `e887cf12b9b200d15affdf872a7e4a7b157db7a7`。后续登记、审计和测试改进形成多个独立提交。每次发布仍以当次 `git log`、`origin/main` 和生产 HEAD 实查为准，不能把这些 SHA 当成永久发布目标。
 
-### 23. 当前可直接复用的能力
+## 6. 已验证证据
 
-以下实现已具备企业搜索底座的关键属性：
+### 6.1 自动化验证基线
 
-- `services/content_index.py`：版本化物理索引、严格字段白名单、analyzer profile、分片/副本/刷新间隔配置和 `best_compression`；
-- `models.py`、`services/outbox.py`、`services/delivery.py`：事务内 State/Outbox、按目标 Delivery、至少一次投递、租约回收、重试、死信和 superseded；
-- `services/elasticsearch.py`：Bulk 写入、请求字节估算和 ES external version，迟到事件不能覆盖新版本；
-- `services/rebuild.py`：固定扫描上界、主键游标、批量读取、按字节切 Bulk、checkpoint、增量追平和 alias 切换门禁；
-- `services/content_query.py`、`services/cursor.py`、`services/highlights.py`：公开性二次检查、签名游标、可选 PIT 和安全高亮；
-- `ContentSearchTarget` 与 `SearchIndexBuild`：新旧物理索引双投递、在线构建、校验和回滚基础；
-- maintenance Worker 与 Beat：已有可靠唤醒加补偿扫描，不需要为 Article 搜索新增一套 Worker 或队列。
+已完成过的相关门禁包括：
 
-这些机制的职责正确，Article 接入应通过通用内容源接口扩展它们，不能复制出第二套 `ArticleSearchOutbox`、第二套索引切换命令或第二条 Celery 队列。
+- Revision、发布、Workflow、scheduled、取消发布、删除、对账和搜索代际定向测试。
+- Blog + Search 全量 483 项通过；曾出现的两项缺列错误已定位为迁移测试未恢复 schema 的夹具污染。
+- 搜索正文、Delivery、rebuild 相关 48 项定向测试通过。
+- 多个批次执行过 `compileall`、`python manage.py check`、`makemigrations --check --dry-run` 和 `git diff --check`。
+- MySQL 对条件唯一约束的 Wagtail warning 是已知数据库能力提示，不等同于本改造测试失败。
 
-### 24. 必须修改的公开搜索文档契约
+这些是历史实施证据。当前未提交搜索修复在提交前必须重新运行对应门禁，不能只引用旧结果。
 
-当前 mapping 版本是 `v003`，ES 文档 `_id` 等于十进制 `page_id`。Article 主键与 Page 主键可能相同，所以新契约必须使用类型化身份：
+### 6.2 生产迁移与服务
 
-```text
-content_key             "blog_page:38" / "article:38"，同时作为 ES _id
-aggregate_type          blog_page / article
-aggregate_id            MySQL 主键
-publication_generation  每次公开投影变化单调递增，作为 ES external version
-body_version_id         Mongo 不可变正文版本指针
-body_sha256              只校验正文
-projection_sha256        校验标题、摘要、正文和筛选字段组成的完整公开投影
-operation                upsert / tombstone
-searchable               是否允许公开命中
-title, intro, body_text
-date, first_published_at, locale_id
-tag_ids, category_ids
-```
+2026-08-29 生产完成：
 
-相关性或日期相同时，最终稳定排序键也必须使用 `content_key`（或等价的 `aggregate_type + aggregate_id`），不能继续只用裸 `page_id`。否则即使 `_id` 已命名空间化，混合类型的 search-after 游标仍会发生排序碰撞。
+- 代码和 schema 部署；成功应用 `blog.0029` 至 `blog.0033`、`search.0006` 和 `search.0007`。
+- 四个服务 `wagtailblog3.service`、maintenance Worker、Beat、Filebeat 均通过 active/enabled 验收。
+- 首页 HTTP 200，生产 `manage.py check` 无错误。
+- 迁移备份位于 `/home/source/Django/wagtail/backups/wagtailblog3-markdown-import-20260829-100724/`。
 
-`body_sha256` 与 `projection_sha256` 不能继续混为一个 `content_hash`。只改标题、摘要、分类或公开状态时，正文哈希可以不变，但搜索投影版本必须递增。`publication_generation` 继承当前 `content_version` 的防迟到职责，正文自身的 `body_version` 不参与比较大小。
+生产 `blog.0034` 是否已应用必须在下一次部署前用 `showmigrations blog` 重新核实，不能仅按测试环境记录推断。
 
-墓碑继续写入同一个 `_id`，仅保留身份、generation、`searchable=false` 和 `operation=tombstone`。不能立即物理删除墓碑，否则迟到的旧 upsert 可能重新创建已取消发布或删除的文档。
+### 6.3 生产 ES v005
 
-新 mapping 必须创建新物理索引；若实施前没有其他 mapping 版本占用，候选版本为 `v004`。不得原地修改当前 `v002/v003` serving 索引。新字段完成回填、增量追平和一致性校验后，才切换 read alias。
+2026-08-29 完成：
 
-### 25. State、Outbox 和 Delivery 的兼容演进
+- snapshot repository：`wagtailblog3-pre-search-20260811-221511`。
+- snapshot：`pre-search-20260811-221511`，状态 `SUCCESS`，`include_global_state=false`。
+- 备份目录：`/home/source/Django/wagtail/backups/wagtailblog3-pre-search-20260811-221511/`。
+- 新物理索引：`wagtailblog-prod-content-v005`。
+- read alias：`wagtailblog-prod-content-read`。
+- 全量回填 1098/1098 成功，缺失 0、失败 0，并完成 catch-up 和 alias 原子切换。
+- 旧索引 `wagtailblog-prod-content-v003` 保留。
+- 临时 BlogPage 1193 完成草稿、预览、Workflow 审批、发布、搜索命中和删除后不可搜索验收。
 
-当前 `ContentSearchState.page_id` 是主键，Outbox 唯一约束是 `(page_id, content_version)`。这两个结构无法区分相同数字 ID 的 BlogPage 与 Article。目标约束应为：
+生产 v005 已工作，但集群为单节点，副本未分配时整体 health 可能为 yellow；必须持续观察 Delivery dead/retry、alias 唯一指向、磁盘水位和 bulk 错误。
 
-```text
-ContentSearchState:  unique(aggregate_type, aggregate_id)
-ContentSearchOutbox: unique(aggregate_type, aggregate_id, publication_generation)
-ES document:         _id = content_key
-```
+### 6.4 生产存量登记
 
-实施采用 expand-contract：
+生产共登记 1098 篇旧 BlogPage：
 
-1. 新增可空 `aggregate_type`、`aggregate_id`、`content_key`、`publication_generation`、`body_version_id`、`body_sha256` 和 `projection_sha256`，旧字段仍保留；
-2. 存量 BlogPage 行按 `aggregate_type=blog_page` 和原 `page_id` 回填，只比较 ID 和哈希，不读取输出正文；
-3. Producer 双写新旧身份，Consumer 优先处理新身份并兼容旧 BlogPage 事件；
-4. 新索引只接受新契约，旧 serving 索引继续由兼容 Delivery 投递；
-5. alias 切换并完成观察窗口后停止旧事件写入；旧字段、旧索引和旧事件归档另行授权。
+- 每篇通过 dry-run 计算 expected-hash，再经受控单页 apply。
+- 对账结果：State 1098、Mongo 不可变正式版本 1098、v005 upsert 文档 1098。
+- `state_missing`、`mongo_missing`、`live_pointer_missing`、`outbox_missing`、`search_identity_mismatch` 均为 0。
+- 全量备份目录：`/home/source/Django/wagtail/backups/wagtailblog3-registration-all-20260829-160000/`。
+- ES snapshot：`wagtailblog3-search-snapshots/pre-register-all-20260829-162500`，状态 `SUCCESS`。
 
-直接把现有 `page_id` 主键在线改成联合主键风险过高。实施时应优先评估新建通用 State 表并在线回填，或增加代理主键和联合唯一约束；选择必须以 MySQL 版本、表行数、DDL 算法和锁影响实测为准。
+旧 live Revision 未绑定新版指针不影响正式正文或搜索。生产孤儿 `page_id=14` 经独立授权和定向备份后已删除；备份位于 `/home/source/Django/wagtail/backups/wagtailblog3-orphan-page14-20260829-170000/`。
 
-`ContentSearchScopeJob` 是 Wagtail 页面树访问限制的专用任务，`root_page_id` 可以保留，不必强行通用化。Article 没有页面子树，应由 Article 发布/权限服务直接生成类型化 upsert 或 tombstone。
+### 6.5 测试环境存量登记
 
-### 26. 内容源适配器与正文读取
+测试环境 156 篇 BlogPage 均已具备 State 和 Mongo 不可变正式正文：
 
-当前 `document.py`、`mongo.py` 和 `delivery.py` 直接调用 `BlogPage`、`mongo_content_id`、`get_full_text_for_search()` 及旧 `blog_content` 集合。目标态增加一个小而明确的内容源协议：
+- 初次已有现代版本 1 篇，剩余 155 篇登记成功。
+- 登记后 `state_missing=0`、Mongo 正文缺失 0、Outbox 身份不一致 0。
+- 定向备份位于 `/home/source/Django/wagtail/test-backups/registration-20260829-180000/`。
+- 历史孤儿 `blog_content.page_id in (14,609,621)` 和一条 `page_id=null` 文档经授权、备份后清理；保留 tombstone 和所有正式版本。
 
-```text
-identity(object) -> aggregate_type, aggregate_id, content_key
-is_public(object) -> bool
-metadata(object) -> title, intro, dates, locale, tag/category ids, canonical URL
-body_pointer(object) -> body_version_id, body_sha256
-body_text(version_document) -> normalized plain text
-```
+测试库的 13 篇 `mongo_content_id=NULL` 页面已核实：13/13 State 完整，13/13 正式版本可读，正文文本长度约 341 至 9713；其中 12 篇含一个 block，1 篇含 17 个 block。问题是搜索旧字段前置判断，不是正文缺失。
 
-分别实现 `BlogPageSearchSource` 与 `ArticleSearchSource`。Outbox、Delivery、重建和一致性检查只依赖该协议，不在核心循环中散落 `if aggregate_type == ...`。
+## 7. 当前工作区与环境状态
 
-Mongo 批量读取继续保留一次请求读取一个批次的模式，但从旧 `blog_content._id/page_id` 改为按 `content_body_versions` 的 `aggregate_type + aggregate_id + body_version_id` 精确读取。若未来 Mongo 使用 hashed `aggregate_id` 分片，仅按全局版本 ID 查询可能形成 scatter-gather，因此搜索回填请求必须携带完整聚合身份。兼容期执行旧、新双读或影子对比，不在循环中回退为逐篇 Mongo 查询。
+本节记录 2026-08-30 文档整理时的快照；执行任何写操作前必须重新查询。
 
-搜索消费者只读取 Outbox 指向的已发布不可变正文版本。草稿、Wagtail Revision 正文和 Article 草稿版本永远不能进入公开索引。
+### 7.1 Git 状态
 
-### 27. 在线重建与千万级回填
+- 分支 `main`，本地领先 `origin/main` 8 个提交。
+- HEAD 为 `e37788f`。
+- 工作区已有未提交的搜索修复、测试和管理命令；这些改动属于此前开发，不是本次文档压缩产生。
+- 本次文档任务只修改本文件，不提交、不推送、不部署。
 
-现有 `SearchIndexBuild` 只有 `scan_upper_bound_page_id` 和 `checkpoint_page_id`，只适合一类 BlogPage。目标态为每次 Build 建立分来源游标，例如子表：
+### 7.2 未提交搜索修复
 
-```text
-SearchIndexBuildCursor
-  build_id
-  aggregate_type
-  scan_upper_bound_id
-  checkpoint_id
-  scanned / succeeded / missing / failed
-  unique(build_id, aggregate_type)
-```
+当前工作区已实现但尚未提交：
 
-回填顺序可以先扫描数量较小的 BlogPage，再扫描 Article；每类内容都在启动时固定自己的最大公开主键。构建期间产生的发布、取消发布和删除事件继续双投递到 serving 与 building Target，回填结束后追平所有未完成 Delivery，再做一致性门禁。
+- 当正式 State/正文已存在时，搜索不再要求 `mongo_content_id` 非空。
+- Delivery 对同代事件可补齐允许为空的 hash，并继续拒绝错误 hash。
+- `search_drain_pending_deliveries`：默认 dry-run，生成 manifest/SHA；确认执行时限制小批并交给既有消费者。
+- 排空命令的 manifest 已绑定 Delivery 重试预算、State/Event hash、Target 身份；确认执行遇到首个非 `succeeded/superseded` 结果即非零停止。
+- 非公开 upsert 不再伪成功，而是以 `content_search_page_not_public` 进入 retry，避免权限任务未收敛时残留公开 ES 正文。
+- alias 切换在执行前重新检查 fresh Build gate；回滚命令改为一次 alias API 原子绑定明确的旧物理索引。
+- `search_archive_tombstones`：当前仅只读报告，不归档、不删除。
+- `bind_blog_revision_bodies`：可选只读审计，不提供 apply，也不是搜索恢复前提。
 
-千万级回填必须保持：
+本轮相关 66 项定向测试、`compileall`、Django check、迁移漂移检查和 `git diff --check` 已通过；提交前仍应重跑并复核实际 diff。
 
-- MySQL 按主键游标扫描，不使用深 OFFSET；
-- Article 目录批次只选索引需要的列，分类/标签必须批量预取；
-- Mongo 按完整版本身份批量读取；
-- ES Bulk 同时受文档数和 UTF-8 请求字节限制；
-- checkpoint 只在整批成功后推进，中断可续跑；
-- 回填限速并监控 MySQL 复制延迟、Mongo cache/磁盘、ES heap/merge 和线上查询延迟；
-- Build 失败不切 alias，旧 serving 索引持续提供查询。
+### 7.3 测试 v005 恢复现场
 
-分片数不能按“一千万篇”直接拍定。先用代表性的标题、摘要、正文长度和中文分词结果测量主分片实际字节、segment 数、merge 压力与查询并发，再确定新物理索引的主分片和副本数。
-
-### 28. 查询结果与页面模板需要较明显的适配
-
-当前 `ContentSearchResults` 把 ES `page_id` 批量回填为 `BlogPage`，搜索模板依赖 `pageurl`、`result.specific`、`content_type` 和 Page 属性，API 也直接调用 `page.get_url()`。Article 不是 Page，不能伪装成 Page 对象。
-
-目标态增加只读 `SearchResultItem` 展示对象，至少包含：
+2026-08-30 受控恢复在首次 rebuild 永久错误处停止后的状态：
 
 ```text
-content_key, aggregate_type, aggregate_id
-title, url, type_label, date, intro
-featured_image_ref（可空）
-matched_field, highlight_fragments, title_highlight
+Target: content-v005-fix
+Index: wagtailblog-test-content-v005
+role: building
+Build: failed
+checkpoint: 530 / 632
+last_error: content_search_state_hash_mismatch
+catch_up_streak: 0
+Delivery: pending=76, processing=0, retry=0, dead=0
+completed Delivery: succeeded=79, superseded=21
 ```
 
-ES 每次返回类型化 ID、排序值和高亮；应用按类型分组，以最多两次 MySQL 查询批量验证 BlogPage 与 Article 的公开状态，再按 ES 原顺序组装 `SearchResultItem`。模板改读 `result.url/result.title/result.type_label`，不再要求所有结果都支持 `pageurl` 和 `.specific`。API 明确增加 `content_key` 与 `content_type`，原数值 `id` 在兼容窗口保留，但客户端不能再把不同类型的相同 ID 当成同一对象。
+原 99 条 Delivery 已按五个 manifest 批次全部处理，结果为 79 `succeeded`、21 `superseded`，无 retry/dead。随后首次 rebuild 在 checkpoint 530 失败，并物化 76 条新的 pending Delivery；不得删除、手工改状态或直接复用历史 manifest。只读诊断确认 page 604、608、610–620 的 State `content_hash` 为空，但 13 篇的正式正文版本均可读取；这不是 `mongo_content_id=NULL` 或 Mongo 正文缺失。
 
-搜索结果页不能读取 Mongo 正文。正文纯文本和高亮来自 ES，标题、摘要、URL、公开状态和权限边界由 MySQL 批量确认。
+## 8. 未完成事项与优先级
 
-### 29. 当前搜索中应先修正的规模与一致性问题
+### 8.1 已完成：nullable legacy-ID 搜索修复
 
-以下问题已存在，Article 接入前应纳入搜索工作包：
+该项已在测试 v005 收尾前完成并通过定向测试。范围包括：
 
-1. State、Outbox、ES `_id` 和排序只使用 `page_id`。同号 BlogPage 与 Article 会共用 State、互相 supersede、撞 Outbox 唯一约束或覆盖同一 ES 文档；这是 Article Producer 上线前必须阻断的 P0。
-2. Delivery 固定按 `event.page_id` 回查 BlogPage。Article 事件在无同号 BlogPage 时会被静默标为成功，有同号 BlogPage 时甚至可能索引错误对象；不能在 typed source resolver 上线前产生 Article 搜索事件。
-3. `ContentSearchScopeJob` 目前有模型和生产入口，但仓库中没有对应任务消费者。页面访问限制变化后可能长期不生成新 tombstone/upsert；MySQL `live().public()` 二次检查会挡住结果对象，却不能及时清除 ES 中的旧公开正文。
-4. Delivery 处理 upsert 时若页面已不公开，会直接把该 Delivery 标为成功而不写墓碑。必须确保同一事务已有更高 generation 的 tombstone，或由消费者原子地请求状态重算，不能静默成功后依赖不存在的范围任务。
-5. `query_content_search_page()` 先从 ES 取固定数量，再由 MySQL 剔除失效页面，不会继续向后补齐当前页；漂移增加时会出现短页或空页。
-6. `ContentSearchResults.count()` 使用 ES 的原始 total，没有经过 MySQL 公开性校验。失效或受限文档会造成总数虚高，并可能泄露“存在某条不可见内容”的数量信息。
-7. 联邦搜索每条来源只取前 100 个候选，但 `count()` 和分页器可以报告远大于 100 的总数；超过候选窗口的页可能为空或排序不完整，复合游标还可能跳过未返回的候选。
-8. 每次内容查询都使用 `track_total_hits=True`。对千万级高频词做精确总数统计可能显著增加开销，应把普通结果页改为有界总数或关系值，仅在确有业务需求时单独执行精确统计。
-9. 标题建议索引只提供 BlogPage 测试回填命令，没有与公开生命周期一致的类型化增量投递。若 Article 需要标题联想，必须把建议索引视为可重建投影，并处理发布、改名、取消发布和删除；若产品不需要，则明确只服务精选 BlogPage。
-10. 未发现面向长期运行的已完成搜索事件归档策略；Delivery 物化仍逐事件 `get_or_create`。这与文章总量不直接等价，但在高发布吞吐下会增加 MySQL 往返和表增长，应先测量事件速率，再设计批量物化及“全部 required Delivery 终态 + 超过审计保留期”后的归档，不能未经授权删除 tombstone 审计。
+1. 核对 `document.py`、`delivery.py` 和对应测试，确保有正式 State 时不读取或校验旧 `mongo_content_id`。
+2. 修正 `register_legacy_blog_page.py` 中仍称 `--apply` 不支持的过时模块说明，使文档与已实现行为一致。
+3. 搜索修复、Delivery 排空命令及测试保持边界清晰；当前工作区仍需按发布门禁提交。
+4. Revision 可选审计和 tombstone 只读报告未混入搜索运行时逻辑。
 
-短页修复应使用有限 over-fetch：按 search-after 继续取后续候选，直到填满页面、ES 无更多结果或达到受控扫描上限。不能为了填满 20 条结果无限扫描大量被 MySQL 拒绝的文档；拒绝比例超过阈值应触发一致性告警和投影修复。
+验收：已通过相关定向测试、`compileall`、`manage.py check` 和 `git diff --check`；最终提交前仍需再次执行完整门禁。
 
-联邦搜索第一阶段仍可保留“统一内容索引 + 普通 Wagtail Page 索引”两条流，但必须使用每来源游标和缓冲区完成稳定归并，去重键改为 `content_key`，不能再按裸 `pk` 去重。长期如果普通 Page 也需要稳定深分页和统一相关性，可把公开普通 Page 作为第三种 `aggregate_type` 投影到统一索引；这是后续优化，不是 Article 第一阶段的上线前提。
+回滚：只回退代码提交；保留 State、Outbox、Delivery、Mongo 正文和失败 Build 证据。
 
-### 30. 后台搜索的企业边界
+### 8.2 已完成：测试 v005 受控收敛与 alias 切换
 
-Wagtail Page Explorer 的 `q` 是页面标题自动补全，只搜索 Page 树中的对象。它不读取 `apps/search` 独立内容索引，也不搜索 `intro` 或 Mongo 正文。这个行为对精选 BlogPage 可以保留。
+该项已按以下顺序完成（详见第 16 节）：
 
-Article 后台应建立独立菜单和列表：
+1. 重新只读核对 Target、物理索引、alias、Build 上界/checkpoint、State→Mongo 三元组和 Delivery 状态。
+2. Delivery 分批排空，最终 pending/processing/retry/dead 均为 0。
+3. checkpoint 恢复至 632，连续两次 clean catch-up。
+4. Build=READY，严格一致性各项均为 0。
+5. 通过 fresh gate 后原子切换测试 read alias，并保留旧索引作为回滚点。
 
-- 第一阶段支持精确 `article_id/source_key`、标题、状态、来源、时间范围和分类筛选；
-- 标题模糊搜索走专用后台查询服务，不能在千万行 MySQL 上执行无前缀 `%LIKE%`；
-- 默认只返回元数据，不读取 Mongo 正文；
-- 若未来必须搜索草稿或非公开正文，新建与公开索引不同的私有物理索引和 read alias，并把角色/组织/可见范围写入可过滤安全字段；
-- 私有索引查询仍要回 MySQL 做最终权限检查，审计管理员、查询条件和命中对象 ID，不记录正文；
-- 公开索引不得通过开关变成后台草稿索引。
+公开文档验收项：`missing/stale/ahead/hash_mismatch/body_version_mismatch/generation_mismatch/wrong_tombstone=0`。不可搜索 tombstone 的 extra 可以保留，但必须单独分类。任一批出现永久 4xx、dead 或租约异常立即停止，不删除审计记录，从 checkpoint 恢复。
 
-这样既不会让一千万 Article 压入 Wagtail Page 树，也不会扩大公开搜索索引的数据边界。
+### 8.3 已完成：alias 原子回切门禁
 
-### 31. 搜索实施工作包细化
+当前 `search_rollback_content_alias` 已改为在一次 Elasticsearch `_aliases` 操作中切回显式传入的旧物理索引；缺少旧索引或 alias 漂移时拒绝写入。
 
-搜索部分建议拆成可独立回滚的六批，不能一次上线：
+合格实现必须：
 
-#### S0：修复现有一致性缺口
+- 记录并显式传入 previous physical index。
+- 在一次 Elasticsearch `_aliases` 操作中 remove 当前索引并 add 旧索引。
+- 切换前校验 alias 集合未漂移且恰好指向预期索引。
+- 同步或明确修复 MySQL Target/Build 角色状态。
+- 通过“切到 v005，再切回 v001，再切回 v005”的测试，且每个时刻 alias 恰好指向一个索引。
 
-实现 ScopeJob 消费、非公开 upsert 的墓碑补偿、结果 over-fetch、总数语义和联邦 100 候选问题。先对现有 BlogPage 建立回归基线，不引入 Article。
+测试已覆盖“切换目标缺少旧索引参数时拒绝”和成功回切；生产切换仍须单独备份、授权和验收。
 
-#### S1：类型化身份与通用来源协议
+### 8.4 P0：实现 `ContentSearchScopeJob` 权限闭环
 
-增加 expand 字段/新 State 结构、`content_key`、source registry 和 BlogPage 适配器。旧索引和旧事件仍可运行，验证 ID 碰撞、旧事件重放和 tombstone 防复活。
+当前 restriction signal 会创建 ScopeJob，代码已具备 maintenance 消费者、稳定主键分页、租约、重试和 rescan 标记；仍需在真实父子页面权限变化场景完成持续验收，并确认生产 Beat/Worker 已加载该任务。搜索 Delivery 在页面变为非公开时仍依赖 ScopeJob 收敛 tombstone。
 
-#### S2：不可变正文版本接入
+实现应覆盖：
 
-搜索事件携带 `body_version_id/body_sha256/projection_sha256`，Mongo reader 双读，影子比较旧正式正文与新版本正文的 hash/长度，不输出正文。
+- 根页面和子树的稳定主键分页。
+- 权限新增后 tombstone，权限删除后重新 upsert。
+- 租约认领、过期回收、幂等重试和失败审计。
+- 处理中再次发生权限变化时创建后继任务或设置 rescan，不能丢事件。
+- 前台 MySQL `live().public()`/权限二次过滤继续保留。
 
-#### S3：Article Producer 与查询回填
+验收必须证明父子页面权限收紧后 ES 无可搜索正文、权限恢复后可重新投影、消费者崩溃后可续跑。回滚是停止 dispatcher/consumer、保留任务和 Outbox，并回切旧 alias；不得清空任务表。
 
-Article 发布事务写同一 Search Outbox；Delivery、重建和查询支持 Article；引入 `SearchResultItem`，更新模板、API、标题建议和后台入口。
+### 8.5 P1：tombstone 归档与清理策略
 
-#### S4：新物理索引在线构建
+当前只实现只读候选报告。近期数据量不需要 apply，也不应为了“表干净”提前删除审计链。
 
-创建新 mapping，开启新旧 Target 双投递，分别按 BlogPage/Article 固定上界回填，追平增量并执行类型化一致性校验。生产索引创建、回填和 alias 切换分别取得授权。
+达到表体积、备份窗口或扫描延迟阈值后再实现：
 
-#### S5：观察与 contract
+- 归档运行表、事件表和脱敏 Delivery 子表。
+- manifest SHA-256、单例锁、fencing token、稳定游标和断点恢复。
+- apply 前重新校验 State tombstone、所有 required Target 已完成、无活动租约和 active build。
+- 归档成功不等于允许 purge；物理清理另立命令和授权。
+- 将来 purge 顺序为 Delivery → Outbox，永久保留 `ContentSearchState` tombstone。
 
-观察搜索延迟、短页率、MySQL 拒绝率、Outbox lag、死信、ES 版本落后和索引容量。完整回滚窗口与恢复演练通过后才停止旧身份写入；旧索引和旧数据清理另行授权。
+### 8.6 P1：运维、恢复和规模准备
 
-### 32. 搜索测试与验收门禁
+- 为生产独立搜索启用有限超时的 systemd readiness：MySQL、Mongo、Redis、MinIO、ES 和 read alias 唯一 serving 指向。
+- 完成 MySQL/Mongo/ES/MinIO 的联合恢复演练，记录 RPO/RTO 和失败回退顺序。
+- 监控 `state_missing`、Mongo 版本缺失、Outbox oldest age、pending/retry/dead、lease reclaim、Build/checkpoint、catch-up streak、alias、ES bulk 错误、锁等待和搜索 p95/p99。
+- Mongo CleanupIntent 当前会解析 Revision 引用；当 Revision 达十万量级、检查 p95 超过租约一半或出现扫描导致的 reclaim/dead 时，建设引用索引。正式版本 GC 前该索引是强制前提。
 
-| 范围 | 必测场景 |
-| --- | --- |
-| 身份 | `blog_page:38` 与 `article:38` 同时存在且不冲突；旧裸 `page_id` 事件兼容 |
-| 版本 | 旧 upsert 晚于新 upsert、旧 upsert 晚于 tombstone、正文不变但元数据变化、重复事件 |
-| 权限 | 取消发布、访问限制、软删除、硬删除、权限变化；结果、总数、高亮均不泄露不可见内容 |
-| 查询 | 相关性、日期排序、类型/语言/分类筛选、空正文、中文分词、短页补齐和受控停止 |
-| 游标 | 下一页、上一页、PIT 过期、alias 切换、类型化稳定排序、相同分数与相同数值 ID |
-| 联邦 | 内容与普通 Page 稳定归并、超过 100 条结果、总数语义、任一来源失败 |
-| 回填 | 两来源独立 checkpoint、中断恢复、固定上界、增量追平、Bulk 限字节、Mongo/ES 短暂故障 |
-| 建议 | BlogPage/Article 改名、发布、取消发布、删除、同名和 ID 碰撞 |
-| 性能 | 百万到千万合成文档的 P50/P95/P99、吞吐、exact count 成本、ES heap/merge、MySQL 批量回查 |
-| 回滚 | 查询开关回旧路径、read alias 回旧索引、旧 Consumer 处理兼容事件且不删除新旧数据 |
+### 8.7 P2：千万级 Article 演进
 
-验收还必须证明每页搜索结果不读取 Mongo 正文、不产生 MySQL N+1、ES `_source` 不包含草稿指针或原始 StreamField 块、日志和 Outbox 不包含正文或凭据。
+当前每日新增约十余篇，现有 BlogPage 架构无需立即拆分。进入独立 `Article` 立项须同时满足：
 
-### 33. 本次搜索分析的数据、服务与回滚边界
+1. 产品明确需要百万/千万级采集或导入内容。
+2. 1 万/10 万脱敏合成数据压测和容量模型证明 BlogPage 无法满足已定义 SLO。
+3. 海量 Article 的权限、后台、生命周期和人工编辑需求确实不同于 Wagtail Page。
 
-本轮只读检查 `apps/search` 的模型、Producer、Delivery、文档构建、Mongo reader、ES client、重建、查询、联邦、建议、视图、模板、管理命令和测试。未修改运行代码、迁移、设置、`systemctl.md`、MySQL、MongoDB、Elasticsearch、Redis、Celery 或生产服务。
-
-本次文档补充的回滚点是移除第 22 至 33 节及对应实施记录。任何 S0-S5 实施都需要单独方案、测试和生产授权；其中 MySQL DDL、ES 新索引创建/回填/alias 切换和存量数据处理不得由本文档视为已授权。
-
-### 34. 搜索改造的模型/推理强度建议
-
-- 只读绑定点统计、测试清单和文档整理：`gpt-5.6-luna` 中推理；
-- S0 的现有缺陷修复、适配器和常规查询改造：`gpt-5.6-terra` 高推理；
-- State/Outbox 在线迁移、跨库版本契约、千万级回填、alias 切换和生产回滚：`gpt-5.6-sol` 高到 xhigh 推理，并安排独立 review；
-- 升级门槛：涉及生产 DDL、不可逆 contract、权限边界、正文泄漏、旧事件复活内容、跨服务恢复水位时升级；
-- 验证门禁：定向单元/集成测试、合成容量压测、故障注入、只读一致性检查、新旧索引影子对比和精确生产授权。
-
-### 2026-08-27：搜索影响专项分析完成
-
-- 状态：完成 `apps/search` 与千万级 Article 方案的专项影响分析，未实施搜索代码。
-- 实际修改文件：仅更新本文档。
-- 事实依据：当前 mapping `v003`、`page_id` 身份、BlogPage State/Outbox/Delivery、external version、在线重建、MySQL 公开性回查、联邦结果、标题建议和 Wagtail Page Explorer 已逐项核对。
-- 独立复核：`review` 角色完成只读审查，确认 typed identity 与来源解析是 Article 接入前置门禁，并补充同号对象误索引、联邦游标和高吞吐事件表风险。
-- 结论：保留搜索底座；类型化身份、通用内容源、结果 DTO、分来源重建和标题建议需要兼容改造；Page Explorer 不接管海量 Article。
-- 数据/服务影响：无；未创建索引、回填、切 alias、投递任务或重启服务，`systemctl.md` 无需更新。
-- Git：工作区未提交；28、29 号说明书继续保持未跟踪状态。
-- 回滚点：移除第 22 至 34 节及本记录。
-- 残余风险：ScopeJob 无消费者、非公开 upsert 静默成功、短页/总数偏差和联邦 100 候选限制仍存在于当前代码，需 S0 获得实现授权后才能修复。
-
-### 35. Wagtail 8.0 历史、草稿与 Mongo 正文兼容性核查
-
-#### 35.1 核查范围与环境
-
-- 测试环境使用 WSL2 的 `wagtailblog-test` Conda 环境，实际版本为 Django 5.2.8、Wagtail 8.0。
-- 浏览器检查使用 `browser-skill` 的 `bsk`，没有使用 Playwright，也没有执行恢复、发布、保存、取消发布或删除。
-- 只读检查的真实 BlogPage 为 `page_id=38`，标题为“初识Django”；访问地址为 `/admin/pages/38/history/`。
-- 页面历史列表显示已发布、已保存草稿和当前草稿等日志，草稿动作包含“预览”“编辑”“与上一个版本进行比较”；预览入口可正常打开。
-
-#### 35.2 Wagtail 8.0 的实际调用链
-
-Wagtail 的历史页本身主要读取 MySQL 的 `PageLogEntry`、`Revision` 元数据，不需要读取 Mongo 正文。当前兼容链路如下：
+目标方向：
 
 ```text
-历史列表
-  PageHistoryView -> PageLogEntry / Revision
-
-预览
-  PreviewRevision.get_revision_object()
-  -> Revision.as_object()
-  -> BlogPage.with_content_json()
-  -> BlogPage.from_serializable_data()
-  -> 按 mongo_draft_pointer 读取 Mongo 草稿正文
-
-比较
-  两个 Revision.as_object()
-  -> EditHandler comparison
-  -> 比较恢复后的 BlogPage 字段值
-
-恢复
-  旧 Revision.as_object()
-  -> 生成新的 Revision
-  -> 用户再次发布
-  -> PublishPageRevisionAction
-  -> BlogPage.save() / page_published
+MySQL Article catalog
+  tenant/source_key/title/intro/status/permission/body pointer/generation
+Mongo immutable body versions
+MySQL Outbox
+Elasticsearch unified typed projection
+可选 wagtail_page_id，仅供精选内容进入 Wagtail
 ```
 
-这说明 Wagtail 历史框架不要求正文必须存储在 MySQL `Revision.content.body` 中；它要求 `Revision.as_object()` 能够得到一个完整、可比较、可保存的页面对象。因此，保留 MySQL Revision 元数据并将正文替换为不可变 Mongo 版本指针是可行的，不能删除 Revision 或绕过 Wagtail 的恢复流程。
+批量导入使用 source key 幂等、游标断点和 bulk 写入，不能逐篇 `add_child()`、触发完整 Wagtail hook 和 ORM `save()`。在实测前不预设 Mongo 分片数、ES shard 数，不对 Wagtail 核心 Page 表做分区。
 
-#### 35.3 当前实现的兼容点与缺口
+## 9. 明确不做的事项
 
-当前 `BlogPage.serializable_data()` 将 MySQL Revision 的 `body` 固定保存为 `[]`，并写入 `mongo_draft_pointer`；`from_serializable_data()` 再通过指针读取 Mongo 草稿，缺失时回退到正式 Mongo 正文。这个设计可以解释现有历史页为什么能够打开，但也带来以下缺口：
-
-1. Mongo 指针失效、正文暂时不可用、正文确实为空和正文反序列化失败，当前可能都降级为 `body=[]`。
-2. 预览可能显示空正文；比较可能漏掉正文差异；恢复可能由旧版本生成一个空正文的新 Revision。
-3. 相同正文复用 Mongo 快照指针时，删除某个 Revision 若直接物理删除快照，可能破坏其他 Revision 的历史读取。
-4. 恢复旧 Revision 后再次发布时，必须保证旧版本正文不会覆盖更新版本的 MySQL 正式指针或搜索投影。
-
-因此，历史列表无需重写，但正文读取、比较、恢复和删除引用管理必须改造。
-
-#### 35.4 面向不可变正文版本的最小改造
-
-建议按兼容迁移分阶段实施：
-
-1. 在 Revision JSON 中新增 `mongo_body_version_id`、`body_sha256`、`body_schema_version` 和读取状态；过渡期继续写入 `mongo_draft_pointer`，新读路径优先使用不可变版本指针。
-2. `from_serializable_data()` 返回可区分的结果：正文为空、快照不存在、Mongo 暂时不可用、结构无法反序列化。后台预览和比较遇到后三类必须显示明确错误或不可用提示，不能静默视为空。
-3. 比较前分别加载两个 Revision 的正文版本；任一版本不可用时中止正文比较并提示历史快照不可用，不能报告“无变化”。
-4. 恢复动作继续使用 Wagtail 的“旧 Revision 生成新 Revision”语义；新 Revision 可以引用旧的不可变正文版本，发布时只在 MySQL 事务内切换 `published_body_version_id` 并写 Search Outbox。
-5. Revision 删除只删除 MySQL 引用或墓碑；Mongo 物理回收交给延迟 GC，只有确认没有 Revision、正式指针、备份或审计引用后才允许回收。
-6. 增加一致性检查命令，至少检查 Revision 指针存在性、哈希、schema 版本、正式指针和搜索投影版本；命令只读并输出计数/ID，不输出正文。
-
-#### 35.5 哪些 Wagtail 代码应保留，哪些代码需要适配
-
-应保留：`PageHistoryView`、`PageLogEntry`、Wagtail `Revision.id`、用户/时间/审核元数据、权限校验、`Revision.as_object()` 调用模型、预览/比较/恢复 URL 和 `PublishPageRevisionAction`。
-
-需要适配：`BlogPage.from_serializable_data()`、`BlogPage.serializable_data()`、表单初始化时的最新草稿恢复、历史预览的正文错误呈现、比较前的正文完整性校验、恢复/发布时的版本指针切换、Revision 删除信号及 Mongo GC。除非出现明确的性能证据，不修改 Wagtail 核心历史视图。
-
-#### 35.6 浏览器验收与后续门禁
-
-实施后必须用 `browser-skill` 在测试环境验证 BlogPage 的：历史列表、最新草稿预览、两个版本比较、恢复旧版本后生成新草稿、发布后正式正文和再次打开历史版本。测试数据必须使用专门的测试页面，禁止在生产页面执行恢复或发布。
-
-验收至少包括：
-
-- 正常快照能在预览和比较中显示正文；
-- Mongo 快照缺失时后台明确显示“历史正文不可用”，不显示为正常空文章；
-- 恢复旧版本不会修改旧 Revision，不会覆盖更高版本正文；
-- 发布后 MySQL 正式指针、Mongo 正式版本、Search Outbox 的版本号一致；
-- 删除一个 Revision 不会删除仍被其他 Revision 或正式正文引用的 Mongo 版本；
-- 草稿、预览和历史正文不会进入公开搜索索引。
-
-#### 35.7 测试库真实 Revision 的只读实测
-
-本次使用测试库现有数据完成了两组互补核验，没有创建页面、保存草稿、发布、恢复、删除或修改 Mongo 文档。
-
-**正常 ObjectId 指针链路（BlogPage 38）：**
-
-- Page 38 当前共有 43 条 MySQL Revision。Revision 1059 的 `content.body` 是字符串 `[]`，`mongo_draft_pointer` 指向现存 Mongo 快照；该快照包含 12 个正文块。
-- 访问 `/admin/pages/38/revisions/1059/view/` 后，页面显示完整正文、多个正文标题且可见文本非空。由于 MySQL Revision 不含正文，这直接证明预览通过 `Revision.as_object()` 和 `BlogPage.from_serializable_data()` 读取了 Mongo Revision。
-- Revision 1042 与 1059 的 Mongo 正文哈希不同；访问 `/admin/pages/38/revisions/compare/1042...1059/` 后比较页出现 `Body` 变更行，证明正常 ObjectId 指针下比较流程能够取得 Mongo 正文。
-- Revision 986、1041、1042 共用同一 Mongo 指针；全测试库还存在另外 9 组共享指针。这是当前“正文相同则复用最新快照”逻辑的真实结果，说明 Revision 删除不能直接物理删除其指针文档。
-
-**字符串主键兼容故障（BlogPage 544-546）：**
-
-- 测试库共有 157 条带 `mongo_draft_pointer` 的 Revision。147 条 ObjectId 指针可正常读取；另有 10 条使用 `rev_<page_id>_<uuid>` 字符串主键，涉及 Revision 947-956 和 Page 544-546。
-- 这 10 份 Mongo 文档实际存在，不是物理丢失；但 `MongoManager.get_blog_revision_body()` 无条件调用 `ObjectId(content_id)`，因此把字符串主键判为非法并返回 `None`。
-- Page 544 的 Revision 947-950 各自指向不同的 Mongo 正文哈希，但 `Revision.as_object()` 对四个版本都回退成同一份正式正文：恢复后均为 9 个块，哈希与 `blog_content` 正式正文完全相同。
-- `/admin/pages/544/revisions/947/view/` 没有显示“历史正文不可用”，而是静默显示当前正式正文。`/admin/pages/544/revisions/compare/947...948/` 虽显示 `Body` 行，却没有增删标记，且比较对象来自同一份正式正文，不能表达两份真实历史快照的差异。
-
-因此当前已经不是只有理论上的“缺失快照可能静默降级”：测试库存在可重复的 P0 兼容故障。第一修复门禁应是让 Revision 存储读取器按原始 `_id` 类型安全查询，至少兼容历史字符串主键和当前 ObjectId；随后再把“文档不存在、Mongo 不可用、ID 格式非法、正文为空、反序列化失败”拆成不同状态。修复前禁止对 Revision 947-956 执行恢复或基于其比较结果做内容判断。
-
-本次没有找到“合法 ObjectId 指针但 Mongo 文档物理缺失”的天然样本，也没有通过删除快照进行故障注入；该分支仍需在取得实现授权后使用隔离测试数据验证。
-
-本节结论：Wagtail 8.0 历史系统本身不需要大改，当前 Mongo 正文接入方式需要补齐“不可变版本指针、显式缺失错误、引用安全和发布代际校验”。在这些门禁完成前，不应清理旧 Mongo 快照、删除 MySQL `body` 字段或把千万级文章全部建成 Wagtail Page。
-
-### 36. Wagtail 历史改造实施记录（2026-08-27）
-
-- 状态：完成 Wagtail 8.0 源码链路核对和测试环境 BlogPage 38 的浏览器只读验收；未实施运行时代码改造。
-- 实际修改文件：仅更新本说明书；未修改模型、迁移、模板、服务、数据库、MongoDB、Elasticsearch、Redis 或 Celery。
-- 测试结果：Django shell 确认 Page 38 有 43 条 Revision，Revision 1059 从含 12 个块的 Mongo 快照恢复正文；`bsk` 确认历史列表有 85 条页面日志、1059 预览正文非空、1042 与 1059 的比较页包含正文变更。全库只读核验发现 10 条字符串主键快照被 ObjectId-only 读取器拒绝；Page 544 的 Revision 947 预览静默回退正式正文，947 与 948 的比较不能表达真实快照差异。未执行恢复、发布和删除路径。
-- 浏览器工具：使用 `browser-skill`；没有生成 Playwright 截图、trace、视频、PDF、HAR 或报告。
-- 环境检查：`python manage.py check` 返回 0 个问题；测试开发服务运行于 `0.0.0.0:8080`，未登录请求返回预期的后台登录重定向，登录态 `bsk` 验收已完成。启动时提示 1 个未应用的 `wagtailcore` 迁移，本次没有执行 `migrate`。
-- 工具状态：所有 `bsk` session 已停止；CLI/浏览器扩展存在 protocol 1.0/1.1 漂移警告，但没有阻止上述只读页面核验。
-- Git 状态：未提交；28、29 号说明书为未跟踪文件，本次没有修改运行时代码。`git diff --check` 无报错，29 号说明书独立空白检查和行尾空白扫描无诊断。
-- 数据与服务影响：没有写入 MySQL、MongoDB、Redis 或 Elasticsearch，没有执行搜索重建、服务重启或 systemd 变更，`systemctl.md` 无需更新。
-- 回滚点：移除第 35 至 36 节及本次记录即可回滚文档变更；运行时代码和数据无回滚动作。
-- 残余风险：合法 ObjectId 快照物理缺失的提示尚未通过故障注入验证；恢复/发布后的版本代际和共享快照 GC 也未验证。这些必须在取得实现授权后用隔离测试数据完成。
-
-### 37. 本阶段模型/推理强度实际使用
-
-- 只读代码、Wagtail 8.0 调用链和文档整理：按建议使用常规开发档强度完成。
-- 浏览器历史页验证：使用 `browser-skill` 完成最短只读路径，未扩大到生产操作。
-- 尚未触发高风险实现升级；涉及 Revision 契约、跨库发布一致性、Mongo GC、搜索代际或生产迁移时，应升级为高推理并安排独立 review、故障注入和回滚演练。
-
-### 38. 项目主线与子代理统筹记录（2026-08-27）
-
-- 状态：完成整个项目的 M0-M7 唯一主线、WP/S 映射、owner/RACI、前置条件、交付物、验收门禁、feature flag 和生产授权边界整理。
-- `architecture_review`：使用 `gpt-5.6-terra` 高推理，只读复核架构、依赖 DAG、Article 与 BlogPage 边界、namespace 和回滚；未修改文件。
-- `django_backend_review`：使用 `gpt-5.6-terra` 中推理，只读复核 `BlogPage`、Mongo 读取器、信号、Wagtail 8.0 历史契约和后端测试工作包；未修改文件。
-- `data_search_ops_review`：使用 `gpt-5.6-luna` 中推理，只读复核 MySQL/Mongo/ES 数据模型、Outbox、重建、容量、备份、监控和 systemd 发布门禁；未修改文件。
-- 主 agent 负责冲突裁决和文档集成：将三方建议统一为“先 P0 读取/删除风险，再正文版本与发布，再搜索，再 Article，最后 GC/收缩”，没有授权任何生产操作。
-- 实际修改文件：仅本说明书；未修改运行时代码、迁移、数据库、MongoDB、Elasticsearch、Redis、Celery、服务单元或 `systemctl.md`。
-- 验证：`git diff --check` 无报错；文档行尾空白扫描为 0；未执行迁移、回填、索引重建、GC、发布或删除。
-- 回滚点：删除第 0.8 节和本节即可回滚本轮统筹整理；不会影响前述事实记录和运行时系统。
-- 残余风险：M1 错误状态在 Wagtail 8.0 后台如何呈现仍需隔离测试确认；Article 多租户/权限/保留策略和生产容量仍待业务确认，不能以本计划替代实现、压测、备份恢复和生产授权。
-
-### 39. Wagtail 8.0 特有生命周期边界补充（2026-08-28）
-
-- 状态：根据 Wagtail 8.0 的 Workflow、预约发布、`page_published` 和 `with_content_json()` 契约补充方案；仍为文档设计，未修改运行时代码或数据。
-- Workflow：审批快照冻结 `revision_id`、`body_version_id`、hash、schema 和 generation；实际发布再次锁定并校验，任何漂移都转为需重新审核，不自动发布。
-- 预约发布：明确 `PublishPageRevisionAction` 调度链与 Outbox Worker 是两个异步执行上下文；到期前后均做版本校验，发布后缺 Outbox 由对账任务补偿，重复任务以幂等键吸收。
-- `page_published`：receiver 限定为通知、缓存/搜索唤醒和对账提示，不执行 Mongo 写入/删除或正式指针推进；发布服务完成 Wagtail 发布后再切换指针并写 Outbox。
-- 序列化：`serializable_data()`、`from_serializable_data()` 必须通过 `with_content_json()`/`Revision.as_object()` 契约测试，兼容 ObjectId 与历史字符串指针；正文缺失、Mongo 不可用、hash/schema 不符不得静默回退到正式正文。
-- 验收门禁：新增 Workflow 漂移、定时重复/取消、发布后崩溃、信号无 Outbox、序列化往返和历史字符串主键场景；Wagtail 历史列表、权限和 URL 保持不变。
-- 实际修改文件：仅本说明书；未修改模型、迁移、模板、服务、搜索、数据库、MongoDB、Redis、Elasticsearch、Celery、systemd 或 `systemctl.md`。
-- 验证与影响：文档变更后需执行 `git diff --check` 和 Markdown 空白扫描；本轮无数据库写入、无迁移、无发布、无服务重启。回滚只需移除本节及 8.3.1-8.3.5，不影响运行时行为。
-- 残余风险：Wagtail 8.0 核心事务边界和 `body` 字段实际 JSON 类型仍需在实现阶段以隔离测试固定；未授权前不得通过故障注入删除 Mongo 快照，也不得在生产执行迁移或历史恢复。
-
-### 40. M1/P0 实施批次：历史 Revision 正文兼容与显式失败（2026-08-28）
-
-#### 40.1 目标、非目标与范围
-
-目标是修复已在测试库 Page 544-546、Revision 947-956 复现的字符串 `_id` 指针读取失败，并消除“Revision 草稿快照读取失败后改读当前正式正文”的错误历史语义。历史预览、比较和恢复必须只使用该 Revision 指向的正文；没有该正文时应明确失败，不能显示另一版本的内容。
-
-本批只修改 `wagtailblog3/mongo.py`、`wagtailblog3/apps/blog/models.py`、现有博客中间件、管理端错误模板及其定向测试；不修改 MySQL schema、Mongo 存量数据、Wagtail 核心、页面 URL、Workflow、定时发布、信号删除逻辑、搜索 Outbox、Celery 或服务配置。`body='[]'` 的实际 Wagtail JSON 兼容形态保留，待独立契约测试和版本化正文批次处理。
-
-#### 40.2 实施设计
-
-1. Mongo Revision 读取器按输入 `_id` 的真实 BSON 类型查询：有效 ObjectId 使用 ObjectId，其他非空字符串使用字符串 `_id`；不把历史 `rev_<page>_<uuid>` 转换为 ObjectId。
-2. 读取器对“空指针、非法输入、文档不存在、Mongo 查询异常、文档缺 body”提供调用方可区分的失败结果或受控异常，并且日志不得输出正文。
-3. `BlogPage.from_serializable_data()` 检测到 Revision 含 `mongo_draft_pointer` 键时，只从该指针恢复正文；读取失败时抛出稳定的历史正文不可用错误，不得回退到 `mongo_content_id` 的当前正式内容。空字符串指针同样属于损坏 Revision，而不是无指针旧数据。
-4. 没有 `mongo_draft_pointer` 的遗留 Revision 由 Wagtail 从该 Revision 的 MySQL JSON body 还原，不能覆盖成当前正式 Mongo 正文。
-5. 编辑页“最新草稿”与历史预览使用相同边界：最新 Revision 明确带指针但正文不可用时阻止表单初始化；存在无指针 Revision 时保留其既有 MySQL body/空状态，只有从未保存 Revision 的页面才可读取正式 Mongo 内容。管理端受控错误页只处理历史/恢复路径，保证不误显示、不误保存。
-
-#### 40.3 验收与回滚
-
-- ObjectId 指针仍能读取同一份 Revision 正文。
-- 字符串 `_id` 指针能读取其对应快照，且不尝试 ObjectId 转换。
-- 有指针但快照不存在或无正文时，`Revision.as_object()` 明确失败；不得返回正式 Mongo 正文。
-- 无指针的历史 Revision 保持其 MySQL 历史正文，不读取当前正式 Mongo 正文。
-- 必须运行目标单元测试、`compileall`、`python manage.py check`、`git diff --check`；不执行 Mongo 删除、恢复、迁移或生产操作。
-- 回滚为还原上述两个运行时文件和定向测试；本批不产生 schema 或数据变更。
-
-#### 40.4 模型/推理强度实际调度
-
-- `gpt-5.6-sol` 高推理：只读复核 Wagtail Revision 契约、跨库边界和错误传播，禁止编辑。
-- `gpt-5.6-terra` 高推理：实现 Mongo 读取器这一单文件边界，遵守运行时代码中文注释与类型门禁。
-- `gpt-5.6-luna` 中推理：只读盘点现有测试夹具、验证命令和回归场景。
-- 主 agent：集成 `models.py` 行为、审查 diff、执行 WSL2 定向测试并维护实施记录。若发现 Wagtail 8 异常处理要求变更 URL/视图或需要迁移、删除/修复 Mongo 数据，则停止本批并升级为 `sol` 高推理专项方案。
-
-### 41. M1/P0 实施记录：历史 Revision 正文读取修复（2026-08-28）
-
-- 状态：完成测试环境代码实现和只读后台验收；未执行存量数据修复、Mongo 删除、迁移、发布或生产操作。
-- 实际修改文件：`wagtailblog3/mongo.py`、`wagtailblog3/apps/blog/models.py`、`wagtailblog3/apps/blog/middleware.py`、`wagtailblog3/templates/blog/admin/revision_body_unavailable.html`、`wagtailblog3/apps/blog/test_mongo.py`、`wagtailblog3/apps/blog/test_revision_body_errors.py`、`wagtailblog3/apps/blog/test_markdown_compat.py`、`wagtailblog3/apps/search/tests/test_lifecycle_baseline.py` 和本说明书。
-- 读取器：支持 BSON ObjectId、ObjectId 字符串和历史字符串 `_id`；将历史 Mongo `body` 的合法 JSON 字符串规范化为列表，空列表仍是合法历史正文。空/损坏指针、快照缺失、缺 body、非法 JSON、非列表正文和 Mongo 不可用均提供稳定 code 与是否可重试标记；日志不记录正文或指针。
-- Revision 边界：带 `mongo_draft_pointer` 键的 Revision（包括空字符串）只能读取该快照；校验快照 `page_id` 归属和块结构，失败时禁止读当前正式正文。无指针 Revision 保留 Wagtail/MySQL 历史 body，不被当前正式 Mongo 正文覆盖。编辑表单按同一规则拒绝损坏最新草稿，避免空正文保存。
-- 管理端：Wagtail 8.0 核心预览、比较和恢复没有捕获该领域异常，因此项目中间件仅在后台页面路径将不可恢复故障转换为 HTTP 409、Mongo 暂不可用转换为 HTTP 503；模板使用 `role="alert"`、返回历史链接和可重试提示。该响应在构造 Revision 对象阶段中断，POST 恢复不会进入保存流程。
-- 测试：WSL2 `wagtailblog-test` 执行 `python manage.py test --keepdb blog.test_mongo blog.test_revision_body_errors blog.test_markdown_compat search.tests.test_lifecycle_baseline`，60 项通过。认证管理员的真实 Wagtail 后台预览、比较和恢复 POST 在缺失快照时均返回 409，恢复 POST 前后 Revision 数量不变。预期模拟错误会产生分类日志；测试环境仍有 MySQL 不支持条件唯一约束的既有 `WorkflowState` 警告。
-- 其他门禁：`python manage.py check` 为 0 问题；`python manage.py makemigrations --check --dry-run` 为 `No changes detected`；目标文件 `compileall`、`git diff --check` 和 `git diff --cached --check` 通过。`python manage.py migrate --plan` 仅列出测试环境既有、未应用的 `wagtailcore.0098_apitoken`，本批未执行 `migrate`。认证后台集成测试通过 `STORAGES` 临时切换到开发静态存储渲染受控错误页，未执行 `collectstatic`。新增文件和本说明书没有行尾空白；`models.py`、`mongo.py` 原有行尾空白未顺手格式化，且 diff 门禁未报告本批新增行问题。
-- 浏览器验收：使用 `browser-skill` 仅访问 `/admin/pages/544/revisions/947/view/`。修复前该历史版本显示受控 409；兼容历史 JSON 字符串正文后，预览显示该快照的“先保存草稿”，未显示当前正式正文。未点击恢复、发布、取消发布、编辑、保存或删除；session 已停止，未生成 Playwright 产物。
-- 数据与服务影响：测试仅使用 Django 测试数据库和内存 Mongo 替身；没有写入测试真实 Mongo 正文、Redis、Elasticsearch、MinIO 或生产环境。没有迁移、搜索重建、Celery 投递、systemd 变更或服务重启，`systemctl.md` 无需更新。测试开发服务器仅用于验收，地址为 `http://192.168.20.5:8080`。
-- Git 与回滚：工作区未提交；本批可通过还原上述运行时文件、模板和测试回滚，不涉及 schema 或数据回滚。
-- 残余风险：单条 Revision 删除和页面删除仍会直接处理 Mongo 指针，尚未解决共享 pointer 与跨库事务风险；不可变正文版本、Workflow/预约发布 generation、Outbox 对账、搜索投影和历史页面正文不可用的运营告警仍在后续 M2+ 工作包，不能因本批读取修复而视为完成。
-
-### 42. M2/WP1 删除清理意图与跨库回收（2026-08-28）
-
-#### 42.1 目标与边界
-
-本批只处理 BlogPage、Wagtail Revision 删除时的 Mongo 清理一致性，不改变正文读取、发布、搜索投影或 Wagtail 历史页面协议。删除请求必须先在 MySQL 事务中记录可审计、可重试的 cleanup intent；事务回滚时不得触碰 Mongo，事务提交后才允许异步消费者执行物理删除。
-
-#### 42.2 清理意图契约
-
-每条意图至少包含 `intent_id`（幂等键）、`page_id`、`revision_id`（可空）、`mongo_id`、`kind`（page/revision）、`status`（pending/running/succeeded/failed）、`attempts`、`next_attempt_at`、错误分类和时间戳。页面删除为页面正文与该页历史快照分别记录意图；Revision 删除只记录其指针。写入使用 `transaction.on_commit` 唤醒既有 maintenance 队列，唤醒失败不影响已提交意图。
-
-#### 42.3 引用保护与幂等
-
-消费者删除前必须重新查询 MySQL：只有当目标 Mongo 指针不再被正式页面、任一 Revision、备份或其他保留引用使用时才物理删除。共享 pointer 只能在最后一个引用消失后回收。重复消费、超时重试和“已不存在”均收敛为成功；Mongo 暂不可用保留 pending/failed 并按退避重试，不能删除 MySQL 历史记录来掩盖失败。
-
-#### 42.4 Wagtail 8.0 删除顺序
-
-`pre_delete` 仅登记意图，不进行 Mongo I/O；页面和 Revision 的 MySQL 删除继续由 Wagtail 管理。级联删除产生的多个意图使用稳定幂等键去重。单 Revision 删除、页面删除和子树级联都必须覆盖；外层事务回滚测试需证明 Mongo mock 未收到删除调用。消费者完成后保留审计结果，后续再接入统一 GC/监控。
-
-#### 42.5 实施记录
-
-- 状态：M2/WP1 实施中；先完成模型/服务/信号与定向测试，再评估是否需要迁移和 maintenance worker 接入。
-- 不执行：不应用迁移、不删除真实 Mongo 数据、不投递生产队列、不重启服务、不修改 `systemctl.md`，除非后续明确授权且完成备份、影响评估和回滚演练。
-- 验收门禁：定向删除生命周期测试、`python manage.py check`、`makemigrations --check --dry-run`、`compileall`、`git diff --check`；若新增表只生成迁移并检查 `migrate --plan`。
-
-### 43. M2/WP1 实施记录（2026-08-28）
-
-- 状态：测试环境代码实现完成，未提交、未发布；未应用迁移。新增 `blog.MongoCleanupIntent` 及迁移 `0029_mongo_cleanup_intent.py`，页面/Revision 删除信号只写意图，事务提交后唤醒 `maintenance` 任务。
-- 实际修改：`blog/models.py`、`blog/signals.py`、`blog/tasks.py`、`mongo.py`、`blog/test_mongo_cleanup_intent.py` 及本说明书。页面删除方法已移除提交后的同步 Mongo I/O；Revision 查询按 Wagtail 8.0 GenericRelation 的 `content_type/object_id` 契约处理。
-- 清理语义：意图按目标 pointer 去重；worker 在删除前检查正式页面引用和 BlogPage Revision 指针引用，共享指针转为 RETRY 并延迟重试；Mongo 异常进入 RETRY/DEAD，字符串 `_id` 与 ObjectId 均可删除，已不存在按幂等成功处理。
-- 验证：WSL2 `wagtailblog-test` 执行 `python manage.py test --keepdb blog.test_mongo blog.test_revision_body_errors blog.test_markdown_compat blog.test_mongo_cleanup_intent search.tests.test_lifecycle_baseline`，64 项通过；`python manage.py check`、`makemigrations --check --dry-run`、目标 `compileall` 和 `git diff --check` 通过。测试环境保留既有 `WorkflowState` 条件唯一约束警告。
-- 数据/服务影响：未写入真实 Mongo 正文、Redis、Elasticsearch 或生产数据；未执行 `migrate`、Mongo 删除、搜索重建、Celery 生产投递、systemd 修改或服务重启，`systemctl.md` 无需更新。迁移仅生成，待独立授权后在目标环境应用。
-- 未覆盖与风险：当前仍缺少统一 Beat 扫描 RETRY 意图、严格 lease/并发 claim、备份引用表和生产级 GC 审计；worker 的 Python 解析会随 Revision 总量增长，后续需索引化元数据或独立引用表。上述不阻塞本批删除安全边界，但在生产启用异步清理前必须补齐并压测。
-- 回滚：在未应用 `0029` 前可删除本批代码/迁移并恢复原信号；若未来已应用迁移，回滚只允许停止消费者并保留意图表，不删除 Mongo 正文或历史快照。
-
-### 44. M2B 清理任务补偿与租约实施记录（2026-08-28）
-
-- 状态：完成测试环境实现；在 `0029` 基础上新增未应用迁移 `0030_mongocleanupintent_leases`。本批复用现有 maintenance Worker 和 Beat，不新增队列、unit、端口或环境文件。
-- 实际修改：`blog/models.py`、`blog/tasks.py`、`blog/test_mongo_cleanup_intent.py`、`settings/database.py`、`systemctl.md`、迁移 `0030` 及本说明书。意图新增 `processing`、owner、到期租约和回收计数；任务使用 MySQL 行锁认领，并只允许匹配 owner 的 worker 写回结果。
-- 补偿：`dispatch_pending_mongo_cleanup_retries` 每 60 秒只扫描到期 `pending/retry` 意图，投递到 maintenance；同时回收崩溃 worker 遗留的过期租约。Broker 唤醒异常只记日志，下一次 Beat 扫描补偿，不回滚已经提交的删除意图。
-- 验证：WSL2 `wagtailblog-test` 执行 `python manage.py test --keepdb blog.test_mongo_cleanup_intent blog.test_mongo blog.test_revision_body_errors blog.test_markdown_compat search.tests.test_lifecycle_baseline`，67 项通过；`check`、`makemigrations --check --dry-run`、目标 `compileall`、`git diff --check` 和 `git diff --cached --check` 通过。
-- 数据/服务影响：未应用 `0029/0030`、未运行真实 Celery worker/Beat、未删除测试或生产 Mongo 数据、未变更服务状态。`systemctl.md` 已补充未来部署时的 Worker 注册、Beat 日志、依赖、重启和回滚门禁。
-- 回滚与风险：发布前可直接放弃未应用迁移和代码；已应用后先停止/回退 Worker 与 Beat，并保留所有意图审计行和 Mongo 正文。若 Mongo 物理删除成功而 MySQL owner 状态写回失败，租约到期后可能再次调用删除接口，依赖 Mongo 的“已不存在即幂等成功”语义；高吞吐量下 Revision TextField 逐行解析引用仍需在后续版本化引用表工作包中替换。
-
-### 45. M3/P1 不可变正文版本兼容层（2026-08-28）
-
-#### 45.1 目标、非目标与执行边界
-
-目标是建立 BlogPage 的不可变 Mongo 正文版本身份，并让新的 Wagtail Revision 携带可审计的版本元数据。新正文版本不得原地覆盖；同一正文内容在同一页面重复保存时可按哈希复用同一版本。M3 不增加 BlogPage MySQL 列，版本指针、哈希和 schema 元数据暂存于 Revision JSON；旧 `mongo_content_id` 与旧读路径在兼容期保留。
-
-本批不切换 `published_body_version_id`、不改变 `BlogPage.publish()`/Workflow/预约发布时序、不推进 `publication_generation`、不改搜索 Outbox payload、不回填或删除存量 Mongo 正文，不应用迁移。上述发布编排属于 M4，公开搜索投影属于 M5。
-
-#### 45.2 最小设计
-
-新 Mongo 集合 `content_body_versions` 按 `(aggregate_type, aggregate_id, body_sha256, body_schema_version)` 唯一保存 `body_version_id`、`body_sha256`、`body_schema_version`、正文和创建时间；`body_version_id` 另设全局唯一索引。仓储必须使用 insert-once/幂等读取，禁止 `$set` 修改既存版本。BlogPage 新建草稿 Revision 时写入 `mongo_body_version_id`、`body_sha256`、`body_schema_version`，且 `from_serializable_data()` 优先读取该版本；旧 Revision 继续使用 `mongo_draft_pointer`。
-
-本批只允许新字段双写与双读影子校验：新版本写入失败不得静默把错误版本伪装为正式正文；旧页面继续依赖 `mongo_content_id`。版本化正文的正式公开切换必须等待 M4 在 MySQL 事务和 Outbox 中实现。
-
-#### 45.3 分工、模型与验证
-
-- `arch/review`：`gpt-5.6-sol` 高推理，只读复核 Mongo 幂等键、Wagtail Revision 契约、并发和回滚边界。
-- `backend`：`gpt-5.6-terra` 中高推理，实现独立版本仓储、BlogPage 双写/双读和隔离测试；开始前阅读第 22 号代码注释方案。
-- `qa/data`：优先 `gpt-5.6-luna` 中推理盘点测试矩阵、迁移计划和无存量数据操作证据；不可用时由主 agent 完成等价只读检查。
-- 门禁：版本仓储不变性、同内容幂等、不同内容生成独立版本、Revision 往返、旧 pointer 兼容、Mongo 故障和 MySQL 回滚测试；`check`、`makemigrations --check --dry-run`、`migrate --plan`、`compileall`、`git diff --check`。
-
-#### 45.4 回滚与残余风险
-
-未应用迁移前可停止新双写并保留旧 `mongo_content_id` 读路径；Mongo 新版本仅会形成安全孤儿，禁止在本批回收。已应用迁移后的回滚只停用新写/读开关并保留版本文档和指针，不得回写旧正文。生产数据回填、Mongo 分片、保留期 GC、公开指针、Workflow、定时发布、Outbox generation 和搜索消费者契约均需后续独立授权。
-
-### 47. M4.1 发布候选状态与正文校验实施记录（2026-08-28）
-
-- 状态：完成最小兼容层实现，未接入 `Revision.publish`、Workflow、定时发布或搜索消费者；未提交、未发布、未应用迁移。
-- 实际修改：新增 `blog.BlogPublicationState` 及迁移 `0031_blogpublicationstate.py`；新增 `blog.services.publication.BlogPublicationService.lock_and_validate_revision`，在 MySQL 事务内锁定页面和 Revision，从 Revision JSON 提取 `mongo_body_version_id`、`body_sha256`、`body_schema_version`，调用 Mongo 版本读取接口并校验正文；新增 `blog/test_publication_service.py` 覆盖元数据缺失、Mongo 版本缺失、成功写入和外层事务回滚。
-- 状态字段：保存 draft/published 正文版本三元组、`publication_generation`（本批不递增）及 approved Revision 元数据；不保存正文内容，不替换 Wagtail 正式发布指针。
-- 验证：`python manage.py test --keepdb blog.test_publication_service blog.test_mongo_body_versions blog.test_markdown_compat blog.test_mongo blog.test_revision_body_errors blog.test_mongo_cleanup_intent search.tests.test_lifecycle_baseline` 共 78 项通过；`check`、`makemigrations --check --dry-run`、目标 `compileall`、`git diff --check` 和 `git diff --cached --check` 通过。`migrate --plan` 仅查看计划，未执行迁移。
-- 数据/服务影响：未写入真实 MongoDB、MySQL 业务数据、Redis、Elasticsearch 或消息队列，未重启服务；迁移 `0031` 需后续独立授权和备份后应用。
-- 回滚边界与残余风险：应用迁移前可删除本批代码和迁移；应用后回滚需先停用调用方并保留状态表。正式发布指针切换、generation 并发围栏、Workflow/定时发布协调、Outbox 与版本 GC 留待后续 M4/M5。
-
-### 48. M4.2 BlogPage 发布前正文校验实施记录（2026-08-28）
-
-- 状态：完成普通 `BlogPage.publish(revision, ...)` 的前置校验，未接入 Workflow、定时发布、`page_published`、Search Outbox 或正式正文指针切换；未提交、未发布、未应用迁移。
-- 实际修改：`BlogPage.publish` 在 `super().publish` 前调用 M4.1 发布服务；复用 `blog.models.MongoManager` 注入边界，确保生命周期测试替身与页面保存使用同一 Mongo 适配器。校验失败直接抛出，Wagtail 页面发布字段不会被修改。
-- 验证：`blog.test_publication_service` 7 项通过，联合 `search.tests.test_lifecycle_baseline` 与 `search.tests.test_search_sync_producer` 共 24 项通过；覆盖普通发布成功、Mongo 正文缺失时页面/Revision/状态不变及外层事务回滚。`check`、迁移检查、`compileall`、`git diff --check` 通过。
-- 数据/服务影响：未写入真实业务数据，未执行 `migrate`、Celery、搜索投影或服务重启；迁移计划仍仅包含待授权的 `0029`-`0031`。
-- 回滚边界与残余风险：删除本批 `BlogPage.publish` 接入即可回到 M4.1；正式指针和 generation 尚未切换，Wagtail `Revision.publish` 在 `as_object` 阶段仍可能先触发历史正文读取异常，Workflow/定时发布尚需复用同一校验契约。
-
-### 46. M3/P1 实施记录（2026-08-28）
-
-- 状态：完成测试环境兼容层实现，未提交、未发布、未应用迁移。
-- 模型实际使用：架构复核由 `gpt-5.6-sol` 高推理完成；实现由 `gpt-5.6-terra` 高推理完成；主 agent 负责契约修正、测试集成和最终门禁。未调用外部模型传输源码、凭据或生产数据。
-- 实际修改：`wagtailblog3/mongo.py` 新增 `content_body_versions` 插入一次仓储、规范化 JSON SHA-256、聚合身份/哈希/schema 唯一索引和严格读取校验；`wagtailblog3/apps/blog/models.py` 的 Revision 序列化双写 `mongo_body_version_id`、`body_sha256`、`body_schema_version`，反序列化和后台编辑表单优先读取不可变版本，旧 `mongo_draft_pointer` 保持兼容；新增 `blog/test_mongo_body_versions.py` 隔离测试，并为搜索生命周期测试替身补齐同一版本仓储契约。
-- 验证：WSL2 `wagtailblog-test` 执行 M3/M1/M2/生命周期综合测试 74 项通过；新增 schema 版本隔离和后台表单新版本优先读取覆盖；`python manage.py check`、`makemigrations --check --dry-run`、目标 `compileall` 和 `git diff --check` 通过。
-- 数据/服务影响：未写入真实 Mongo/MySQL/Redis/Elasticsearch，未执行迁移、搜索重建、Celery 投递或 systemd 操作；本批无 MySQL schema 变化，不生成迁移。
-- 回滚与残余风险：可停用新字段双写/读取并保留旧指针路径；已插入的不可变版本只能作为安全孤儿保留，禁止本批 GC。正式发布指针、Workflow/定时发布 generation、搜索投影和版本引用索引仍属于 M4/M5，未在本批解决。
-
-### 49. M4.3 Wagtail 8.0 Workflow 审批 Revision 围栏实施记录（2026-08-28）
-
-- 状态：完成测试环境 Workflow 完成动作接入与审批 Revision 二次校验，未执行生产 Workflow 配置、迁移、发布或服务重启。
-- 架构事实：Wagtail 8.0 默认 `publish_workflow_state` 会读取页面最新 Revision；审批完成后若产生新草稿，可能绕过已审批正文。本批通过 `WAGTAIL_FINISH_WORKFLOW_ACTION` 指向 `blog.services.publication.finish_workflow_action`，在 `WorkflowState.finish()` 的事务内锁定 WorkflowState，读取最终成功 TaskState 绑定的 Revision，并拒绝其与页面最新 Revision 不一致。
-- 正文校验：完成动作调用 `BlogPublicationService.lock_and_validate_revision`，重新校验 `mongo_body_version_id`、SHA-256、schema 版本及 Mongo 正文归属；成功后仅发布精确审批 Revision，并保存 approved Revision 与正文版本元数据。正文缺失、篡改或 Revision 漂移会抛出受控异常，事务回滚且不切换正式页面。
-- Wagtail 边界：`workflow_approved` 仍只作为通知/对账触发点，不承担 Mongo 写入；BlogPage 未新增继承层，复用 Wagtail 8.0 已提供的 WorkflowMixin 能力。非 BlogPage Workflow 继续回退 Wagtail 默认完成动作。
-- 实际修改文件：`wagtailblog3/settings/base.py`、`wagtailblog3/apps/blog/services/publication.py`、`wagtailblog3/apps/blog/models.py`、`wagtailblog3/apps/blog/migrations/0031_blogpublicationstate.py`、`wagtailblog3/apps/blog/test_publication_service.py`、`wagtailblog3/apps/blog/test_workflow_publication.py` 及本说明书。迁移文件仅生成，未应用。
-- 验证：WSL2 `wagtailblog-test` 执行 Workflow/发布定向测试 10 项通过；M1-M4.3 与搜索生命周期综合测试 91 项通过。`python manage.py check` 通过；`makemigrations --check --dry-run` 输出 `No changes detected`；`migrate --plan` 仅查看计划；`python -m compileall -q wagtailblog3` 和 `git diff --check` 通过。测试中保留 Wagtail `WorkflowState` 条件唯一约束的 MySQL 警告。
-- 数据与服务影响：未写入真实业务 MySQL/MongoDB、Redis、Elasticsearch、MinIO 或消息队列；未运行真实 Celery/Beat，未修改 `systemctl.md` 服务单元。测试使用隔离数据库和内存 Mongo 替身。
-- 回滚边界与残余风险：未应用迁移前可移除完成动作配置和新增服务逻辑，恢复默认 Wagtail Workflow 行为；若未来应用 `0031`，回滚必须先停用调用方并保留状态表。预约发布仍需单独验证 Workflow 关联和精确 Revision；公开正文指针切换、`publication_generation`、Search Outbox 幂等字段、审批后编辑自动重新审核和版本 GC 尚未完成。
-- 模型/推理实际调度：`gpt-5.6-sol` 高推理完成 Wagtail 8.0 Workflow/事务边界复核；`gpt-5.6-terra` 高推理实现完成动作与服务接入；`gpt-5.6-luna` 中推理盘点测试矩阵与门禁；主 agent 修正并发编辑错误、补齐迁移字段、集成测试并执行最终验证。Context7 未提供 Wagtail 8.0 准确资料，本批以测试 Conda 环境中实际安装的 Wagtail 8.0 源码为准。
-
-### 50. M4.4 Wagtail 8.0 定时发布 Revision 校验实施记录（2026-08-28）
-
-- 状态：完成测试环境定时发布前置校验，未执行真实 `wagtail publish_scheduled`、迁移、生产发布或服务重启。
-- Wagtail 8.0 定时命令按 `Revision.approved_go_live_at < now` 查询并调用该 Revision 的 `publish(log_action="wagtail.publish.scheduled")`。BlogPage 对该日志动作增加到期标记校验，再复用 M4.1 的 Mongo 不可变正文版本校验。
-- 定时发布允许指定 Revision 不是页面最新 Revision，以保持 Wagtail 预约发布语义；页面存在更新草稿时仍只发布已批准且已到期的 Revision，不自动改发最新草稿。
-- 未批准、未到期、Mongo 正文缺失或版本元数据损坏时，发布在 Wagtail 切换页面前失败，正式页面状态保持不变。重复执行依赖 Wagtail 到期标记被清理后的既有幂等行为；跨服务搜索投影幂等留待 M4.5。
-- 实际修改：`wagtailblog3/apps/blog/models.py`、`wagtailblog3/apps/blog/services/publication.py`、`wagtailblog3/apps/blog/test_publication_service.py` 及本说明书。未新增模型字段或迁移。
-- 验证：定向发布/Workflow/正文/清理/搜索生命周期测试 43 项通过；`check`、`makemigrations --check --dry-run`、`compileall`、`git diff --check` 通过；`migrate --plan` 仅查看，未应用 0029-0032。
-- 模型/推理实际调度：架构复核使用 `gpt-5.6-sol`（外部服务本轮不可用，结论以测试 Conda 中 Wagtail 8.0 源码为准）；实现使用 `gpt-5.6-terra` 高推理；QA 由主 agent 按既定 `gpt-5.6-luna` 场景完成回归。未向外部工具发送源码、凭据或生产数据。
-- 回滚与残余风险：移除定时日志动作分支即可恢复 M4.3 行为；若未来启用生产定时任务，必须先确认迁移已应用、Mongo 可用、任务失败重试与 Outbox 补偿策略。定时发布与 Workflow 审批关联尚未建立强制约束，Search Outbox generation、正式指针切换和版本 GC 仍未实施。
-
-### 51. M4.5 Search Outbox 正文版本与公开代际围栏实施记录（2026-08-28）
-
-- 状态：完成测试环境搜索事件的兼容扩展，未应用迁移、未重建 Elasticsearch、未切换生产 alias、未操作生产数据或服务。
-- 数据契约：`ContentSearchState` 与 `ContentSearchOutbox` 新增可空 `body_version_id`、`publication_generation`；保留原 `content_version`、`mongo_content_id` 和 `content_hash`。新增迁移 `search.0006_contentsearch_generation_fields` 仅包含扩展字段，未回填存量事件。
-- 生产者：发布/取消发布/删除事件优先读取 `BlogPublicationState.published_body_version_id` 与 `publication_generation`；状态不存在或尚未切换时显式回退旧字段，不伪造新的正文版本身份。墓碑事件同样携带可用代际和正文身份，但不包含正文。
-- 消费者：Delivery 在读取 State 和 ES 写入前同时比较正文版本身份与公开代际；旧事件、缺失身份事件不能覆盖已有新代际，旧代际标记 `SUPERSEDED`，未来代际进入重试。ES external version 优先使用 `publication_generation`，为空时兼容 `content_version`。
-- 索引与重建：正式搜索文档、墓碑、mapping 字段白名单、批量重建和只读一致性检查均携带新字段；旧索引/旧文档缺失字段按兼容路径处理，不把旧数据猜测为新正文版本。新 mapping 版本为 `v003`，需后续通过独立索引构建和 alias 切换流程启用。
-- 实际修改：`wagtailblog3/apps/search/models.py`、`services/outbox.py`、`services/delivery.py`、`services/document.py`、`services/elasticsearch.py`、`services/content_index.py`、`services/rebuild.py`、`services/consistency.py`、`migrations/0006_contentsearch_generation_fields.py`、搜索测试替身和 `tests/test_search_generation.py`。
-- 验证：新增代际测试、内容索引和 ES 单元测试共 31 项通过；`python manage.py check`、`makemigrations --check --dry-run`、`compileall`、`git diff --check` 通过；`migrate --plan` 仅查看并列出待授权的 blog.0029-0032 与 search.0006。完整旧搜索回归未在持久 `--keepdb` 库执行，原因是共享库尚未包含新列；尝试临时测试库时发现同名数据库已存在且 Django 需要交互确认，未删除或重建该库。
-- 模型/推理实际调度：`gpt-5.6-sol` 高推理完成搜索幂等、代际和回滚边界审查；`gpt-5.6-terra` 高推理实现跨 State/Outbox/Delivery/ES 链路；`gpt-5.6-luna` 原计划 QA 因协作服务异常未完成，主 agent 执行新增测试与门禁。未向外部模型传输源码、凭据、正文或生产日志。
-- 回滚与残余风险：应用迁移前可停止新字段双写和消费者围栏，保留旧 `content_version` 路径；应用迁移后回滚需保留新增列和 Outbox 审计，先停新消费者并回切旧索引 alias，禁止删除 Mongo 正文。正式 `published_body_version_id`/generation 切换、ES 新索引构建、历史事件回放、生产容量压测和版本 GC 仍未完成。
-
-### 52. M4.6 发布后一致性、取消发布墓碑与只读对账（2026-08-28）
-
-- 状态：完成测试环境第一子批，先建立发布后 State/Outbox 同事务集成测试，再实现正式正文指针代次推进、取消发布 tombstone 和只读对账命令；未执行迁移、自动修复、索引重建或生产操作。
-- 发布事务：`BlogPage.publish()` 在外层 MySQL 事务中先校验 Revision 的 Mongo 正文版本，再递增 `BlogPublicationState.publication_generation` 并写入 `published_body_version_id/hash/schema`，随后进入 Wagtail 发布和 `page_published` 信号。信号内读取到的 State 与 Outbox 必须具有相同正文版本和 generation；事务回滚时两者均不可见。
-- 取消发布：取消发布前保留当前正文身份并递增 generation，使 tombstone 携带最新代次；Wagtail 页面取消发布完成后再清空 `published_body_version_id/hash/schema`。这样搜索消费者可先处理墓碑，避免“已发布可搜、取消发布仍可搜”的窗口。
-- 只读对账：新增 `blog_publication_consistency_check` 命令及服务，按 `BlogPublicationState.page_id` 游标扫描，关联 BlogPage、live Revision、ContentSearchState、最新 Outbox，并可只读校验 Mongo `content_body_versions`。只输出计数和有限 ID 样本，发现异常不自动选草稿、不修改任何表或外部系统。
-- 实际修改：`wagtailblog3/apps/blog/models.py`、`apps/blog/services/publication.py`、新增 `apps/blog/services/publication_consistency.py`、新增 `apps/blog/management/commands/blog_publication_consistency_check.py`、`apps/search/tests/test_search_sync_producer.py` 及本说明书。
-- 验证：发布/Workflow/搜索代次/对账相关测试 28 项通过；搜索生命周期测试 8 项通过；`python manage.py check`、`makemigrations --check --dry-run`、`compileall`、`git diff --check` 通过；`migrate --plan` 仅查看，未应用 0029-0032、search.0006。保留 Wagtail 在 MySQL 上条件唯一约束警告。
-- 模型/推理实际调度：`gpt-5.6-sol` 复核 Wagtail 8.0 事务和对账边界；`gpt-5.6-luna` 先行盘点并设计测试建议；主 agent 按建议先补集成断言，再由 `gpt-5.6-terra` 实现搜索字段扩展后的发布指针、tombstone 和只读对账。
-- 回滚与残余风险：未应用迁移前可移除指针推进和对账命令，保留 M4.5 旧字段路径；若未来应用迁移，回滚必须保留 State/Outbox/对账数据，先停消费者并回退索引 alias。当前对账仅扫描已有 `BlogPublicationState` 行，尚不能发现“完全缺失状态行”的页面；Mongo/ES/Redis 仍不参与 MySQL 原子事务，正式指针切换与 GC 仍需后续压测和生产授权。
-
-### 50. M4.4 Wagtail 8.0 定时发布 Revision 精确校验（2026-08-28）
-
-- 状态：完成测试环境定时发布前置校验，未接入搜索 Outbox、正式正文指针切换、Celery/Beat 生产任务或服务重启。
-- 架构事实：Wagtail 8.0 `publish_scheduled` 管理命令按 `Revision.approved_go_live_at` 到期条件查询 Revision，再调用 `Revision.publish(log_action="wagtail.publish.scheduled")`。页面可在排期后产生更新草稿，因此定时执行不能强制要求排期 Revision 是页面最新 Revision；必须以调度器传入的 Revision 为准。
-- 实际修改：`BlogPage.publish` 识别 `wagtail.publish.scheduled` 调用，要求传入 Revision 已有 `approved_go_live_at` 且已到期；随后继续复用 M4.1 发布服务锁定页面/Revision 并严格校验 Mongo `body_version_id`、SHA-256、schema 和正文归属。未到期或没有 Wagtail 审批标记时在 Wagtail 修改页面前失败。
-- 验证：新增排期 Revision 已到期且存在更新草稿时仍发布原排期版本、缺少审批标记拒绝、尚未到期拒绝三项测试；`blog.test_publication_service` 共 11 项通过。排期校验不改变普通即时发布和 Workflow 完成路径。
-- 数据/服务影响：未应用 `0029`-`0032` 迁移，未写入真实 MySQL/MongoDB、Redis、Elasticsearch 或消息队列，未运行真实 `publish_scheduled`、Celery/Beat，未修改 `systemctl.md`。
-- 回滚与残余风险：未应用迁移前可移除定时校验函数和 `BlogPage.publish` 分支，恢复 Wagtail 默认排期行为；若未来启用生产排期，仍需补充排期取消/重排、重复执行幂等、Mongo 暂不可用重试和发布后 Outbox 对账。`page_published`、Search Outbox generation 与公开正文指针切换留待 M4.5/M4.6。
-
-### 51. M4.5 搜索 Outbox 正文身份与公开代际围栏（2026-08-28）
-
-- 状态：完成测试环境兼容实现，未应用迁移、未创建或切换 Elasticsearch 索引、未运行生产消费者。
-- 实际修改：`search` State/Outbox 新增可空 `body_version_id` 与 `publication_generation`；producer 从 `BlogPublicationState` 读取已提交正文身份并写入事件；delivery 在 State、正文投影和 ES 写入前校验身份，旧事件只允许标记 superseded/retry，不得覆盖新代际；重建、mapping、只读一致性检查和 ES mget/scan 均携带新字段。保留 `content_version` 作为旧事件兼容版本。
-- ES 语义：当事件含 `publication_generation` 时使用该值作为 external version；旧事件继续使用 `content_version`。正文身份字段为不可搜索的审计元数据。新索引 mapping 仍需通过后续在线重建发布，未修改真实 alias。
-- 迁移：新增未应用 `search.0006_contentsearch_generation_fields`，四列均可空，允许旧事件/存量 State 平滑过渡。
-- 验证：目标搜索索引、ES 读写、重建、一致性和代际围栏测试通过；`python manage.py check` 通过；`makemigrations --check --dry-run` 输出 `No changes detected`；`migrate --plan` 仅查看并包含 `search.0006`；`compileall` 与 `git diff --check` 通过。测试环境保留既有 Wagtail 条件唯一约束警告。
-- 数据/服务影响：未写入真实 MySQL/MongoDB/Elasticsearch/Redis，未执行迁移、重建、Celery、Beat 或 systemd 操作；`systemctl.md` 无需更新。
-- 回滚与残余风险：应用迁移前可移除新字段读写与 `0006`；应用后回滚应先停消费者并保留字段。当前 BlogPage 发布状态尚未在同一事务内递增 `publication_generation`/切换 `published_body_version_id`，因此新代际字段在存量页面上仍可为空；正式指针切换和事件补偿属于 M4.6。
-- 模型/推理实际调度：架构边界由 `gpt-5.6-sol` 高推理复核；搜索后端实现由 `gpt-5.6-terra` 高推理完成；测试替身与回归由 `gpt-5.6-luna` 中推理覆盖；主 agent 负责兼容性修正和门禁。未向外部模型发送源码、凭据或正文数据。
-- 模型/推理实际调度：`gpt-5.6-sol` 负责 Wagtail 8.0 调度源码与旧排期 Revision 兼容边界复核（外部模型本轮不可用时由本地源码核对）；`gpt-5.6-terra` 负责后端实现；`gpt-5.6-luna` 负责定向测试矩阵；主 agent 负责集成与门禁。
-### 53. M4.6 第二子批：BlogPage 全量对账与只读调度（2026-08-28）
-
-- 状态：完成测试环境实现，未应用迁移、未执行自动修复或生产操作。
-- 对账游标：`check_blog_publication_consistency` 改为以 `BlogPage.pk` 为主游标，按批次一次读取页面、`BlogPublicationState`、live Revision、搜索状态和 Outbox；页面存在而状态行缺失时报告 `state_missing`，状态行无页面时继续报告 `page_missing`。`next_after_page_id` 基于页面批次末尾，避免 N+1 查询。
-- 并发边界：`BlogPage.unpublish()` 先锁页面再锁 `BlogPublicationState`，与发布路径保持 Page→State 锁序；取消发布继续在同一 MySQL 事务中推进 generation、写 tombstone 并清空正式指针。
-- 只读任务：新增 `blog.tasks.check_publication_consistency`，限制单轮扫描量、仅记录计数并返回游标；业务数据不写入 MySQL、MongoDB、Elasticsearch、Redis 或 Outbox，周期模式只维护独立 checkpoint 元数据；Beat 每 300 秒经 `maintenance` 队列触发。
-- 实际修改：`apps/blog/services/publication_consistency.py`、`apps/blog/models.py`、`apps/blog/tasks.py`、`settings/database.py`、`systemctl.md` 及本说明书。
-- 验证：`blog.test_publication_consistency` 4 项通过；其余全量门禁由主 agent 集成执行。未应用迁移，未写入真实业务数据。
-- 残余风险：对账任务当前跳过 Mongo 读取以控制 maintenance 延迟；Mongo 正文存在性需由人工命令或后续分层任务执行。并发发布仍依赖数据库行锁，未进行多进程压力测试。
-
-### 54. M4.6 第三子批：对账 checkpoint、租约与周期轮转（2026-08-28）
-
-- 状态：完成测试环境实现，未应用迁移、未执行自动修复、未修改真实业务数据或生产服务。
-- 持久化边界：新增独立模型 `BlogPublicationConsistencyCheckpoint`，保存固定 scope、`cursor_page_id`、周期 high-water (`scan_upper_bound_page_id`)、`cycle`、租约、最近批次计数和脱敏错误类型。该表只记录对账进度，不承载发布指针，也不参与 BlogPage 发布、取消发布或 Search Outbox 业务事务。
-- 调度流程：Beat 每 300 秒投递 maintenance 队列。周期任务先用短 MySQL 事务和行锁抢占租约，再在事务外执行有界只读扫描；扫描完成后仅由原 owner 条件更新 checkpoint。达到 high-water 后清零游标、递增 `cycle` 并开始下一轮；新增页面留到下一轮，避免高并发写入造成扫描目标无限后移。有效租约存在时返回 `lease_busy`；异常时释放租约并记录异常类型，避免 maintenance 长期阻塞。
-- 实际修改：`wagtailblog3/apps/blog/models.py`、`apps/blog/migrations/0033_blogpublicationconsistencycheckpoint.py`、`apps/blog/tasks.py`、`apps/blog/services/publication_consistency.py`、`apps/blog/test_publication_consistency.py`、`systemctl.md` 及本说明书；测试根节点缺失的前置兼容修正位于 `apps/blog/test_page_view_admin.py`。
-- 验证：checkpoint 生命周期、租约冲突、异常释放、BlogPage 状态缺失、游标边界和管理命令只读测试已通过；随后执行 `blog` 应用全量回归及最终 Django/迁移计划/编译/空白检查。迁移 `blog.0033` 仅生成并在 `migrate --plan` 查看，未应用。
-- 数据与服务影响：周期任务唯一允许的写入是 checkpoint 元数据；不写 BlogPublicationState、Search State/Outbox、MongoDB、Elasticsearch、Redis 或正文。没有新增 systemd unit，也没有执行 daemon-reload、重启或生产发布。
-- 回滚边界与残余风险：停用 Beat/maintenance Worker 后可恢复到上一已验证代码；保留 checkpoint、State、Outbox 和 Mongo 正文，不执行删除或回填。当前仍未在多进程/高吞吐条件下压测租约与扫描时延；Mongo 正文一致性继续由显式命令或后续分层任务负责；Outbox 最新事件查询的历史扫描成本需在百万级压测后再优化。未来若按主键范围拆分多个 scope，必须为每个 scope 独立 high-water、租约和监控指标。
-- 模型/推理实际调度：`gpt-5.6-sol` 完成 checkpoint 架构与并发边界复核；`gpt-5.6-terra` 完成后端模型、租约和调度实现；`gpt-5.6-luna` 完成测试先行与回归矩阵；主 agent 负责文档边界修正、集成和最终门禁。未向外部模型发送源码、凭据或正文数据。
-
-### 55. M4.6 第四子批：小规模性能基线与边界修正（2026-08-29）
-
-- 状态：完成测试环境实现，未应用迁移、未连接或修改生产库。
-- 边界修正：对账服务在页面批次为空时的 orphan State fallback 同样应用 `upper_bound_page_id`，避免周期结束后把 high-water 之外新产生的 State 误报为 `page_missing`。
-- 查询性能：`ContentSearchOutbox` 增加 `(page_id, content_version, id)` 复合索引（迁移 `search.0007`，仅生成未应用），匹配 latest event 的批量排序；未改变事件语义。按页面聚合最新 Outbox 的窗口/子查询优化暂留后续专项，避免在当前每日十几篇的规模引入数据库兼容性复杂度。
-- 测试基线：新增可控规模测试，覆盖 15 篇日常文章的硬批次上限、high-water 外页面隔离，以及每页有限历史事件仍使用批量 Outbox 查询；不伪造百万条持久数据。
-- 实际修改：`apps/blog/services/publication_consistency.py`、`apps/blog/test_publication_consistency_upper_bound.py`、`apps/blog/test_publication_consistency_scale.py`、`apps/search/models.py`、`apps/search/migrations/0007_contentsearchoutbox_page_version_index.py` 及本说明书。
-- 验证：对账/边界/索引相关定向测试通过；`manage.py check`、`makemigrations --check --dry-run`、`compileall`、`git diff --check` 通过。`migrate --plan` 仅查看，新增 `search.0007` 与此前迁移仍未应用。
-- 生产备份门禁：本批没有生产写操作，因此未执行备份。未来若要应用迁移，必须先获得独立授权，并完成 MySQL 含 schema/triggers/routines 的一致性备份、Mongo 正文/草稿/revision 备份、ES snapshot 及 systemd/env 清单，且先演练恢复。
-- 残余风险与规模判断：当前日均十几篇，按现速达到百万篇需数百年，暂无分库分片必要。应先在测试环境生成 1 万/10 万级合成元数据做 EXPLAIN 和延迟基线；Mongo 正文校验继续作为低频分层任务；多进程租约超时、Outbox 历史事件线性增长和 ES 索引容量仍需专项压测与监控。未执行自动修复、GC、数据回填或生产服务操作。
-- 模型/推理实际调度：`gpt-5.6-sol` 复核 high-water、备份和容量边界；`gpt-5.6-terra` 实现 Outbox 索引；`gpt-5.6-luna` 补充小规模性能/批次测试；主 agent 集成修正、更新文档并执行门禁。未向外部模型发送源码、凭据或正文数据。
-
-### 56. M4.6 第五子批：租约失效与 Wagtail 8.0 排期字符串兼容（2026-08-29）
-
-- 状态：完成测试环境修复，未应用迁移、未连接或修改生产库。
-- 租约围栏：checkpoint 完成写回现在检查条件 `update()` 的影响行数；租约过期或被其他 worker 接管时返回 `lease_lost` 并记录 warning，不再误报 `completed`，游标由当前持有者决定是否推进。
-- 排期兼容：`BlogPage.publish()` 使用统一 `_revision_content()` 解析 Wagtail 8.0 `Revision.content` 的 JSON 字符串/映射值，再判断 `go_live_at`；未来排期只保存草稿状态，不提前切换正式正文指针。测试隔离 Wagtail 核心 `Page.publish()`，避免把项目解析契约与核心反序列化边界混为一谈。
-- 实际修改：`wagtailblog3/apps/blog/tasks.py`、`apps/blog/models.py`、`apps/blog/test_publication_consistency.py`、`apps/blog/test_publication_service.py` 及本说明书；未新增迁移。
-- 验证：发布服务、checkpoint、high-water 和规模基线测试共 26 项通过；`manage.py check`、`makemigrations --check --dry-run`、`compileall`、`git diff --check` 通过。仍保留既有 Wagtail/MySQL 条件唯一约束警告。
-- 尚未完成事项（需独立批次和门禁）：生产迁移 `blog.0029`-`0033`、`search.0006`-`0007`；MySQL/Mongo/ES/systemd 配置备份与恢复演练；低频 Mongo 正文存在性对账；Outbox/Delivery 审计保留和归档；1 万/10 万级合成数据 EXPLAIN、ES 容量和多进程租约压测；生产 Beat/maintenance 监控接入。
-- 生产备份边界：由于本批没有生产操作，未执行备份。未来生产迁移或索引操作前必须先冻结写入、备份 MySQL schema+data/triggers/routines、Mongo 正文/草稿/revision、ES snapshot 和 systemd/env 清单，并完成恢复演练后再取得单独授权。
-- 残余风险：Beat 默认 `check_mongo=False`，Mongo 正文缺失可能不会进入 300 秒快速对账；Outbox 历史事件仍长期增长；租约虽能识别失效，但尚未做多进程超时压力测试。当前日均十几篇，暂不需要分库分片，先观察 1～2 周周期耗时、`lease_lost`、`last_error`、pending/retry 和数据库增长指标。
-- 模型/推理实际调度：`gpt-5.6-sol` 复核生产门禁与 Wagtail 8.0 兼容边界；`gpt-5.6-terra` 完成租约运行时修复；主 agent 完成排期字符串测试适配和集成；`gpt-5.6-luna` 负责回归验证。未向外部模型发送源码、凭据或正文数据。
-
-### 57. 生产迁移准备方案（待单独确认执行）
-
-本节是生产迁移 runbook，不构成当前执行授权。当前工作区存在未提交改动，必须先完成测试、代码审查、精确 commit 和 `origin/main` 推送；生产目录、分支、实际 HEAD、Wagtail 版本、已应用迁移、数据库名、服务名和 alias 必须在维护窗口开始前重新只读核实，不能使用历史记录中的固定值替代现场检查。
-
-#### 57.1 迁移对象与前置门禁
-
-- 本批 Django 迁移为 `blog.0029`、`blog.0030`、`blog.0031`、`blog.0032`、`blog.0033`、`search.0006` 和 `search.0007`；Wagtail `wagtailcore.0098` 是否需要执行必须以生产 `showmigrations wagtailcore` 为准，不能默认重复执行。
-- 生产执行前必须确认 `main` 工作树干净、远程地址正确、目标 commit 已在测试环境通过；确认 MySQL、MongoDB、Redis、MinIO、Docker、Elasticsearch、read alias 和四个项目服务健康。
-- 备份目录使用现场时间戳创建在 `/home/source/Django/wagtail/backups/`，保存命令输出、文件清单、SHA-256 校验和、数据库版本、ES alias/索引清单以及 systemd unit 和 `.env.production` 的脱敏元数据；凭据和正文内容不得复制到 Git 或报告。
-
-#### 57.2 备份与恢复演练
-
-1. MySQL 执行一致性备份，至少包含受影响 schema 和数据、triggers、routines、events，并记录 binlog 位点；备份完成后在隔离实例恢复，运行 `mysqlcheck`、关键表行数/索引核对和 `manage.py migrate --plan`。
-2. Mongo 执行正式正文、`content_body_versions`、草稿和 Revision 快照的副本集快照或 `mongodump`，记录 clusterTime/oplog 位点；在隔离实例按 page/version 抽样恢复并校验 hash、schema 和 page 归属。
-3. Elasticsearch 创建或确认可恢复 snapshot，记录 serving alias、当前索引、mapping 和文档计数；不在迁移窗口删除旧索引。MinIO 记录对象版本/清单，Redis 只作为可重建缓存记录状态即可。
-4. 恢复演练必须证明 MySQL 正式正文指针不早于 Mongo 可恢复正文版本，且恢复后可以只读运行 `blog_publication_consistency_check`；演练未通过则不进入生产迁移。
-
-#### 57.3 停写、迁移与恢复顺序
-
-1. 维护窗口开始后先停止 `wagtailblog3.service`、`wagtailblog3-celery-maintenance.service` 和 `wagtailblog3-celery-beat.service`，确认没有新的页面保存、发布、取消发布、Mongo 清理或 Search Outbox 消费；Filebeat 可继续采集，除非日志目录或格式变更。
-2. 在生产目录 `git fetch origin --prune`，只允许 `git merge --ff-only origin/main` 到已验证 commit；安装依赖前核对 Conda 环境和 lock/requirements 差异，不允许从未审阅分支部署。
-3. 使用生产 `.env.production` 执行 `manage.py check`、`showmigrations blog search wagtailcore` 和 `migrate --plan`；再次核对计划只包含已批准迁移后，才执行 `manage.py migrate`。迁移仅改变 MySQL schema，不回填正文、不触发 Mongo 删除、不重建 ES。
-   MySQL DDL 可能隐式提交，整组迁移不具备跨迁移原子回滚能力；若中途锁等待或失败，立即停止后续服务恢复，保留已执行的表/列/索引，依据 `showmigrations` 和数据库实际结构人工处理，禁止使用 `--fake` 或未经授权的反向迁移。
-4. 迁移成功后运行 `manage.py check`、`makemigrations --check --dry-run` 和只读一致性命令；确认 `BlogPublicationConsistencyCheckpoint`、`BlogPublicationState`、Search generation 字段和 Outbox 索引存在。
-   迁移本身不为存量 BlogPage 回填 `BlogPublicationState` 或 `published_body_version_id`；若对账发现 `state_missing` 或正文指针缺失，先保留搜索/发布开关关闭，输出只读报告，再以独立数据修复方案、备份和授权处理。
-5. 按“基础设施 readiness -> `wagtailblog3.service` -> maintenance Worker -> Beat -> Filebeat（受影响时）-> Nginx（受影响时）”恢复。Beat/Worker 恢复前确认 Redis、Mongo、ES alias 和 MySQL 实际可用。
-
-#### 57.4 生产验收与回滚
-
-- 验收包括首页、BlogPage 详情、后台历史预览/比较、只读对账命令、四个服务 active/enabled、failed unit、socket/端口、Redis 队列、Beat 调度、Outbox pending/retry/dead、Mongo 正文指针/hash、ES alias/mapping/文档计数和错误日志。
-- 迁移前代码阶段失败：停止新服务，回到上一个已验证 commit，保留备份和新增数据，不删除 Mongo 正文或 Outbox。迁移已部分或全部完成时，不默认执行反向迁移；先停服务、保留新增列/表和备份，确认旧代码是否兼容，再由数据库负责人决定恢复或前向修复。
-- 任何 MySQL/Mongo/ES 恢复、索引 alias 切换、页面发布、自动修复、GC 或删除都需要单独书面授权；本 runbook 不授权这些动作。
-
-#### 57.5 当前状态与后续事项
-
-- 当前仅完成方案准备，未执行生产 SSH、备份、迁移、索引切换、服务重启或真实数据操作。
-- 生产迁移前仍需先提交并推送当前工作区改动，完成恢复演练和维护窗口审批；每日十几篇文章不需要为迁移额外扩容或分片。
-- 迁移后观察至少 1～2 周，记录发布成功率、对账周期、`lease_lost`、`last_error`、Outbox lag、Mongo 读取错误和数据库/ES 增长，再决定低频 Mongo 对账、归档和百万级压测的下一批次。
-- 模型/推理实际调度：`gpt-5.6-sol` 负责迁移和回滚架构复核；`gpt-5.6-terra` 负责服务/依赖顺序核对；主 agent 负责把方案写入文档并保留授权边界。未向外部模型发送源码、凭据或生产正文数据。
-### 58. 生产迁移实施记录（2026-08-29）
-
-- 状态：已完成代码同步、数据库迁移、服务恢复和只读验收；未执行正文回填、Mongo 删除、ES 重建、alias 切换或自动修复。
-- 运行时代码发布 commit：`726978aaf1c2394167185c4ff45037de2a3ba3d5`；随后仅文档实施记录提交为 `8d15cb48d7f37fc7fc88ab0ade8717935e571189`，生产与 `origin/main` 当前均在后者，生产工作树干净。
-- 备份目录：`/home/source/Django/wagtail/backups/wagtailblog3-markdown-import-20260829-100724`。包含 MySQL schema/data/triggers/routines/events 导出、Mongo `blog_content` 与 `blog_page_revision_bodies` 导出及校验信息、ES 集群健康和 snapshot repository 状态、`.env.production`、四个 systemd unit、Nginx 配置及迁移前后服务状态。
-- 迁移结果：成功应用 `blog.0029` 至 `blog.0033`、`search.0006` 和 `search.0007`；`wagtailcore.0098` 现场已是已应用状态。迁移未写入正文数据，也未回填 `BlogPublicationState`。
-- 服务验收：`wagtailblog3.service`、`wagtailblog3-celery-maintenance.service`、`wagtailblog3-celery-beat.service`、`wagtailblog3-filebeat.service` 均 active/enabled；首页 HTTP 200；生产 `manage.py check` 无错误，仅保留既有 MySQL 条件唯一约束警告。
-- 只读对账：扫描 1000 个页面，`state_missing=1000`；`mongo_missing`、`live_pointer_missing`、`revision_body_mismatch`、`outbox_missing`、`search_identity_mismatch` 等样本均为空。`state_missing` 是未回填存量 State 的已知结果，后续须单独制定只读观察、分批回填和回滚方案，不得由本次迁移自动修复。
-- 回滚边界：代码可回退到迁移前 commit；MySQL DDL 已执行，不执行未经验证的反向迁移或 `--fake`。保留新增表/列及备份，必要时停止应用服务并依据备份恢复；不删除 Mongo 正文、草稿、Revision 或 Outbox。
-- 残余风险：ES 无 snapshot repository 且集群为单节点 yellow；Mongo 正文对账当前为显式命令，Beat 默认不启用 Mongo 检查；存量 State 缺失、Outbox/Delivery 归档、百万级压测和恢复演练仍未完成。
-
-### 59. Wagtail 8.0 生产真实验收与 BrowserSkill 协议记录（2026-08-29）
-
-- 浏览器自动化使用 BrowserSkill `bsk`，未使用 Playwright。首次诊断发现扩展协议 1.1、daemon 协议 1.0（扩展 0.1.7、CLI/daemon 0.1.10）；升级 CLI/daemon 至 0.1.11 后协议统一为 1.1，`bsk doctor` 全部通过。该问题属于工具链版本漂移，不是业务代码错误。
-- 生产验收页：BlogPage ID 1192，标题“生产验收测试-20260829”。完成创建、编辑、保存草稿、预览、提交 Moderators approval、批准并发布；页面详情读取 Mongo 正文正常。证据位于 `output/playwright/production-acceptance-20260829/01-*` 至 `13-*`。
-- 发布后 MySQL/Wagtail：`live=True`、`live_revision_id=1870`；`BlogPublicationState.published_body_version_id` 已写入、`publication_generation=1`。说明发布服务与正文指针切换成功。
-- 发布后搜索链路未通过：`ContentSearchOutbox(id=23, operation=upsert)` 和 Delivery(id=32) 进入 `dead`，Delivery 错误码为 `es_http_400`；ES serving 索引中不存在文档 1192，前台搜索标题返回“未找到相关内容”。该结果证明搜索改造的发布投影仍有生产兼容缺陷，不能宣称搜索验收通过；未执行手工重试、索引重建或自动修复。
-- 删除验收页已获授权并完成：后台确认页显示“确定要删除此页面吗？”，删除后返回父页面并显示“页面已删除”。删除后 MySQL 页面不存在，Mongo 正式正文、Revision 正文及 `content_body_versions` 均已清理；产生的 `MongoCleanupIntent`（formal/revision）状态为 `succeeded`。
-- 删除 tombstone 同样进入 Outbox/Delivery dead（Delivery `es_http_400`），因此“取消/删除后搜索不可见”在本次索引失败下无法由 ES 投影证明；必须先修复并在测试环境复现 ES 400，再补做只读对账和可重试投递验证。
-- 日志：uWSGI 发布请求与前台正文读取无异常堆栈；maintenance worker 记录 ES bulk HTTP 200 但单项返回 400，现有 Delivery 仅保留错误码，缺少 ES 响应体，排障信息不足。建议后续在不记录正文/凭据的前提下补充受限错误摘要。
-- 残余风险（P0）：发布状态与 Mongo 正文已一致，但搜索 upsert/tombstone 均 dead，公开搜索与删除后的索引一致性不成立。回滚边界为保留 Wagtail/Mongo/Outbox 数据，禁止直接删除正文或手工改 ES；应先修复索引写入契约，再通过重试/重建恢复投影。
-
-### 60. ES 400 测试复现与修复计划（2026-08-29）
-
-- 目标：在测试环境用真实 Elasticsearch 复现生产 `es_http_400`，确认是否由 strict mapping、索引版本或 Bulk 外部版本契约导致；修复后补充回归测试，并在生产仅做一次受控搜索验收。
-- 非目标：不修改生产正文、Mongo 草稿、历史 Revision，不手工重试或删除生产 Outbox，不在未通过测试门禁前切换生产 alias。
-- 计划：读取测试 ES alias/mapping 与 Outbox；使用隔离测试页面或最小 Bulk 请求复现并保存脱敏错误分类；由搜索实现补齐兼容 mapping/索引版本与错误诊断；运行搜索及 Django 回归；生产执行备份、发布精确 commit 后只创建临时页验证搜索，随后删除并核验 tombstone。
-- 验收标准：测试 upsert 与 tombstone Delivery 均 succeeded，ES 文档可检索且删除后不可检索；`manage.py check`、目标测试、`compileall`、迁移检查和 `git diff --check` 通过；生产搜索验收有截图、日志和 Outbox/Delivery 只读证据。
-- 回滚：测试环境可删除隔离索引/页面并恢复代码；生产仅回退到上一已验证 commit，保留 Outbox/Mongo/ES 证据，不执行未经授权的索引删除或数据修复。
-
-#### 实施记录：ES 400 根因确认与代码修复（2026-08-29）
-
-- 状态：代码修复与隔离索引写入验证完成；测试 serving alias 尚未切换，因现有公开页面中 13 个页面缺少 Mongo 正文而无法宣称全量重建完成。
-- 事实：测试 serving target `test-content-replica0-v001` 及其 read alias 指向旧 `dynamic: strict` mapping，缺少 `body_version_id`、`publication_generation`；真实 Bulk 单项返回 `strict_dynamic_mapping_exception`/HTTP 400。缺失正文页面 ID 仅记录为 `[604,608,610,611,612,613,614,615,616,617,618,619,620]`，未读取或修改正文。
-- 实际修改：`search/services/content_index.py` 将不可变 mapping 版本提升至 `v005`，并让模板复用比较完整 settings/mappings 契约；`search/services/elasticsearch.py` 固定以单调 `content_version` 作为 ES external version；补充 mapping 缺字段和 generation 不得覆盖 content version 的回归测试。
-- 测试证据：`search.tests.test_search_sync_elasticsearch` 9 项通过；`search.tests.test_search_content_index` 22 项通过；`manage.py check` 通过（保留既有 Wagtail 条件唯一约束警告）；在隔离物理索引 `wagtailblog-test-content-v005` 上真实 upsert 与 tombstone 均 succeeded，含新增身份字段且 tombstone 后 searchable=false。
-- 数据/服务影响：仅写入测试 ES 隔离索引并登记测试 MySQL Target/Build（`content-v005-fix`），未切换 read alias，未处理旧 dead Delivery；生产尚未执行索引创建、alias 切换或服务重启。
-- 回滚点：删除/退役测试隔离 target 与索引即可；代码回退到本批次前 commit 不触及 MySQL/Mongo 正文。生产回滚仍限定为 alias 原子切回上一 serving 索引和恢复上一已验证代码。
-- 残余风险：需另行处理 13 个页面的 Mongo 正文完整性并完成全量重建、catch-up、alias 门禁；模板契约比较要求 ES 返回完整 template 结构，旧模板响应不完整时会安全拒绝复用。
-
-### 61. 生产 ES snapshot、v005 迁移、alias 切换与临时 BlogPage 验收实施记录（2026-08-29）
-
-- 状态：已完成生产 Elasticsearch 备份核验、v005 新索引迁移、全量回填、catch-up、read alias 原子切换，以及发布/删除闭环验收；未删除旧索引、未修改 Mongo 正文或历史 Revision。
-- 备份证据：生产 ES 使用已登记的 snapshot repository `wagtailblog3-pre-search-20260811-221511` 及快照 `pre-search-20260811-221511`，状态 `SUCCESS`（`include_global_state=false`）。备份目录为 `/home/source/Django/wagtail/backups/wagtailblog3-pre-search-20260811-221511/`；旧 v003 索引和该快照均保留为回滚点。恢复时不得覆盖集群级设置，也不得删除 snapshot、repository 或数据卷。
-- 索引迁移：新 serving 索引为 `wagtailblog-prod-content-v005`，read alias 为 `wagtailblog-prod-content-read`；全量回填 1098 条，成功 1098、缺失 0、失败 0，随后完成 catch-up 并以原子操作切换 alias。旧 `wagtailblog-prod-content-v003` 未删除。生产代码 commit 为 `e887cf12b9b200d15affdf872a7e4a7b157db7a7`。
-- 发布验收：通过 BrowserSkill（未使用 Playwright）新建临时 BlogPage ID 1193，标题“生产搜索修复验收-20260829”。完成编辑、保存草稿、预览、提交 `Moderators approval`、审批并发布；`ContentSearchState` 显示 `content_version=1`、`publication_generation=1`，v005 文档正文投影和 `searchable=true` 均正确。
-- 搜索与删除验收：前台精确搜索命中临时页 1 条；随后删除页面并确认 tombstone Delivery 目标为 v005，ES 文档变为 `searchable=false`，删除后前台搜索无结果。upsert 与 tombstone Delivery 均为 v005 target；旧 v003 target 保留历史 `dead/es_http_400` 记录，未被修改。删除过程未删除 Outbox、Mongo 正文或历史记录以外的受保护数据。
-- 证据与日志：BrowserSkill 截图位于 `output/playwright/prod-search-20260829/`（`01-draft-saved.png`、`02-preview.png`、`03-published.png`、`04-search-hit.png`、`05-delete-confirm.png`、`06-search-after-delete.png`）。四个项目服务自 2026-08-29 06:25 起未出现新的 `es_http_400` 或 `strict_dynamic_mapping_exception`；控制台仅有浏览器/CDN 跟踪防护和无效扩展资源警告。
-- 回滚边界：若 v005 出现回归，先停止受影响消费者并保留 v005、v003、snapshot、Outbox/Delivery 审计，再执行 alias 原子切回 v003；代码回滚到上一已验证 commit。不得通过回滚删除 Mongo 正文、草稿、Revision、Outbox 或直接手工改写 ES 文档。
-- 更正与残余风险：早期 §59 记录的临时页 ID 1192 属于前一轮验收；本轮实际验收页为 1193。当前 v005 投影已通过单页发布/删除验收，但仍需持续观察 dead/retry、alias 指向、ES 单节点 yellow 状态和旧 dead target 归档策略；存量 `BlogPublicationState` 回填、低频 Mongo 正文对账、恢复演练及百万级压测不在本批范围内。
-- 模型/推理实际调度：生产索引迁移与回滚边界按 `gpt-5.6-sol` 高推理门禁执行；搜索实现与验收由 `gpt-5.6-terra` 中高推理完成；BrowserSkill 只读证据整理由 `gpt-5.6-luna` 完成。未向外部模型发送凭据、Token 或正文内容。
-
-### 62. 存量 State 回填只读分析与旧文章登记可行性（2026-08-29）
-
-- 只读报告：在 WSL2 `wagtailblog-test` 环境读取 BlogPage、Wagtail Revision 和 Mongo 元数据，未调用保存、迁移、索引创建或删除接口。报告文件为 `output/state-missing-report-20260829.json`，包含全部文章 ID、标题、发布状态、Mongo 正文存在性、Revision 数量和最新 Revision 标识；Mongo 查询仅返回数组类型/存在性元数据，不返回正文。
-- 环境前置发现：测试库 `wagtailsoftblog_test` 尚未应用 `blog.0029` 至 `blog.0033`，`blog_blogpublicationstate` 表不存在。因此本次扫描的 156 篇 BlogPage 是“State 表缺失基线”，不能等同于真实的 156 条 `state_missing`；必须先在授权的测试迁移批次应用 schema，再重新运行报告，才能生成可用于回填决策的真实分类。
-- 当前基线统计（仅供迁移前核对）：156 篇 BlogPage 均为 `live=1`，均存在 `blog_content` 正文元数据，Revision 共 352 条；其中 61 篇存在历史/非 live Revision，但按“最新 Revision ID 是否等于 live_revision_id”判定，未发现未同步的最新 Revision。现代 `content_body_versions` 集合未发现对应记录。该结果不构成生产数据结论。
-- 报告分类定义：`published/unpublished` 依据 BlogPage.live；`has_mongo_body` 依据 `blog_content` 或 `content_body_versions` 中存在合法数组正文；`has_draft_revision` 仅表示最新 Revision 不等于 live Revision，后续登记前仍需再区分真正草稿、历史 Revision 和审批状态，不能直接据此发布。
-- 旧文章逐个登记：方案可行，但应登记现有 BlogPage，不应重建页面或改变 page PK、slug、标题和页面树。每篇以 `page_id` 幂等，先只读校验正式 Mongo 正文、归属、schema 和 hash，再在独立批次写入不可变 `body_version`；随后在 MySQL 事务内锁定页面并创建/更新 `BlogPublicationState`，最后生成与当前公开代际一致的 Search State/Outbox。Mongo 写入与 MySQL 事务无法共享原子提交，Mongo 先写而 MySQL 失败时保留安全孤儿版本并进入待审计/后续 GC，Mongo 失败时不得创建 State 指针。
-- 历史兼容边界：旧 live Revision 往往没有 `mongo_body_version_id`，直接绑定新 State 会产生 `revision_body_mismatch`。此类页面应分类为 `legacy_revision_unbound`，先登记正式正文，是否创建桥接 Revision 另行审批；草稿 Revision 按其自身指针和正文可读性单独分类，不能用正式正文覆盖历史快照。现有 `add_blog_page` 或后台逐篇打开保存都不适合作为迁移工具。
-- 建议实施顺序：先应用并核验测试 schema → 重新生成真实 State 缺失报告 → 选取 1 篇已发布且 Mongo 正文完整的页面 dry-run → 验证幂等、指针/hash、Outbox 和搜索身份 → 扩大为小批量 → 观察并取得生产授权后再执行生产登记。整个登记批次必须默认 dry-run、单页/小批、可暂停、可重试并输出脱敏审计结果；本记录未执行任何登记或数据写入。
-- 模型/推理实际调度：`gpt-5.6-terra` 复核逐篇登记的数据流和跨库一致性；`gpt-5.6-luna` 执行只读报告与迁移前置检查；主 agent 负责把测试库缺表事实和生产授权边界写入方案。未向外部模型发送正文、凭据或生产数据。
-
-### 63. 测试库 State 迁移、真实缺失报告与旧文章 dry-run（2026-08-29）
-
-- 状态：已在测试库应用 `blog.0029` 至 `blog.0033`；`search.0006`、`search.0007` 原已应用，因此没有重复执行。未执行生产迁移、State 回填、Mongo 正文版本写入或搜索事件投递。
-- 迁移验证：`python manage.py migrate blog` 五个迁移均返回 `OK`；随后 `migrate --plan blog/search` 均为 `No planned migration operations`，`manage.py check` 和 `makemigrations --check --dry-run` 通过（保留既有 Wagtail/MySQL 条件唯一约束警告）。
-- 真实 State 报告：State 表已存在但行数为 0，扫描 156 篇 BlogPage，确认 `state_missing=156`。156 篇均为 `live=True`，旧 `blog_content` 正文元数据存在；现代 `content_body_versions` 对应记录为 0；Wagtail Revision 共 352 条，其中 61 篇存在历史/非 live Revision，但没有最新 Revision 晚于 `live_revision_id` 的草稿候选。完整 ID、标题、发布状态、Mongo 存在性和 Revision 标识见 `output/state-missing-report-20260829.json`。
-- 单篇 dry-run（BlogPage 38）：旧 `mongo_content_id` 可读取 `blog_content`，正文为 12 个块，规范化 SHA-256 为 `3764642ad3f11928ea48d63ad134794c6ed835b6f21f51a3584f4ab5f5920f53`；`content_body_versions` 尚无相同版本；live Revision 1059 存在但不含 `mongo_body_version_id`，因此分类为 `legacy_revision_unbound/ready_formal_hydration`。本次仅读取和计算 hash，没有调用 `save_content_body_version()`、`save_revision()`、State 写入或 Outbox。
-- 导入流程结论：当前仓库没有 `register_legacy_blog_page` 命令；`add_blog_page` 只能 `add_child()` 创建新页面并保存/发布 Revision，不能用于存量登记。后续应实现默认 dry-run、按 `page_id` 幂等、带 expected hash/confirm 的受控登记命令，先创建不可变正文版本，再在 MySQL 事务内绑定 State，最后单独生成并验证 Search Outbox；旧 Revision 不直接改写。
-- 数据与回滚边界：本批唯一生产性变更是测试 MySQL schema；若测试迁移需要回退，应保留新增表/列并按迁移记录处理，不执行未经验证的反向迁移。报告和 dry-run 不修改业务数据；生产登记仍需独立备份、小批授权和可暂停/可重试审计。
-- 模型/推理实际调度：`gpt-5.6-terra` 复核旧文章登记契约和跨库失败补偿；`gpt-5.6-luna` 执行测试迁移门禁、只读报告和单篇 dry-run；主 agent 负责确认迁移顺序、报告边界和回滚约束。未向外部模型发送正文、凭据或生产数据。
-
-### 64. 只读登记命令实现与验收（2026-08-29）
-
-- 实际修改文件：新增 `wagtailblog3/apps/blog/management/commands/register_legacy_blog_page.py` 与 `wagtailblog3/apps/blog/test_register_legacy_blog_page.py`。命令默认只读，支持按 `page_id` 或分页扫描；`--apply` 当前明确拒绝，避免在登记流程尚未完成前误写数据。
-- 读取边界：MySQL 仅查询 BlogPage、BlogPublicationState 和 Wagtail Revision；Mongo 直接使用 PyMongo `find` 查询 `blog_content`、`content_body_versions`，不实例化 `MongoManager`，不会触发建索引或旧全文索引清理。
-- 输出字段：页面标题/发布状态、State 是否存在、Mongo 正文是否存在及块数、规范化 SHA-256、草稿 Revision、live/latest Revision 的正文版本指针、现代正文版本数量和分类统计；不输出正文内容。Django 启动横幅会先写 stdout，采集 JSON 时应读取最后一行。
-- 测试环境实跑：`WAGTAILBLOG_ENV=test conda run -n wagtailblog-test python manage.py register_legacy_blog_page --page-id 38 --dry-run` 成功；Page 38 输出 `state_missing`、`legacy_revision_unbound`，Mongo 正文 12 块，哈希为 `3764642ad3f11928ea48d63ad134794c6ed835b6f21f51a3584f4ab5f5920f53`，未产生 MySQL/Mongo/Outbox/ES 写入。
-- 自动化验证：新增命令测试 3 项通过；既有发布、工作流和搜索回归共 55 项通过；`compileall`、`manage.py check`、`makemigrations --check --dry-run`、`migrate --plan blog/search` 与 `git diff --check` 通过。保留既有 Wagtail 条件唯一约束警告。
-- 后续门禁：正式登记仍需单独实现 `--apply`、expected-hash、幂等锁与 Outbox 补偿，并先在隔离测试数据上小批量验证；本批次不执行 State 回填、Mongo 版本写入、搜索投影或生产操作。回滚边界为移除新增命令/测试文件，既有业务数据未改变。
-
-### 65. 受控登记 apply、幂等与失败补偿（2026-08-29）
-
-- 实现：`--apply` 仅允许单页并强制提供 64 位十六进制 `--expected-hash`。命令先读取旧 Mongo 正文并校验哈希，再调用 `MongoManager.save_content_body_version()` 的 insert-once 语义创建不可变版本。
-- MySQL 一致性：Mongo 成功后进入 MySQL `transaction.atomic()`，按 BlogPage → BlogPublicationState 顺序 `select_for_update()`；已绑定相同版本时返回 `already_registered`，否则写入 draft/published 指针和 generation，live 页面随后在同一事务记录 Search State/Outbox。
-- 失败补偿：Mongo 写入失败时不创建 State；MySQL 事务失败时自动回滚 State/Outbox，Mongo 版本保留为安全孤儿版本并记录错误日志，后续重试依靠相同正文 hash 幂等复用。当前未建立持久化审计表，正式批量运行前应补充审计/对账记录。
-- 测试：新增 hash 不匹配拒绝测试；`register_legacy_blog_page` 定向测试 4 项通过，既有发布/工作流/搜索回归 55 项通过，`compileall`、`manage.py check`、迁移检查和 `git diff --check` 通过。
-- 安全边界：本批次只在测试环境验证命令契约，未对真实页面执行 `--apply`，未修改生产 MySQL、Mongo、Outbox 或 Elasticsearch。正式登记仍需先备份、单页试运行，再小批量推进并观察搜索投递。
-
-### 66. 测试文章 548 实际登记验收（2026-08-29）
-
-- 目标：测试库 BlogPage 548，标题“测试第一页”。只读筛选确认 `live=True`、旧 Mongo 正文 5 块、哈希 `d3721e5d0e06f170ad753d91be2401f1c804d174cdb065d2e5b7d0d5ac2b077f`，原先无 State/现代正文版本。
-- 执行：运行 `register_legacy_blog_page --apply --page-id 548 --expected-hash d3721e5d0e06f170ad753d91be2401f1c804d174cdb065d2e5b7d0d5ac2b077f`，返回 `status=registered`，生成 `body_version_id=57ade9c49d2040e98f209567d00cf1bb`。
-- MySQL 核验：`BlogPublicationState` 已写入 draft/published 指针、同一 SHA/schema，`publication_generation=1`；`ContentSearchState` 为 `content_version=2`、`upsert`、`searchable=true`、同一正文版本；`ContentSearchOutbox` id=97 已生成。
-- Mongo 核验：`content_body_versions` 存在唯一版本，`aggregate_type=blog_page`、`aggregate_id=548`、SHA/schema 与 State 一致，正文块数为 5。
-- 搜索投影核验：building 目标 `wagtailblog-test-content-v004` 的文档 548 已成功写入并包含 `body_version_id`、`publication_generation=1`；当前 serving 目标 `wagtailblog-test-content-replica0-v001` 仍为旧 mapping，文档仅有旧字段，Delivery id=163 以 `es_http_400` 进入 `dead`，因此本次搜索链路验收为**部分通过**，不能宣称 serving 搜索已完全正确。该结果复现了旧 serving mapping 与新字段契约不兼容的问题。
-- 数据/回滚：本次仅修改测试库 BlogPage 548 的 State、Mongo 版本和测试 ES 投影；未触碰生产。若需清理测试数据，应按回滚方案处理并保留 Outbox/Delivery 证据，不直接删除 Mongo 正文版本。
-
-### 67. 测试 serving 索引修复门禁（2026-08-29）
-
-- 只读核对确认 alias `wagtailblog-test-content-read` 唯一指向旧索引 `wagtailblog-test-content-replica0-v001`；其 strict mapping 缺少 `body_version_id`、`publication_generation`，不能直接接受新事件。
-- 候选 building 索引 `content-v004` 已包含新字段但 Build 状态为 failed；`content-v005-fix` 同样因 13 篇 Mongo 正式正文缺失而未达到 READY。直接切 alias 会造成公开搜索回退或数据缺失，因此本批次不切换 alias、不删除旧索引、不手工改 ES 文档。
-- 修复门槛：先完成缺失正文对账或建立完整可重建数据集，再运行测试索引全量回填、catch-up、READY 校验，最后执行原子 alias 切换并重放 page 548 的 Delivery。当前 page 548 的 State/Mongo/Outbox 正确，但 serving 搜索仍为部分通过。
-
-### 68. 生产 BlogPage 38 登记前置核验（2026-08-29）
-
-- 用户提出跳过测试搜索修复，直接在生产对 BlogPage 38 执行 `--apply`。该操作涉及生产 Mongo 正文版本、MySQL State、Search Outbox 和 ES 投影，按生产门禁先做只读核验，未执行任何写入。
-- 核验结果：生产仓库 `main` 已同步至 `706269d3fe083f03d04746d4d8529f766c1195a6`，但在生产执行 `python manage.py register_legacy_blog_page --page-id 38 --dry-run` 返回 `Unknown command`；文档记录的 `/root/anaconda3/envs/wagtailblog` Python 路径也不存在。真实服务运行的 Conda/解释器和 Django 应用加载状态尚未确认。
-- 决策：在命令可被生产 Django 正确发现、真实解释器/环境核实、page 38 Mongo 正文 hash 与生产 v005 alias/mapping 只读核验完成，并完成生产备份记录前，不执行 `--apply`。当前无生产数据变化、无服务重启、无 ES 写入。
-- 下一步：先修正/确认生产运行环境与代码部署（不改变数据），重新执行 page 38 dry-run；随后单独说明生产备份、影响范围和回滚点，取得针对 page 38 的明确确认后再登记。
-
-### 69. 生产 SSH 目标核验结果（2026-08-29）
-
-- 直接 SSH `root@192.168.20.2:22` 后，远端 `hostname` 为 `ziliao`，但 `hostname -I` 返回 `192.168.20.5 172.17.0.1`；该连接实际落到测试/WSL 主机地址，而非预期的生产虚拟机地址。
-- 该主机不存在 `/home/source/Django/wagtail/wagtailblog3`、`wagtailblog3.service` 和记录中的生产 Conda 环境，因此不能在此执行生产 dry-run 或 `--apply`。本次仅执行路径、服务和网络身份只读检查，无数据或服务变更。
-- 生产登记门禁保持：需先确认真正生产 VM 的可达 IP/端口和主机身份，再核对 unit 的 `ExecStart`、EnvironmentFile、解释器、page 38 Mongo/hash、v005 alias 与备份，之后才可进行单页登记。
-### 70. 生产 BlogPage 38 单篇登记实施记录（2026-08-29）
-
-- 生产门禁：确认主机 `ziliao`（192.168.20.2）、代码 `main` 已 fast-forward 至 `1c0a8aa0d468f2c7c9bdb036ff0b6b7acbedffc2`，工作树干净；生产解释器为 `/root/anaconda3/envs/wagtailblog/bin/python`，Wagtail 8.0/Django 5.2.8。
-- 备份：建立 `/home/source/Django/wagtail/backups/wagtailblog3-registration-20260829-150000/`，保存 BlogPage 38、State、Search State/Outbox 快照及 manifest；引用既有 Mongo 全量备份 `wagtailblog3-markdown-import-20260829-100724/mongodb` 与 ES snapshot `wagtailblog3-search-snapshots/pre-search-20260829-134500`。未删除任何旧索引、正文或快照。
-- dry-run：page 38 为 live/published，Mongo 正文 20 块，hash `dacf01aaabe9135de0235c394eee46dd2bb6389d7e5c4915539948f68638cef1`，State/现代正文版本缺失，分类 `state_missing + legacy_revision_unbound`。
-- apply：使用 expected-hash 执行单篇登记，生成 Mongo `body_version_id=517972c372754b608d5fb25da25b5cb4`；MySQL `BlogPublicationState` draft/published 指针、hash/schema、`publication_generation=1` 均一致；Search State `content_version=2`、`upsert`、`searchable=true`，Outbox id=27 创建。
-- 搜索验收：v005 alias 文档 `_id=38` 已更新为 `content_version=2`，包含相同 `body_version_id`、`publication_generation=1`、`searchable=true`；v005 Delivery(id=39) succeeded。旧 v003 Delivery(id=38) 因兼容性映射缺失记为 `dead/es_http_400`，因此 Outbox 聚合状态仍为 dead，但生产 read alias 实际指向的 v005 已成功，不执行旧目标重试或删除。
-- 服务：四个生产服务保持 active/enabled，无重启；ES v005 green，集群整体 yellow（单节点副本未分配）作为残余风险记录。回滚边界为保留 Mongo 版本/State/Outbox 与备份，必要时恢复到 `1c0a8aa` 前代码或旧 alias，禁止删除正文。
-### 71. 生产旧文章首批扩展登记（2026-08-29）
-
-- 批次范围：page 40、41、46–53，共 10 篇；逐篇 dry-run 后以独立 expected-hash 执行 `--apply`，未使用批量绕过幂等或锁逻辑。
-- 前置条件：10 篇均为 live/published、Mongo 正文存在且非空、State 与现代正文版本缺失；批次备份目录为 `/home/source/Django/wagtail/backups/wagtailblog3-registration-batch-20260829-153000/`，包含 dry-run、BlogPage、State、Search State/Outbox 快照及校验和。
-- 结果：10 篇全部 `status=registered`。每篇均生成唯一 Mongo `body_version_id`，MySQL `BlogPublicationState` 的 published 指针与 hash/schema 一致，`publication_generation=1`；Search State `content_version=2`、`upsert`、`searchable=true`，Outbox id=28–37 创建。
-- 搜索验收：生产 v005 read alias 中 10 篇文档全部存在，`content_version=2`、`body_version_id`、`publication_generation=1` 与 MySQL/Mongo 对齐，`searchable=true`。旧 v003 目标仍会产生 `dead/es_http_400`，未重试或清理；v005 投递成功不受影响。
-- 服务与回滚：四个 systemd 服务保持 active/enabled，未重启；未删除 Mongo 正文、Revision、Outbox 或索引。回滚仅允许恢复代码/alias 或依据批次备份处理，禁止直接删除新正文版本。
-### 72. 生产存量正文全量登记（2026-08-29）
-
-- 范围：在 page 38 及首批 10 篇验证基础上，对剩余 1087 篇 `BlogPage`（page 21–1191 中实际存在的页面）完成登记；全部页面经 dry-run 确认为 live、Mongo 正文非空、State 缺失且无现代正文版本。
-- 执行：由于 `--apply` 是受控单页接口，使用每批 10 篇、每批最多 10 个并行进程；每页携带 dry-run 计算的 64 位 expected-hash，批间 flush，任一失败即停止。实际 1087/1087 返回 `registered`，无 hash 不匹配、Mongo 或 MySQL 失败。
-- 备份与回滚：批次目录 `/home/source/Django/wagtail/backups/wagtailblog3-registration-all-20260829-160000/` 保存全量 dry-run、MySQL 页面/State/Search 快照、apply 结果、对账报告及 SHA-256；ES v005 snapshot 为 `wagtailblog3-search-snapshots/pre-register-all-20260829-162500`（SUCCESS）。未删除 Mongo 正文、Revision、Outbox、旧索引或快照。
-- 对账结果：`BlogPublicationState` 共 1098 行，`content_body_versions` 共 1098 个对应版本，Search State 共 1101 行（含 3 个既有 tombstone），Outbox 共 1120 行；所有 upsert 的 body_version/hash/schema/generation 与 Mongo/MySQL 对齐，v005 read alias 的 upsert 文档数为 1098，索引 green。`state_missing`、`mongo_missing`、`live_pointer_missing`、`outbox_missing`、`search_identity_mismatch` 均为 0。
-- 残余风险：只读一致性命令仍报告 1098 条 `revision_body_mismatch`，原因是旧 Wagtail live Revision 未写入 `mongo_body_version_id`；本批未改写历史 Revision，避免破坏预览/比较/恢复语义。后续应单独设计 Revision 绑定迁移和逐页验收，不能把该告警静默视为正文登记失败。
-- 服务：四个应用 systemd 服务持续 active/enabled，未重启；v005 alias 未切换。文档-only 提交已同步生产仓库，回滚边界为恢复代码/alias 或依据批次备份重建投影，禁止删除新正文版本。
-### 73. 生产 Mongo 孤儿正文 page 14 清理（2026-08-29）
-
-- 核验：生产 MySQL `wagtailsoftblog` 中不存在 `wagtailcore_page.id=14` 或 `blog_blogpage.page_ptr_id=14`，Django `BlogPage(pk=14)` 不存在；Mongo 仅存在 `blog_content.page_id=14`，无 `content_body_versions`，无 Revision/State/Outbox 关联。
-- 备份：删除前使用 `mongodump` 定向备份至 `/home/source/Django/wagtail/backups/wagtailblog3-orphan-page14-20260829-170000/`，包含 1 条 `blog_content` BSON（1153 bytes）及元数据；`blog_page_revision_bodies` 查询为 0 条。备份可用于恢复该孤儿正文。
-- 清理：按用户授权删除 Mongo `blog_content.page_id=14` 1 条；`blog_page_revision_bodies.page_id=14` 删除 0 条。未修改 MySQL、Wagtail 页面、State、Outbox、ES 索引或服务。
-- 复核：删除后 `blog_content`、`blog_page_revision_bodies`、`content_body_versions` 对 page 14 均为 0；四个应用服务未重启。回滚边界为使用定向 BSON 备份恢复 Mongo 孤儿文档，不得新建 Wagtail 页面或改动其他 page_id。
-
-### 74. 测试环境存量正文批量登记与 Mongo 孤儿清理（2026-08-30）
-
-- 只读盘点：测试库扫描 156 篇 `BlogPage`，初始 `state_missing=155`、针对可登记 BlogPage 的 Mongo 正文缺失为 0；已有现代正文版本 1 篇。所有页面均为 live/published；扫描未发现草稿 Revision 缺失。
-- 备份：测试机定向备份位于 `/home/source/Django/wagtail/test-backups/registration-20260829-180000/`，保存 BlogPage、PublicationState、SearchState/Outbox/Delivery 快照、Mongo `blog_content`/`blog_page_revision_bodies`/`content_body_versions` 导出和 manifest SHA-256。
-- 登记：按现有单页 `--apply --expected-hash` 接口逐篇处理剩余 155 篇（已有版本的页面不重复写入），实际 155/155 成功，每篇创建一个 Mongo `content_body_versions` 版本并写入 MySQL `BlogPublicationState`、Search State 和 Outbox。
-- 孤儿清理：根据 MySQL 不存在对应 `BlogPage` 的定义，删除 Mongo `blog_content.page_id in (14,609,621)` 共3 条；定向 `blog_page_revision_bodies` 为 0 条，`content_body_versions` 无关联版本因而未删除。另有 1 个非整数 page_id 保留并记录为待复核对象。
-- 对账：登记后 `BlogPublicationState=156`、Mongo `content_body_versions=156`，且 `state_missing=0`、Mongo 正文缺失=0、Outbox 身份不一致=0。只读 `blog_publication_consistency_check` 仍报告 156 条 `revision_body_mismatch`，与生产一致，原因是历史 live Revision 未回写新版本指针，本批未改写 Revision。
-- 搜索与服务：测试 serving 仍为旧 `test-content-replica0-v001`，只读搜索对账报告旧索引 stale/missing；`content-v005-fix` 仍为 building，未在本批切换 alias。测试机四个 systemd 单元不运行，本批未重启或改动服务。
-- 回滚与残余风险：正文版本、State、Outbox 不应直接删除；如需回滚，使用备份恢复孤儿文档或回退代码、依赖索引重建，不回写历史 Revision。
-
-### 75. P0 不可变公开正文读取与旧存储隔离（2026-08-30）
-
-- 实际修改：`BlogPage.save()` 对已有 `published_body_version_id` 的页面跳过可变 Mongo `blog_content` 写入；`get_content_from_mongodb()` 优先按 State 中的正式指针、SHA-256 和 schema 读取 `content_body_versions`，指针失效时不回退旧正文，无 State 的旧页面保留兼容路径。
-- 搜索修改：`search.services.document` 的单页正式快照在未显式传入正文时优先读取发布版本；不存在 State 指针时回退旧 `blog_content`。批量 rebuild 显式传入旧正文的路径本批未改动，避免 N+1，后续需增加指针批量读取。
-- 测试：新增 `blog.test_public_body_reads` 和 `search.tests.test_search_content_index`，并扩充 lifecycle 回归测试；P0 定向测试 27 项通过，`manage.py check`、`makemigrations --check --dry-run`、`compileall` 和 `git diff --check` 通过。
-- 数据与服务影响：本批未操作数据库、ES alias、Celery 或 systemd；仅修改运行时读取/保存路径及测试。
-- 残余风险：Wagtail Revision 历史绑定、Workflow/定时发布边界、批量 rebuild 指针读取、并发登记审计和测试 ES v005 全量重建仍未完成，禁止以本批通过宣称全链路完成。
-
-### 76. P1 批量重建与登记审计保护（2026-08-30）
-
-- 搜索重建：批量 rebuild 新增一次性读取 `BlogPublicationState.published_body_version_id` 对应的 Mongo 不可变正文，指针无效的页面才回退旧 `blog_content`，避免循环内 N+1。旧 rebuild 单元测试需在后续补充指针读取 mock，本批未切换 ES alias。
-- 登记审计：新增 `LegacyBlogRegistrationAudit` 及 `0034` 迁移，按 `(page_id, body_sha256, body_schema_version)` 唯一去重，记录 processing/succeeded/failed、attempts、锁超时和错误代码。`register_legacy_blog_page --apply` 在 Mongo 写入前创建审计锁，成功后回写版本 ID；同一 page/hash 重试返回 `already_registered`。
-- 验证：测试库已应用 `0034`，对 page 38 以正确 expected-hash 连续执行两次 `--apply`，均返回 `already_registered`，审计记录仅 1 条、attempts=1、status=succeeded。
-- 测试：`manage.py check`、`makemigrations --check --dry-run`、`compileall` 及 `git diff --check` 通过；P0 测试 27 项通过。本批未执行生产迁移、ES alias 切换或服务重启。
-- 残余风险：审计锁与 Mongo 写入不在同一跨库事务，过期恢复、并发失败和批量断点恢复仍需压测；历史 Revision 未回写新版本指针、测试 ES v005 未全量建好。
-
-### 77. P1 集成复核与测试调整（2026-08-30）
-
-- 修正：批量 rebuild 的旧存储 mock 显式标记为无发布指针，保持旧测试用例的兼容语义；搜索正式快照复用 `blog.models.MongoManager` 适配器，确保运行时连接与 BlogPage 一致。
-- 测试：`blog.test_workflow_publication`、`blog.test_publication_service`、`search.tests.test_search_rebuild`、`search.tests.test_search_sync_delivery` 共 31 项通过；包含 Wagtail 8.0 Workflow 重新校验和 scheduled 发布边界的现有回归用例。
-- 变更范围：仅测试环境应用 `blog.0034_legacyblogregistrationaudit`；本批未对生产执行迁移、重建 ES、切 alias 或重启服务。
-
-### 78. 测试环境历史孤儿数据清理与失败归因（2026-08-30）
-
-- 只读盘点：156 篇 BlogPage 均有 State 和 Mongo 不可变正文版本；Mongo `blog_content` 原有 1 条 `page_id=null` 文档，属于明确历史孤儿。SearchState/Outbox 中 page_id 576、577、578、579、594、609、621、622、623 为已删页面的 tombstone，不是错误数据，予以保留。
-- 备份与清理：定向备份位于 `/home/source/Django/wagtail/test-backups/orphan-null-page-20260830-100000/`，包含 `blog_content` 孤儿文档和校验和；已删除该 `page_id=null` 文档 1 条。未删除任何正式版本、Revision、State 或 tombstone。
-- 清理后对账：`state_missing=0`、`mongo_missing=0`、`outbox_missing=0`、`search_identity_mismatch=0`；`revision_body_mismatch=156` 仍在，原因是旧 Revision 没有 `mongo_body_version_id`，标记为“历史数据污染，需单独清理”。
-- ES 归因：当前 serving alias 仍指向旧 replica 索引，v005 仍是 building；stale/missing 属于历史索引欠数，不是本批登记或清理造成。
-- 测试与风险：清理后相关 blog/search 定向套件 31 项通过；测试服务未启动，本次未修改服务配置。剩余实现顺序为历史 Revision 绑定方案、ES v005 全量重建/切换门禁和 tombstone 保留期管理。
-
-### 79. 测试迁移夹具污染修复与完整套件归因（2026-08-30）
-
-- 测试夹具修复：`search.tests.test_search_content_index` 的 Mongo mock 路径改为与运行时代码实际导入位置一致的 `blog.models.MongoManager`；`ContentSearchMigrationTests.test_initial_migration_can_reverse_and_reapply` 在回滚到 0002 后通过 `finally` 恢复 search 最新迁移，避免后续测试看到缺失 `body_version_id` 的降级 schema。
-- 验证：`search.tests.test_search_content_index` 24 项通过；迁移回滚测试单独运行 1 项通过；修复后现有 test DB 的 blog+search 全量 483 项通过。此前 483 项中的 2 个 `Unknown column search_contentsearchstate.body_version_id` 错误归因于迁移测试污染，不是孤儿 Mongo 数据或运行时代码回归。另一次全新 test DB 重建曾因 MySQL 测试库残留/创建状态返回 1049，未作为全新库门禁证据；业务库未受影响。
-- 历史污染边界：测试日志中的 `revision_snapshot_missing`、Mongo 历史快照异常和旧 ES serving/v005 欠数均为历史夹具/索引状态，标记“历史数据污染，需单独清理”；本批不修改生产库、测试业务库、ES alias 或服务配置。
-- 变更文件：仅测试夹具 `wagtailblog3/apps/search/tests/test_search_content_index.py`、`wagtailblog3/apps/search/tests/test_search_sync_models.py` 与本方案文档；运行时代码、数据模型和迁移文件未改。
-
-### 80. 后续收尾任务 dry-run 复核与实施边界（2026-08-30）
-
-#### 80.1 历史 Revision 正文绑定
-
-- 只读证据：`register_legacy_blog_page --after-page-id 0 --limit 5 --dry-run` 显示 page 38、271--274 均已有 `BlogPublicationState` 和唯一的 Mongo 不可变正式正文版本，但它们的 live Revision 没有 `mongo_body_version_id`；五页均分类为 `legacy_revision_unbound + modern_body_version_present`。全量 `blog_publication_consistency_check` 同样保留 156 条 `revision_body_mismatch`。
-- 可安全绑定范围：仅限仍为 live 的 `page.live_revision`，且 Revision JSON 可解析、未带冲突正文指针、State 的 published 指针/hash/schema 完整，并能按该三元组从 Mongo 读回正文的记录。写入时只能保留原 Revision JSON 的所有字段并补入 `mongo_body_version_id`、`body_sha256`、`body_schema_version`；不得创建新 Revision、不得改 Page/live_revision、不得触发发布、Outbox 或搜索事件。
-- 明确排除：草稿、非 live 的历史 Revision、正文指针已冲突、State/Mongo 不完整或哈希不一致的页面一律输出 `unresolved`，不得用当前正式正文覆盖其历史内容。该限制是防止预览、比较、恢复时把旧草稿错误替换为当前公开版本。
-- 下一实现：新增默认只读的 Revision 绑定 dry-run，以 `(revision_id, page_id)` 游标输出候选、拒绝原因、原 JSON 摘要和建议指针的脱敏 manifest；`--apply` 需要独立确认、备份 Revision 行、manifest SHA-256 和稳定游标，且逐小批次复核 Wagtail 预览/比较。当前未回写任何 Revision。
-
-#### 80.2 测试 ES v005 alias 门禁
-
-- 只读结果：read alias `wagtailblog-test-content-read` 仍唯一指向 `wagtailblog-test-content-replica0-v001`。候选 `content-v005-fix` 的物理索引 `wagtailblog-test-content-v005` 为 green（102 文档），但 Build 为 `failed`，checkpoint 为 530/632，尚有 23 个 pending Delivery。
-- 一致性：v005 相对 165 个 Search State 的只读结果为 `missing=64`、`stale=100`、`extra=1`；extra 是 page 990001 的不可搜索 tombstone，不构成公开搜索泄露。page 531 之后抽样的 56 篇页面均已有不可变正文且可从 Mongo 读取，因此此前 build 失败属于登记前历史状态，不是本批代码回归。
-- 已执行且未写入：`search_rebuild_content_index --target content-v005-fix --dry-run --check-catch-up`、`search_switch_content_alias --target content-v005-fix`、v005 `search_consistency_check` 和 `search_cluster_preflight`。alias dry-run 明确显示 `build_status=failed`、`alias_changed=false`。
-- 后续门禁：须先经确认以 `--confirm --resume-build --max-batches 1` 小批恢复 rebuild，逐批复核 Delivery；连续两次 catch-up 均清洁、build 进入 READY、pending/retry/dead 为 0、严格一致性无公开 missing/stale 后，才能另行确认 `search_switch_content_alias --target content-v005-fix --confirm`。回滚仅切回旧 alias，两个物理索引都保留；当前禁止切换。
-
-#### 80.3 Tombstone 归档策略
-
-- 长期保留：`ContentSearchState.desired_operation=tombstone` 是防迟到 upsert、重放和异常恢复造成搜索复活的高水位围栏，长期热存，不按时间删除；ES tombstone 也不逐文档物理删除，而通过新空索引回填、追平与 alias 切换自然压缩。
-- 拟归档对象：只考虑已完成的 `ContentSearchOutbox` 和关联 `ContentSearchDelivery` 审计。默认建议热存 180 天、归档副本至少两年，但这不是已启用配置，也不是当前可执行的删除策略。
-- dry-run 候选门禁：事件为 tombstone；State 仍为 tombstone 且版本不低于事件；所有 enabled/required target 的 Delivery 均为 succeeded 或 superseded；任一 pending、processing、retry、dead、过期租约、运行中的 index build/alias 切换/replay 均拒绝。dry-run 只输出无正文 manifest、分类、拒绝原因和 `(completed_at, id)` 游标。
-- 实现顺序：先增加显式 `tombstoned_at`、只读 `search_archive_tombstones --dry-run`、归档 manifest 和 10 万级查询/锁等待基线；再经独立确认实现 `--apply --expected-manifest-sha256`。apply 顺序必须是锁定候选与 State、写归档记录/manifest、先迁移或删除 Delivery、后处理 Outbox，绝不删除 State。当前未设计自动清理任务，也未删除任何 tombstone。
-
-#### 80.4 测试、模型调度与授权边界
-
-- 本批实际执行的是 MySQL/Mongo/ES 只读查询与 dry-run，没有执行 Revision 回写、ES rebuild、alias 切换、Outbox/Delivery 归档、服务重启或生产操作。
-- 模型/推理实际调度：Sol 高推理负责 Revision/ES 数据一致性与回滚门禁核查；Terra 高推理负责 tombstone 生命周期和归档可行性审查；主 agent 负责整合、授权边界和验证。升级条件是任何 Revision 回写、ES alias 切换、批量归档、生产数据或跨服务回滚。
-- 回滚点：本批仅文档变更，可回退该提交；未来 Revision apply 以逐批 MySQL Revision 行备份恢复，ES 以旧 alias 回切，Outbox/Delivery 以 manifest/归档副本恢复。所有 apply 前仍需用户明确确认。
+- 不为 13 篇有效文章补造 `mongo_content_id`。
+- 不把历史无草稿、无 Revision 绑定视为正文或搜索故障。
+- 不用当前正式正文伪造历史 Revision 内容。
+- 不删除 MySQL `body` 字段，不恢复把大正文写回 MySQL。
+- 不把 Elasticsearch 当权威库，不手工改写 ES 来掩盖 State/Outbox 问题。
+- 不删除失败 Delivery、Outbox、tombstone 或 Build 现场来让统计归零。
+- 不在未备份、未对账、未授权时回收 Mongo 正文或历史快照。
+- 不在当前阶段引入 Mongo 分片、MySQL 分区或千万级 Article 运行代码。
+
+## 10. 主要代码与运维边界
+
+| 范围 | 主要位置 | 职责 |
+| --- | --- | --- |
+| Blog 页面/读取 | `wagtailblog3/apps/blog/models.py` | StreamField、正文读写、发布/取消发布入口 |
+| Mongo 适配 | `wagtailblog3/apps/blog/mongo.py` | 版本/快照存取与错误分类 |
+| 发布服务 | `wagtailblog3/apps/blog/services/publication.py` | Revision 校验、State 指针和 Workflow/scheduled 围栏 |
+| 发布对账 | `wagtailblog3/apps/blog/services/publication_consistency.py` | 只读扫描、checkpoint 和差异分类 |
+| 清理任务 | `wagtailblog3/apps/blog/tasks.py`、`signals.py` | CleanupIntent 唤醒、租约、重试和引用保护 |
+| 旧文登记 | `wagtailblog3/apps/blog/management/commands/register_legacy_blog_page.py` | dry-run、expected-hash、单页 apply 和审计 |
+| 搜索文档 | `wagtailblog3/apps/search/services/document.py` | 正文来源和 ES 投影契约 |
+| 搜索投递 | `wagtailblog3/apps/search/services/delivery.py` | Target Delivery、generation/hash 围栏 |
+| 搜索重建 | `wagtailblog3/apps/search/services/rebuild.py` | checkpoint、catch-up 和 build gate |
+| alias | `wagtailblog3/apps/search/services/alias.py` | read alias 查询和原子切换 |
+| 运维基准 | `systemctl.md` | 环境、服务依赖、发布、健康检查和回滚 |
+
+任何运行时代码修改继续遵守第 22 号说明书：中文模块说明和必要 docstring、准确类型标注、不用 `Any` 隐藏未知契约，并报告 `compileall`、相关测试、Django check、迁移检查和 `git diff --check`。
+
+## 11. 发布、数据与回滚门禁
+
+### 11.1 测试环境
+
+1. 固定 `WAGTAILBLOG_ENV=test` 和 WSL2 Conda `wagtailblog-test`。
+2. 先 dry-run 和只读对账，再对准确目标申请 apply。
+3. ES 恢复以小批次执行，保留 Build、Outbox 和 Delivery 证据。
+4. alias 切换必须在 READY、两次 clean catch-up、严格一致性和原子回切测试后单独授权。
+
+### 11.2 生产环境
+
+1. 重新核实主机、目录、分支、commit、Conda、EnvironmentFile、服务名、ES alias 和备份状态。
+2. 在 WSL2 完成测试、commit、push，并确认本地、`origin/main`、GitHub 远端为同一 SHA。
+3. 生产工作树必须干净，使用 `fetch`、差异清单和 `merge --ff-only` 同步精确 commit。
+4. 数据迁移、回填、alias、环境文件、unit 和服务重启分别说明影响、备份、顺序、验收和回滚，再取得确认。
+5. 发布后检查四个服务、失败 unit、端口/socket、首页/后台、Django check、队列、Beat、Filebeat、ES、Outbox/Delivery 和应用日志。
+
+### 11.3 回滚原则
+
+- 代码：回退到上一个已验证 commit，但保留已应用的兼容表/列，除非反向迁移经过独立验证。
+- 正文：只切换 MySQL 指针或恢复备份，不删除不可变版本、草稿或 Revision。
+- 搜索：暂停受影响消费者，在一次 alias 操作中切回记录的旧物理索引；保留新旧索引和快照。
+- 任务：停止 dispatcher/consumer，保留 State、Outbox、Delivery、ScopeJob、CleanupIntent 和 checkpoint。
+- 数据清理：按 manifest 和定向备份恢复；不能通过创建伪造 Page/Revision 来补偿误删。
+
+## 12. 验收清单
+
+每个后续批次至少记录：
+
+- 实际修改与明确不修改的文件。
+- 环境、分支、commit、迁移和配置事实。
+- 数据读取/写入范围，是否涉及正文、Revision、索引或服务。
+- 定向测试、`compileall`、Django check、迁移漂移和 `git diff --check` 的精确结果。
+- State→Mongo、State→Outbox/Delivery、State→ES 的一致性结果。
+- Workflow、scheduled、取消发布、删除和权限变化中受影响的路径。
+- 备份位置、manifest/hash、回滚命令和保留期。
+- 未覆盖边界、历史数据污染和残余风险。
+
+历史数据问题必须按事实分类：真正的 State/Mongo 缺失是故障；旧 Revision 无新版指针、早期无草稿、已删页面 tombstone 和 `mongo_content_id=NULL` 则可能是合法兼容状态，不能混为一类。
+
+## 13. 模型与推理强度建议
+
+| 任务 | 建议角色/模型 | 推理 | 升级条件 | 验证门禁 |
+| --- | --- | --- | --- | --- |
+| 只读状态、文档和常规测试 | Luna | 低/中 | 证据冲突或涉及真实写入 | 输出范围受控、无正文/凭据 |
+| Django/Wagtail 局部实现 | Terra | 中/高 | 发布并发、权限或迁移 | 定向测试、check、迁移检查 |
+| ES rebuild/alias 和跨库一致性 | Sol | 高/xhigh | 默认高风险 | 快照、strict consistency、回切演练 |
+| 生产数据、清理和恢复 | Sol | 高/xhigh | 始终需要独立授权 | 备份、manifest、逐批验收、回滚 |
+| UI/后台验收 | Terra 或 Luna | 中 | 复杂交互/可访问性问题 | BrowserSkill/Playwright 证据和日志 |
+
+本轮文档压缩实际使用：主 agent 负责整合；Terra 高推理只读核对代码契约；Sol 高推理复核 P0/P1/P2、权限与回滚门禁；Luna 历史整理代理因服务 503 未完成，主 agent 使用本地标题索引和实施证据完成替代。MinerU 当前无已配置 collection，因此没有用其文档查询结果，未重复安装或扩大工具范围。
+
+模型选择不能替代测试、备份、生产授权或回滚演练，也不得把源码、凭据、生产日志、Mongo 正文或个人数据发送给外部模型。
+
+## 14. 本次文档压缩实施记录
+
+日期：2026-08-30。
+
+- 目标：把原约 1965 行、218 KB、包含重复编号和逐轮修改过程的方案，整理为当前架构、实施证据和后续计划的唯一维护版本。
+- 实际修改：仅重写本说明书；未修改 `AGENTS.md`、运行时代码、迁移、测试、配置或 `systemctl.md`。
+- 删除的内容：重复的早期提议、已经被实现取代的“尚未实现”描述、每个小批次反复出现的模型分工、测试和回滚模板、互相冲突的旧统计及重复章节编号。
+- 保留的内容：数据权威、不变量、Wagtail 8.0 生命周期、迁移范围、生产备份与 v005 证据、存量登记结果、当前未提交状态、P0/P1/P2 和回滚边界。
+- 数据/服务影响：无。未访问或修改 MySQL、Mongo、Redis、Elasticsearch、MinIO、Revision、正文、Outbox、alias 或 systemd 服务。
+- 回滚点：Git 中恢复本文件重写前版本；不需要数据或服务回滚。
+- 残余风险：工作区已有搜索修复、ScopeJob、管理命令和文档仍未形成新的发布提交；测试 v005 收敛和 alias 切换已完成。ScopeJob 已有消费者/租约骨架，但仍需在真实权限父子树场景持续验收；生产 readiness、联合恢复演练和千万级压测仍未完成。
+
+## 15. 测试 ES v005 受控恢复停止记录
+
+日期：2026-08-30。
+
+- 授权目标：排空 99 条 Delivery，恢复 checkpoint 到 632，完成两次 catch-up 和严格一致性，全部通过后切换测试 alias 并验收；任一错误立即停止，不操作生产。
+- 前置代码修复：排空命令 fail-fast 和 manifest 漂移保护；新版正文忽略旧 `mongo_content_id`；非公开 upsert 明确 retry；alias fresh gate 和旧物理索引原子回切。修改范围仅在 Search 服务、管理命令及测试，无迁移、配置或 unit 变化。
+- 前置验证：Django 5.2.8、Wagtail 8.0、Blog 迁移到 0034、Search 到 0007；相关 66 项测试通过，`compileall`、`manage.py check`、`makemigrations --check --dry-run`、`git diff --check` 通过。测试库无 `ContentSearchScopeJob`。
+- Delivery 结果：原 99 条按 20、20、20、20、19 五批处理完成；79 条 `succeeded`、21 条 `superseded`，当时 pending/processing/retry/dead 均为 0。
+- 停止点：首次 `search_rebuild_content_index --resume-build --confirm` 返回永久错误 `content_search_state_hash_mismatch`；checkpoint 保持 530/632，Build failed 从 162 累计到 218，catch-up streak 为 0。命令物化了 76 条新 pending Delivery。
+- 根因证据：只读重算 531–632 范围内 56 个公开页面，Mongo 正文缺失 0；page 604、608、610–620 共 13 条 State 的 `content_hash` 为空，而按正式正文计算的 hash 有效。rebuild 在写 ES 前拒绝空 State hash，因此未推进 checkpoint。
+- 当前一致性：State 165、v005 索引文档 104；`missing=62`、`stale=24`、`extra=1`，其余 ahead/hash/body version/generation/wrong tombstone 均为 0。extra 为既有不可搜索 tombstone 990001。
+- 未执行：未处理新产生的 76 条 Delivery，未重试 rebuild，未执行两次 catch-up，未切换 alias，未做 BrowserSkill 搜索验收。测试 read alias 仍唯一指向 `wagtailblog-test-content-replica0-v001`。
+- 数据/服务影响：只修改测试 Search Delivery/Outbox/Build 状态和 v005 投影；未修改 BlogPage、Revision、Mongo 正文、生产数据、生产 ES、systemd 或服务进程。`systemctl.md` 无需更新。
+- 回滚与下一门禁：保留所有 succeeded/superseded/pending Delivery、Build checkpoint 和 ES 文档作为审计现场，不反向改状态。下一批先重新 dry-run 新的 76 条 Delivery；若其能由消费者安全补齐 13 条空 hash，则分批排空后重新只读验证 State hash，再单次恢复 rebuild。任何 retry/dead 或 hash 仍为空时继续停止。
+## 16. 测试 v005 收尾记录（2026-08-30）
+
+- 环境：WSL2 `wagtailblog-test`，`WAGTAILBLOG_ENV=test`；仅操作测试 MySQL、MongoDB 和 Elasticsearch，未操作生产。
+- Delivery：76 条新建 Delivery 按 20、20、16 三批执行，全部 `succeeded`；随后 catch-up 物化的 3 条 Delivery 全部 `superseded`。最终 `pending=0`、`processing=0`、`retry=0`、`dead=0`。
+- Rebuild：从 checkpoint 530 恢复到 632，Build 进入 `ready`；13 条现代正文 State 的缺失 hash 通过 guarded 回填补齐，没有修改 Mongo 正文或旧 `mongo_content_id`。
+- Catch-up：连续两次检查均无未收敛 Delivery 和公开文档差异，`catch_up_clean_streak=2`。
+- Tombstone：为 7 个已删除页面的最新 tombstone Outbox 事件补建 Delivery 并成功写入 v005；清理 1 个无 State 的测试 ES 孤儿 tombstone `page_id=990001`，未触碰 MySQL/Mongo。
+- 严格一致性：最终 `missing=0`、`stale=0`、`ahead=0`、`hash_mismatch=0`、`body_version_mismatch=0`、`generation_mismatch=0`、`wrong_tombstone=0`、`extra=0`。
+- Alias：通过 fresh gate 后原子切换 `wagtailblog-test-content-read` 到 `wagtailblog-test-content-v005`；旧物理索引 `wagtailblog-test-content-replica0-v001` 保留为回滚点。
+- BrowserSkill：访问 `/zh-hans/search/?query=初识Django&type=blog` 返回 1 条“初识Django”及正文摘要/详情链接，资源请求为 200，无应用 JS 异常；session 和临时 runserver 均已停止。
+- 测试库仍提示 1 个历史 `wagtailcore` 未应用迁移；本批未擅自迁移，需独立维护批次处理。
+
+## 17. 面向未来数据的实施路线
+
+本路线不要求先修复全部历史文章，按风险和规模逐步启用：
+
+| 阶段 | 目标 | 必须完成的门禁 |
+| --- | --- | --- |
+| F1 新写入统一 | 新建、编辑、Workflow、定时发布均写 Mongo body_version + MySQL State/Outbox | 发布集成测试、取消发布/删除 tombstone 测试、失败重试测试 |
+| F2 搜索稳定运行 | v005 read alias 服务未来文章，Delivery/对账持续运行 | strict consistency、dead=0、alias 唯一指向、搜索抽样验收 |
+| F3 权限与运维 | ScopeJob 父子树收敛、readiness、监控和恢复演练 | 权限收紧/恢复测试、服务启动依赖检查、RPO/RTO 记录 |
+| F4 百万级压测 | 用脱敏合成数据验证吞吐、延迟和容量 | 1 万/10 万/100 万分阶段压测；未达 SLO 不进入下一阶段 |
+| F5 Article 演进（触发式） | 仅当 BlogPage 不满足 SLO 或产品需要海量采集时拆分独立 Article catalog | 独立权限/生命周期设计、bulk 导入、双写/回滚和数据迁移方案单独审批 |
+
+非目标：本路线不删除旧字段、不强制补造历史 Revision、不把历史错误对账归零、不在未压测前预设分片数量，也不直接对生产数据执行回填或清理。
+
+## 18. 未来数据链路实现批次记录（2026-08-30）
+
+- F1 生命周期门禁：补强 live BlogPage 直接删除路径。删除仍 live 页面时先递增 `publication_generation`，再写 tombstone，防止迟到 upsert 复活；新增集成测试验证 State 与最新 tombstone generation。
+- F3 ScopeJob：接入 maintenance task/Beat 调度，补齐稳定主键分页、租约回收、连续失败计数、成功批次清零、rescan 和父子树定向测试。连续失败达到上限才进入 dead，不因大子树批次数提前死信。
+- F2 搜索门禁：测试 v005 已完成 Delivery 清零、rebuild checkpoint 632、两次 clean catch-up、strict consistency 全部归零和 read alias 原子切换；本批未改生产索引。
+- 验证：Blog/Workflow/搜索定向测试共 87 项通过；`manage.py check`、`makemigrations --check --dry-run`、`compileall`、`git diff --check` 通过。MySQL 条件唯一约束 W036 为既有能力提示。
+- 数据/服务影响：仅修改代码、测试和方案文档；未回填或删除历史正文，未修改生产数据库、Mongo、ES、alias 或 systemd 服务。当前修改尚未形成发布 commit。
+- 剩余门禁：真实父子页面权限场景验收、生产 readiness/联合恢复演练、百万级脱敏压测，以及正式 commit/push/生产发布仍需独立批次和授权。
+
+## 19. 测试环境 500 篇合成索引压测（2026-08-30）
+
+- 范围：仅测试 Elasticsearch，使用临时 `wagtailblog-test-bench-v005-20260830` 物理索引；500 条完全脱敏的公开 upsert 文档，不写入 BlogPage、BlogPublicationState、Outbox 或 Mongo。
+- 结果：bulk 成功 500/500，耗时约 0.0309 秒；全文查询命中 500 条，耗时约 0.0037 秒；按 `page_id` 排序分页返回 100 条，耗时约 0.0031 秒。
+- 版本围栏：对首条文档提交旧 `content_version=0`，被 ES 外部版本机制判定为 superseded=1，未覆盖新版本。
+- 清理：压测结束后已删除临时物理索引，未改变测试 v005 serving alias。
+- 解释：该结果只代表当前单节点测试 ES、短正文和单批 bulk 的基线，不等价于百万篇容量承诺；后续扩容仍须按 1 万、10 万、100 万脱敏数据分阶段压测。

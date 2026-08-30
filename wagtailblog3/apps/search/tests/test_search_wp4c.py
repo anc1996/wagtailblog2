@@ -266,6 +266,10 @@ class ContentSearchAliasCommandTests(TestCase):
             ),
             patch("search.management.commands.search_switch_content_alias.verify_content_search_index"),
             patch(
+                "search.management.commands.search_switch_content_alias.get_content_search_build_gate",
+                return_value={"clean": True},
+            ),
+            patch(
                 "search.management.commands.search_switch_content_alias.switch_content_search_read_alias",
                 return_value=switched,
             ) as switch,
@@ -284,6 +288,35 @@ class ContentSearchAliasCommandTests(TestCase):
         self.build.refresh_from_db()
         self.assertEqual(self.target.role, ContentSearchTargetRole.SERVING)
         self.assertEqual(self.build.status, SearchIndexBuildStatus.SERVING)
+
+    @override_settings(
+        CONTENT_SEARCH_INDEX_PREFIX="wagtailblog-test-content",
+        CONTENT_SEARCH_CONNECTION_NAME="default",
+    )
+    def test_confirm_refuses_dirty_fresh_gate_before_alias_write(self):
+        with (
+            patch.dict("os.environ", {"WAGTAILBLOG_ENV": "test"}),
+            patch(
+                "search.management.commands.search_switch_content_alias.get_content_search_read_alias_indices",
+                return_value=("wagtailblog-test-content-v000",),
+            ),
+            patch(
+                "search.management.commands.search_switch_content_alias.get_content_search_build_gate",
+                return_value={"clean": False},
+            ),
+            patch(
+                "search.management.commands.search_switch_content_alias.switch_content_search_read_alias"
+            ) as switch,
+            self.assertRaisesMessage(CommandError, "content_build_gate_not_clean"),
+        ):
+            call_command(
+                "search_switch_content_alias",
+                "--target",
+                self.target.target_id,
+                "--confirm",
+            )
+
+        switch.assert_not_called()
 
     @override_settings(CONTENT_SEARCH_INDEX_PREFIX="wagtailblog-test-content")
     def test_confirm_refuses_production_before_alias_write(self):
@@ -321,22 +354,54 @@ class ContentSearchAliasCommandTests(TestCase):
                 return_value=(self.target.index_name,),
             ),
             patch(
-                "search.management.commands.search_rollback_content_alias.clear_content_search_read_alias",
-                return_value=(self.target.index_name,),
-            ) as clear_alias,
+                "search.management.commands.search_rollback_content_alias.switch_content_search_read_alias",
+                return_value=SimpleNamespace(new_index="wagtailblog-test-content-v000"),
+            ) as switch_alias,
         ):
             call_command(
                 "search_rollback_content_alias",
                 "--target",
                 self.target.target_id,
+                "--previous-index",
+                "wagtailblog-test-content-v000",
                 "--confirm",
                 stdout=output,
             )
 
         report = json.loads(output.getvalue())
         self.assertTrue(report["alias_changed"])
-        clear_alias.assert_called_once()
+        self.assertEqual(report["new_indices"], ["wagtailblog-test-content-v000"])
+        switch_alias.assert_called_once()
         self.target.refresh_from_db()
         self.build.refresh_from_db()
         self.assertEqual(self.target.role, ContentSearchTargetRole.BUILDING)
         self.assertEqual(self.build.status, SearchIndexBuildStatus.READY)
+
+    @override_settings(
+        CONTENT_SEARCH_INDEX_PREFIX="wagtailblog-test-content",
+        CONTENT_SEARCH_CONNECTION_NAME="default",
+    )
+    def test_confirm_rollback_requires_previous_index_before_alias_write(self):
+        self.target.role = ContentSearchTargetRole.SERVING
+        self.target.save(update_fields=("role",))
+        self.build.status = SearchIndexBuildStatus.SERVING
+        self.build.save(update_fields=("status",))
+        with (
+            patch.dict("os.environ", {"WAGTAILBLOG_ENV": "test"}),
+            patch(
+                "search.management.commands.search_rollback_content_alias.get_content_search_read_alias_indices",
+                return_value=(self.target.index_name,),
+            ),
+            patch(
+                "search.management.commands.search_rollback_content_alias.switch_content_search_read_alias"
+            ) as switch_alias,
+            self.assertRaisesMessage(CommandError, "previous_index_required"),
+        ):
+            call_command(
+                "search_rollback_content_alias",
+                "--target",
+                self.target.target_id,
+                "--confirm",
+            )
+
+        switch_alias.assert_not_called()

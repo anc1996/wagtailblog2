@@ -6,7 +6,7 @@ import json
 import os
 
 from django.conf import settings
-from django.core.management.base import BaseCommand, CommandError
+from django.core.management.base import BaseCommand, CommandError, CommandParser
 from django.db import transaction
 
 from search.models import (
@@ -22,12 +22,13 @@ from search.services.alias import (
 )
 from search.services.content_index import validate_content_index_name
 from search.services.elasticsearch import ContentSearchElasticsearchError, verify_content_search_index
+from search.services.rebuild import get_content_search_build_gate
 
 
 class Command(BaseCommand):
     help = "在测试环境原子切换独立内容索引 read alias，默认只输出预演结果"
 
-    def add_arguments(self, parser):
+    def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument("--target", required=True, help="精确 ContentSearchTarget.target_id")
         parser.add_argument("--alias", help="稳定 read alias，默认使用 CONTENT_SEARCH_READ_ALIAS")
         parser.add_argument(
@@ -36,7 +37,7 @@ class Command(BaseCommand):
             help="确认执行测试环境 ES alias 写入和 Target 状态更新",
         )
 
-    def handle(self, *args, **options):
+    def handle(self, *args: object, **options: object) -> None:
         environment = os.environ.get("WAGTAILBLOG_ENV", "unset")
         target_id = options["target"]
         try:
@@ -93,6 +94,13 @@ class Command(BaseCommand):
             SearchIndexBuildStatus.SERVING,
         ):
             raise CommandError("content_build_not_ready")
+
+        # READY 之后仍可能产生新 Delivery；切换前必须重新验证当前 checkpoint、投递和 ES 一致性。
+        gate = get_content_search_build_gate(target.target_id, mutate=False)
+        report["gate"] = gate
+        if not gate.get("clean"):
+            self.stdout.write(json.dumps(report, ensure_ascii=False, sort_keys=True))
+            raise CommandError("content_build_gate_not_clean")
 
         try:
             verify_content_search_index(target)

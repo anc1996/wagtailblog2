@@ -221,6 +221,33 @@ class ContentIndexDefinitionTests(SimpleTestCase):
         )
         self.assertEqual(document.document["body_text"], "正式正文")
 
+    def test_document_reads_published_version_without_legacy_content_id(self):
+        page = _FormalContentPage()
+        page._meta = SimpleNamespace()
+        page.mongo_content_id = None
+        state_values = Mock()
+        state_values.first.return_value = {
+            "published_body_version_id": "body-v2",
+            "published_body_sha256": "a" * 64,
+            "published_body_schema_version": 1,
+        }
+        state_filter = Mock()
+        state_filter.values.return_value = state_values
+        manager = Mock()
+        manager.get_content_body_version.return_value = {
+            "body": [{"type": "markdown_block", "value": "正式正文"}],
+        }
+
+        with (
+            patch("blog.models.BlogPublicationState.objects.filter", return_value=state_filter),
+            patch("blog.models.MongoManager", return_value=manager),
+        ):
+            document = build_formal_content_document(page, content_version=8)
+
+        self.assertIsNotNone(document)
+        self.assertIsNone(document.mongo_content_id)
+        self.assertEqual(page.mongo_read_count, 0)
+
     def test_document_falls_back_to_legacy_content_without_published_pointer(self):
         page = _FormalContentPage()
         page._meta = SimpleNamespace()
@@ -251,6 +278,24 @@ class ContentIndexDefinitionTests(SimpleTestCase):
         self.assertEqual(missing_page_ids, [second_page.pk])
         self.assertEqual(first_page.mongo_read_count, 0)
         self.assertEqual(second_page.mongo_read_count, 0)
+
+    def test_batch_projection_uses_state_body_when_legacy_content_id_is_empty(self):
+        page = _FormalContentPage()
+        page.mongo_content_id = None
+
+        documents, missing_page_ids = build_formal_content_documents(
+            [page],
+            {page.pk: 1},
+            {f"page:{page.pk}": page.formal_content},
+            body_version_ids={page.pk: "published-v1"},
+            publication_generations={page.pk: 1},
+        )
+
+        self.assertEqual(missing_page_ids, [])
+        self.assertEqual(len(documents), 1)
+        self.assertIsNone(documents[0].mongo_content_id)
+        self.assertEqual(documents[0].document["body_version_id"], "published-v1")
+        self.assertEqual(page.mongo_read_count, 0)
 
     def test_batch_reader_uses_one_in_query_and_excludes_invalid_ids(self):
         first_id = "64e7b6ef1d86d3f4b6e4e001"

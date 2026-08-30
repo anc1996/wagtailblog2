@@ -3,7 +3,9 @@ from unittest.mock import Mock, patch
 
 from django.test import TestCase, override_settings
 from django.utils import timezone
+from wagtail.models import Page
 
+from blog.models import BlogPage
 from search.models import (
     ContentSearchDelivery,
     ContentSearchOperation,
@@ -95,6 +97,66 @@ class ContentSearchDeliveryTests(BlogLifecycleFixtureMixin, TestCase):
         self.assertTrue(document["searchable"])
         self.assertEqual(delivery.status, ContentSearchStatus.SUCCEEDED)
         self.assertEqual(event.status, ContentSearchStatus.SUCCEEDED)
+
+    def test_delivery_backfills_missing_hash_from_published_version_without_legacy_id(self):
+        page, event = self._published_event("正式 Mongo 正文")
+        BlogPage.objects.filter(pk=page.pk).update(mongo_content_id=None)
+        state = ContentSearchState.objects.get(page_id=page.pk)
+        ContentSearchState.objects.filter(pk=state.pk).update(
+            content_hash=None,
+            mongo_content_id=None,
+        )
+        ContentSearchOutbox.objects.filter(pk=event.pk).update(
+            content_hash=None,
+            mongo_content_id=None,
+        )
+        original_version = state.content_version
+        original_event_count = ContentSearchOutbox.objects.count()
+        self._target()
+        delivery_id = self._delivery_id_for(event)
+
+        with patch(
+            "search.services.delivery.write_content_search_document",
+            return_value=ContentSearchWriteResult(status="succeeded"),
+        ):
+            result = process_content_search_delivery(delivery_id)
+
+        state.refresh_from_db()
+        event.refresh_from_db()
+        self.assertEqual(result, ContentSearchStatus.SUCCEEDED)
+        self.assertEqual(len(state.content_hash), 64)
+        self.assertEqual(event.content_hash, state.content_hash)
+        self.assertEqual(state.content_version, original_version)
+        self.assertEqual(ContentSearchOutbox.objects.count(), original_event_count)
+
+    def test_modern_body_identity_ignores_mismatched_legacy_ids(self):
+        page, event = self._published_event("正式 Mongo 正文")
+        ContentSearchState.objects.filter(page_id=page.pk).update(mongo_content_id="state-legacy")
+        ContentSearchOutbox.objects.filter(pk=event.pk).update(mongo_content_id="event-legacy")
+        self._target()
+        delivery_id = self._delivery_id_for(event)
+
+        with patch(
+            "search.services.delivery.write_content_search_document",
+            return_value=ContentSearchWriteResult(status="succeeded"),
+        ):
+            result = process_content_search_delivery(delivery_id)
+
+        self.assertEqual(result, ContentSearchStatus.SUCCEEDED)
+
+    def test_non_public_upsert_retries_instead_of_succeeding_without_tombstone(self):
+        page, event = self._published_event("即将收紧权限的正文")
+        self._target()
+        delivery_id = self._delivery_id_for(event)
+        Page.objects.filter(pk=page.pk).update(live=False)
+
+        with patch("search.services.delivery.write_content_search_document") as write_document:
+            result = process_content_search_delivery(delivery_id)
+
+        delivery = ContentSearchDelivery.objects.get(pk=delivery_id)
+        self.assertEqual(result, ContentSearchStatus.RETRY)
+        self.assertEqual(delivery.last_error_code, "content_search_page_not_public")
+        write_document.assert_not_called()
 
     def test_expired_lease_is_reclaimed_then_processed(self):
         _state, event = self._tombstone_event(page_id=80001, content_version=1)

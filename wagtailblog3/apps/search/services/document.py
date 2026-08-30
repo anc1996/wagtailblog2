@@ -72,7 +72,7 @@ def _published_body_version_content(page: object) -> tuple[bool, object | None]:
 @dataclass(frozen=True)
 class FormalContentSnapshot:
     """正式正文的稳定标识和哈希；草稿 revision 不参与计算。"""
-    mongo_content_id: str
+    mongo_content_id: str | None
     content_hash: str
     body_version_id: str | None = None
     publication_generation: int | None = None
@@ -81,7 +81,7 @@ class FormalContentSnapshot:
 @dataclass(frozen=True)
 class FormalContentDocument:
     """待写入搜索索引的最小公开文档及其版本校验信息。"""
-    mongo_content_id: str
+    mongo_content_id: str | None
     content_hash: str
     document: dict
     body_version_id: str | None = None
@@ -107,15 +107,14 @@ def _build_formal_payload(
     """从正式 Mongo 正文构造索引输入，草稿 Revision 永远不参与公开搜索版本。"""
 
     mongo_content_id = getattr(page, "mongo_content_id", None)
-    if not mongo_content_id:
-        return None
-
-	# 回填可传入同批次已读取的正式正文，避免每篇文章再次访问 MongoDB。
     if formal_content is _FORMAL_CONTENT_UNSET:
         state_configured, state_content = _published_body_version_content(page)
         if state_configured:
             formal_content = state_content
         else:
+            # 只有兼容旧 blog_content 的读取路径仍依赖旧 ObjectId。
+            if not mongo_content_id:
+                return None
             formal_content = page.get_content_from_mongodb()
     # 空文章正文是合法内容，只有正式文档不存在才应判定为 Mongo 缺失。
     if formal_content is None:
@@ -134,7 +133,7 @@ def _build_formal_payload(
         "locale_id": getattr(page, "locale_id", None),
         "tag_ids": _related_ids(page, "tags"),
         "category_ids": _related_ids(page, "categories"),
-        "mongo_content_id": str(mongo_content_id),
+        "mongo_content_id": str(mongo_content_id) if mongo_content_id else None,
     }
 
 

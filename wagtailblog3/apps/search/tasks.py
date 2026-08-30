@@ -21,6 +21,16 @@ def wake_content_search_delivery(event_id: Any = None) -> int:
         logger.info("content_search_wakeup_deferred event_id=%s", event_id)
         return 0
 
+    if isinstance(event_id, str) and event_id.startswith("scope:"):
+        try:
+            job_id = int(event_id.split(":", 1)[1])
+        except (TypeError, ValueError):
+            logger.error("content_search_scope_wakeup_invalid event_id=%s", event_id)
+            return 0
+        return 1 if consume_content_search_scope_job.apply_async(
+            args=(job_id,), queue="maintenance"
+        ) else 0
+
     return dispatch_pending_content_search_deliveries()
 
 
@@ -52,4 +62,33 @@ def dispatch_pending_content_search_deliveries(limit: int | None = None) -> int:
                 "content_search_delivery_dispatch_failed delivery_id=%s",
                 delivery_id,
             )
+    return dispatched_count
+
+
+@shared_task(name="search.tasks.consume_content_search_scope_job", ignore_result=True)
+def consume_content_search_scope_job(job_id: int) -> str:
+    """maintenance Worker 入口：处理权限范围任务的一个可恢复批次。"""
+
+    # 延迟导入避免 outbox -> tasks -> scope -> outbox 的启动期循环依赖。
+    from search.services.scope import process_scope_job
+
+    return process_scope_job(int(job_id))
+
+
+@shared_task(name="search.tasks.dispatch_pending_content_search_scope_jobs", ignore_result=True)
+def dispatch_pending_content_search_scope_jobs(limit: int | None = None) -> int:
+    """派发待处理范围任务；租约和检查点由消费者负责最终一致性。"""
+
+    if not settings.CONTENT_SEARCH_CONSUMER_ENABLED:
+        return 0
+    dispatched_count = 0
+    # 延迟导入避免 Django app ready 阶段加载 ScopeJob 服务。
+    from search.services.scope import due_scope_job_ids
+
+    for job_id in due_scope_job_ids(limit=limit):
+        try:
+            consume_content_search_scope_job.apply_async(args=(job_id,), queue="maintenance")
+            dispatched_count += 1
+        except Exception:
+            logger.error("content_search_scope_dispatch_failed job_id=%s", job_id)
     return dispatched_count

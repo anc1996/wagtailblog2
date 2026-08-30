@@ -278,6 +278,10 @@ class ContentSearchScopeJob(models.Model):
         default=ContentSearchScopeJobStatus.PENDING,
     )
     checkpoint_page_id = models.PositiveBigIntegerField(default=0)
+    attempts = models.PositiveIntegerField(default=0)
+    locked_by = models.CharField(max_length=128, blank=True, default="")
+    lock_expires_at = models.DateTimeField(null=True, blank=True)
+    rescan_requested = models.BooleanField(default=False)
     last_error_code = models.CharField(max_length=64, blank=True, default="")
     # 范围任务的错误信息同样只允许记录脱敏诊断，避免把页面正文带入审计表。
     last_error_message = models.TextField(max_length=2000, blank=True, default="")

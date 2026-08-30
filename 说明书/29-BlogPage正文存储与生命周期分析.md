@@ -1830,3 +1830,11 @@ Wagtail 的历史页本身主要读取 MySQL 的 `PageLogEntry`、`Revision` 元
 - 测试：新增 `blog.test_public_body_reads` 和 `search.tests.test_search_content_index`，并扩充 lifecycle 回归测试；P0 定向测试 27 项通过，`manage.py check`、`makemigrations --check --dry-run`、`compileall` 和 `git diff --check` 通过。
 - 数据与服务影响：本批未操作数据库、ES alias、Celery 或 systemd；仅修改运行时读取/保存路径及测试。
 - 残余风险：Wagtail Revision 历史绑定、Workflow/定时发布边界、批量 rebuild 指针读取、并发登记审计和测试 ES v005 全量重建仍未完成，禁止以本批通过宣称全链路完成。
+
+### 76. P1 批量重建与登记审计保护（2026-08-30）
+
+- 搜索重建：批量 rebuild 新增一次性读取 `BlogPublicationState.published_body_version_id` 对应的 Mongo 不可变正文，指针无效的页面才回退旧 `blog_content`，避免循环内 N+1。旧 rebuild 单元测试需在后续补充指针读取 mock，本批未切换 ES alias。
+- 登记审计：新增 `LegacyBlogRegistrationAudit` 及 `0034` 迁移，按 `(page_id, body_sha256, body_schema_version)` 唯一去重，记录 processing/succeeded/failed、attempts、锁超时和错误代码。`register_legacy_blog_page --apply` 在 Mongo 写入前创建审计锁，成功后回写版本 ID；同一 page/hash 重试返回 `already_registered`。
+- 验证：测试库已应用 `0034`，对 page 38 以正确 expected-hash 连续执行两次 `--apply`，均返回 `already_registered`，审计记录仅 1 条、attempts=1、status=succeeded。
+- 测试：`manage.py check`、`makemigrations --check --dry-run`、`compileall` 及 `git diff --check` 通过；P0 测试 27 项通过。本批未执行生产迁移、ES alias 切换或服务重启。
+- 残余风险：审计锁与 Mongo 写入不在同一跨库事务，过期恢复、并发失败和批量断点恢复仍需压测；历史 Revision 未回写新版本指针、测试 ES v005 未全量建好。

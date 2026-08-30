@@ -128,6 +128,50 @@ class BlogPublicationState(models.Model):
 		return f"page={self.page_id} generation={self.publication_generation}"
 
 
+class LegacyBlogRegistrationStatus(models.TextChoices):
+	"""旧正文登记审计的持久化状态。"""
+
+	PROCESSING = "processing", "处理中"
+	SUCCEEDED = "succeeded", "已完成"
+	FAILED = "failed", "失败"
+
+
+class LegacyBlogRegistrationAudit(models.Model):
+	"""按页面、正文哈希和 schema 去重的旧正文登记审计记录。
+
+	记录先于 Mongo 写入，状态更新与页面 State 绑定在独立 MySQL 事务中；
+	Mongo 或 MySQL 失败只更新错误字段，不删除已生成的不可变版本。
+	"""
+
+	page_id = models.PositiveBigIntegerField()
+	body_sha256 = models.CharField(max_length=64)
+	body_schema_version = models.PositiveIntegerField(default=1)
+	status = models.CharField(
+		max_length=16,
+		choices=LegacyBlogRegistrationStatus.choices,
+		default=LegacyBlogRegistrationStatus.PROCESSING,
+	)
+	body_version_id = models.CharField(max_length=128, blank=True, default="")
+	attempts = models.PositiveIntegerField(default=0)
+	last_error_code = models.CharField(max_length=64, blank=True, default="")
+	locked_by = models.CharField(max_length=128, blank=True, default="")
+	lock_expires_at = models.DateTimeField(null=True, blank=True)
+	created_at = models.DateTimeField(auto_now_add=True)
+	updated_at = models.DateTimeField(auto_now=True)
+	completed_at = models.DateTimeField(null=True, blank=True)
+
+	class Meta:
+		constraints = [
+			models.UniqueConstraint(
+				fields=("page_id", "body_sha256", "body_schema_version"),
+				name="blog_legacy_reg_page_hash_uq",
+			)
+		]
+		indexes = [
+			models.Index(fields=("status", "lock_expires_at"), name="blog_legacy_reg_status_idx"),
+		]
+
+
 class BlogPublicationConsistencyCheckpoint(models.Model):
 	"""保存只读对账周期的游标和租约，不参与页面发布或正文写入。"""
 

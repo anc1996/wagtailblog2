@@ -10,16 +10,25 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import socket
+import uuid
 from collections import defaultdict
+from datetime import timedelta
 from typing import Any
 
 import pymongo
 from bson import json_util
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
-from django.db import transaction
+from django.db import IntegrityError, transaction
+from django.utils import timezone
 
-from blog.models import BlogPage, BlogPublicationState
+from blog.models import (
+	BlogPage,
+	BlogPublicationState,
+	LegacyBlogRegistrationAudit,
+	LegacyBlogRegistrationStatus,
+)
 from wagtail.models import Revision
 
 logger = logging.getLogger(__name__)
@@ -102,10 +111,36 @@ class Command(BaseCommand):
 		body = (legacy_docs.get(int(page.pk)) or {}).get("body")
 		if not isinstance(body, list) or _body_sha256(body) != expected_hash:
 			raise CommandError("旧正文缺失或哈希不匹配，已拒绝登记")
+		worker_id = f"{socket.gethostname()}:{uuid.uuid4().hex}"
+		audit_id = None
+		try:
+			with transaction.atomic():
+				audit, created = LegacyBlogRegistrationAudit.objects.select_for_update().get_or_create(
+					page_id=page.pk,
+					body_sha256=expected_hash.lower(),
+					body_schema_version=1,
+					defaults={"status": LegacyBlogRegistrationStatus.PROCESSING},
+				)
+				if not created and audit.status == LegacyBlogRegistrationStatus.SUCCEEDED and audit.body_version_id:
+					self.stdout.write(json.dumps({"status": "already_registered", "page_id": page.pk, "body_version_id": audit.body_version_id}, ensure_ascii=False, sort_keys=True))
+					return
+				if not created and audit.status == LegacyBlogRegistrationStatus.PROCESSING and audit.lock_expires_at and audit.lock_expires_at > timezone.now():
+					raise CommandError("该页面登记正在由其他任务处理")
+				audit.status = LegacyBlogRegistrationStatus.PROCESSING
+				audit.attempts = int(audit.attempts or 0) + 1
+				audit.locked_by = worker_id
+				audit.lock_expires_at = timezone.now() + timedelta(minutes=10)
+				audit.last_error_code = ""
+				audit.save(update_fields=("status", "attempts", "locked_by", "lock_expires_at", "last_error_code", "updated_at"))
+				audit_id = audit.pk
+		except IntegrityError as exc:
+			raise CommandError("登记审计记录并发冲突，请稍后重试") from exc
 		try:
 			from wagtailblog3.mongo import MongoManager
 			version = MongoManager().save_content_body_version("blog_page", page.pk, body)
 		except Exception as exc:
+			if audit_id:
+				LegacyBlogRegistrationAudit.objects.filter(pk=audit_id).update(status=LegacyBlogRegistrationStatus.FAILED, last_error_code=type(exc).__name__, lock_expires_at=None, updated_at=timezone.now())
 			logger.error("legacy_registration_mongo_failed page_id=%s error=%s", page.pk, type(exc).__name__)
 			raise CommandError("Mongo 正文版本写入失败，未创建 State") from exc
 		try:
@@ -132,6 +167,8 @@ class Command(BaseCommand):
 						ContentSearchOutboxService.record_publication(locked)
 					result = {"status": "registered", "page_id": locked.pk, **version}
 		except Exception as exc:
+			if audit_id:
+				LegacyBlogRegistrationAudit.objects.filter(pk=audit_id).update(status=LegacyBlogRegistrationStatus.FAILED, last_error_code=type(exc).__name__, lock_expires_at=None, updated_at=timezone.now())
 			logger.error(
 				"legacy_registration_mysql_failed page_id=%s body_version_id=%s error=%s",
 				page.pk,
@@ -141,6 +178,14 @@ class Command(BaseCommand):
 			raise CommandError(
 				"MySQL 登记失败，事务已回滚；Mongo 版本保留，可按相同 hash 重试"
 			) from exc
+		if audit_id:
+			LegacyBlogRegistrationAudit.objects.filter(pk=audit_id).update(
+				status=LegacyBlogRegistrationStatus.SUCCEEDED,
+				body_version_id=str(version["body_version_id"]),
+				lock_expires_at=None,
+				completed_at=timezone.now(),
+				updated_at=timezone.now(),
+			)
 		self.stdout.write(json.dumps(result, ensure_ascii=False, sort_keys=True))
 
 	def _build_report(self, pages: list[BlogPage]) -> dict[str, Any]:

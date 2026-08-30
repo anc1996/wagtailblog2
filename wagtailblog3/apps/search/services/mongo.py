@@ -17,6 +17,62 @@ class ContentSearchMongoReadError(Exception):
         self.code = code
 
 
+def read_published_body_versions_by_page(
+	page_refs: Mapping[int, Mapping[str, object]],
+	mongo_manager: Any = None,
+) -> dict[str, Mapping[str, list[Any]]]:
+	"""一次查询读取多个页面的已发布不可变正文版本。
+
+	``page_refs`` 由页面主键映射到 ``body_version_id``、``body_sha256`` 和
+	``body_schema_version``。查询结果按 ``page:<id>`` 返回，供批量索引直接投影；
+	缺失或字段不完整的版本不会回退到其他页面正文。函数只读 MongoDB，单次查询
+	失败统一转换为脱敏的搜索读取错误。
+	"""
+	if not page_refs:
+		return {}
+	queries: list[dict[str, object]] = []
+	for page_id, ref in page_refs.items():
+		version_id = ref.get("body_version_id")
+		body_sha256 = ref.get("body_sha256")
+		schema_version = ref.get("body_schema_version")
+		if (
+			isinstance(version_id, str)
+			and version_id
+			and isinstance(body_sha256, str)
+			and len(body_sha256) == 64
+			and isinstance(schema_version, int)
+			and schema_version > 0
+		):
+			queries.append(
+				{
+					"aggregate_type": "blog_page",
+					"aggregate_id": str(page_id),
+					"body_version_id": version_id,
+					"body_sha256": body_sha256,
+					"body_schema_version": schema_version,
+				}
+			)
+	if not queries:
+		return {}
+	try:
+		manager = mongo_manager or MongoManager()
+		cursor = manager.content_body_versions.find(
+			{"$or": queries},
+			{"_id": 0, "aggregate_id": 1, "body_version_id": 1, "body": 1},
+		)
+		by_page: dict[str, Mapping[str, list[Any]]] = {}
+		for document in cursor:
+			if not isinstance(document, dict) or not isinstance(document.get("body"), list):
+				continue
+			aggregate_id = document.get("aggregate_id")
+			if aggregate_id is None:
+				continue
+			by_page[f"page:{aggregate_id}"] = {"body": document["body"]}
+		return by_page
+	except Exception as error:
+		raise ContentSearchMongoReadError("mongo_published_body_version_batch_read_failed") from error
+
+
 def read_formal_contents_by_id(
     mongo_content_ids: Iterable[Any],
     mongo_manager: Any = None,

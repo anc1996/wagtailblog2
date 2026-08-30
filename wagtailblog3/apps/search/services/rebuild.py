@@ -9,7 +9,7 @@ from django.db import transaction
 from django.db.models import Max
 from django.utils import timezone
 
-from blog.models import BlogPage
+from blog.models import BlogPage, BlogPublicationState
 from search.models import (
     ContentSearchOperation,
     ContentSearchState,
@@ -35,6 +35,7 @@ from search.services.elasticsearch import (
 from search.services.mongo import (
     ContentSearchMongoReadError,
     read_formal_contents_by_id,
+    read_published_body_versions_by_page,
 )
 
 
@@ -286,7 +287,27 @@ def rebuild_content_search_batch(target_id: str, batch_size: int, max_batch_byte
 
     mongo_ids = [getattr(page, "mongo_content_id", None) for page in pages]
     try:
-        formal_contents = read_formal_contents_by_id(mongo_ids, page_ids=page_ids)
+        publication_states = BlogPublicationState.objects.in_bulk(page_ids, field_name="page_id")
+        pointer_refs = {
+            page_id: {
+                "body_version_id": state.published_body_version_id,
+                "body_sha256": state.published_body_sha256,
+                "body_schema_version": state.published_body_schema_version,
+            }
+            for page_id, state in publication_states.items()
+            if state.published_body_version_id
+        }
+        formal_contents = read_published_body_versions_by_page(pointer_refs, mongo_manager=None)
+        legacy_page_ids = [page_id for page_id in page_ids if f"page:{page_id}" not in formal_contents]
+        if legacy_page_ids:
+            legacy_ids = [
+                getattr(page, "mongo_content_id", None)
+                for page in pages
+                if page.pk in legacy_page_ids
+            ]
+            formal_contents.update(
+                read_formal_contents_by_id(legacy_ids, page_ids=legacy_page_ids)
+            )
         versions = {page_id: states[page_id].content_version for page_id in page_ids}
         body_version_ids = {
             page_id: states[page_id].body_version_id for page_id in page_ids

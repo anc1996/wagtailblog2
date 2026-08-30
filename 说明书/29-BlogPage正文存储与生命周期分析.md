@@ -623,3 +623,13 @@ Elasticsearch unified typed projection
 - 版本围栏：对首条文档提交旧 `content_version=0`，被 ES 外部版本机制判定为 superseded=1，未覆盖新版本。
 - 清理：压测结束后已删除临时物理索引，未改变测试 v005 serving alias。
 - 解释：该结果只代表当前单节点测试 ES、短正文和单批 bulk 的基线，不等价于百万篇容量承诺；后续扩容仍须按 1 万、10 万、100 万脱敏数据分阶段压测。
+
+## 20. 生产代码同步记录（2026-08-30）
+
+- 提交：`eceed3f4f57aecd8acfbd759f2c4add16f702233`，已推送 `origin/main` 并 fast-forward 同步生产。
+- 备份：创建 `/home/source/Django/wagtail/backups/wagtailblog3-pre-future-lifecycle-20260830-203507/`，包含 MySQL dump、Mongo 三集合、环境/unit 清单、ES health/alias 和 SHA-256 校验。
+- 迁移：生产应用 `blog.0034`、`search.0008`；未执行正文回填、历史 Revision 修复、ES 重建或数据清理。
+- 服务：`wagtailblog3`、maintenance Worker、Beat、Filebeat 均 active/enabled；Django `check` 通过；生产工作树干净。
+- 搜索：v005 Target enabled，1100 条 Delivery succeeded、无 pending/processing/retry/dead；read alias 唯一指向 `wagtailblog-prod-content-v005`。
+- 严格对账：发现 `missing=4`（page 1179、1187、1188、1192），其余 stale/ahead/hash/body version/generation/wrong tombstone 均为 0；按历史兼容策略不处理，需未来独立历史数据核对批次确认。
+- ES 集群为单节点 yellow（无主分片缺失，14 个副本未分配），属于既有容量状态；未擅自调整副本数或删除索引。

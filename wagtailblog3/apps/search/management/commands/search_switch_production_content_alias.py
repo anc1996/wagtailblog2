@@ -20,6 +20,8 @@ from search.models import (
     SearchIndexBuildStatus,
 )
 from search.services.alias import (
+    ContentSearchAliasSwitchInProgress,
+    content_search_alias_switch_lock,
     get_content_search_read_alias_indices,
     switch_content_search_read_alias,
     validate_content_search_alias,
@@ -135,26 +137,74 @@ class Command(BaseCommand):
             self.stdout.write(json.dumps(report, ensure_ascii=False, sort_keys=True))
             raise CommandError("生产前台搜索切换门禁未满足")
 
+        alias_changed = False
         try:
-            verify_content_search_index(target)
-            result = switch_content_search_read_alias(
-                target,
-                target.index_name,
-                alias=report["alias"],
-                expected_indices=tuple(report["current_indices"]),
-                index_prefix=production_prefix,
-            )
+            with content_search_alias_switch_lock(production_connection):
+                # 锁内重新读取 alias，防止并发命令使 ES 和 MySQL 最终指向不同索引。
+                target.refresh_from_db()
+                build = SearchIndexBuild.objects.filter(target=target).order_by("-pk").first()
+                if not target.enabled or target.role not in (
+                    ContentSearchTargetRole.BUILDING,
+                    ContentSearchTargetRole.SERVING,
+                ):
+                    raise CommandError("content_target_not_switchable")
+                if build is None or build.status not in (
+                    SearchIndexBuildStatus.READY,
+                    SearchIndexBuildStatus.SERVING,
+                ):
+                    raise CommandError("content_build_not_ready")
+                unfinished = ContentSearchDelivery.objects.filter(
+                    target=target,
+                    status__in=_UNFINISHED_STATUSES,
+                ).count()
+                if unfinished:
+                    raise CommandError("content_deliveries_not_caught_up")
+                current_indices = get_content_search_read_alias_indices(
+                    target,
+                    report["alias"],
+                    index_prefix=production_prefix,
+                )
+                verify_content_search_index(target)
+                result = switch_content_search_read_alias(
+                    target,
+                    target.index_name,
+                    alias=report["alias"],
+                    expected_indices=current_indices,
+                    index_prefix=production_prefix,
+                )
+                alias_changed = True
+                with transaction.atomic():
+                    locked_target = ContentSearchTarget.objects.select_for_update().get(pk=target.pk)
+                    # alias 已经唯一指向新索引；它必须成为唯一 required serving 目标，
+                    # 否则遗留的 optional serving 目标会继续接收增量 Delivery。
+                    ContentSearchTarget.objects.select_for_update().filter(
+                        connection_name=production_connection,
+                        enabled=True,
+                        role=ContentSearchTargetRole.SERVING,
+                    ).exclude(pk=locked_target.pk).update(
+                        enabled=False,
+                        required=False,
+                        role=ContentSearchTargetRole.RETIRED,
+                    )
+                    locked_target.role = ContentSearchTargetRole.SERVING
+                    locked_target.required = True
+                    locked_target.enabled = True
+                    locked_target.save(
+                        update_fields=("role", "required", "enabled", "updated_at")
+                    )
+                    build.status = SearchIndexBuildStatus.SERVING
+                    build.save(update_fields=("status", "updated_at"))
+        except ContentSearchAliasSwitchInProgress as error:
+            raise CommandError("content_alias_switch_in_progress") from error
+        except CommandError:
+            raise
         except ContentSearchElasticsearchError as error:
             report["error"] = {"code": error.code, "retryable": error.retryable}
             self.stdout.write(json.dumps(report, ensure_ascii=False, sort_keys=True))
             raise CommandError("生产内容 read alias 切换失败") from error
-        try:
-            with transaction.atomic():
-                target.role = ContentSearchTargetRole.SERVING
-                target.save(update_fields=("role", "updated_at"))
-                build.status = SearchIndexBuildStatus.SERVING
-                build.save(update_fields=("status", "updated_at"))
         except Exception as error:
+            if not alias_changed:
+                raise
             report.update({"alias_changed": True, "new_indices": [result.new_index]})
             self.stdout.write(json.dumps(report, ensure_ascii=False, sort_keys=True))
             raise CommandError("alias 已切换但 MySQL 状态更新失败；请保留现场并人工核对") from error

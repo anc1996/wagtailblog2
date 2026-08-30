@@ -97,15 +97,41 @@ def _terminal_statuses() -> set[str]:
     }
 
 
+def _active_delivery_target_query(prefix: str = "") -> Q:
+    """返回应接收增量事件的目标条件。
+
+    已切走 alias 但尚未完成退役的旧 serving 目标可能仍为 enabled。它们只
+    保留历史审计，不能继续生成 Delivery 或影响 Outbox 状态；构建中的目标
+    则必须继续接收增量事件以完成 catch-up。
+    """
+
+    return Q(**{f"{prefix}role": ContentSearchTargetRole.BUILDING}) | Q(
+        **{
+            f"{prefix}role": ContentSearchTargetRole.SERVING,
+            f"{prefix}required": True,
+        }
+    )
+
+
+def _is_active_delivery_target(target: ContentSearchTarget) -> bool:
+    """判断单个目标是否仍参与增量投递和 Outbox 收敛。"""
+
+    return target.enabled and (
+        target.role == ContentSearchTargetRole.BUILDING
+        or (target.role == ContentSearchTargetRole.SERVING and target.required)
+    )
+
+
 def materialize_content_search_deliveries(limit: object | None = None) -> int:
-    """为已启用目标补齐 Delivery；没有目标时保留 Outbox 等待建索引。"""
-    """为当前已启用目标补齐 Delivery；没有目标时保留 Outbox 以待后续索引建立。"""
+    """为活跃 serving/building 目标补齐 Delivery。"""
 
     if not settings.CONTENT_SEARCH_CONSUMER_ENABLED:
         return 0
 
     targets = list(
-        ContentSearchTarget.objects.filter(enabled=True).only("pk", "created_at", "role")
+        ContentSearchTarget.objects.filter(enabled=True)
+        .filter(_active_delivery_target_query())
+        .only("pk", "created_at", "role")
     )
     if not targets:
         return 0
@@ -204,7 +230,7 @@ def due_content_search_delivery_ids(limit: object | None = None) -> list[int]:
             status__in=(ContentSearchStatus.PENDING, ContentSearchStatus.RETRY),
             available_at__lte=now,
             target__enabled=True,
-        )
+        ).filter(_active_delivery_target_query("target__"))
         .order_by("available_at", "pk")
         .values_list("pk", flat=True)[: _batch_size(limit)]
     )
@@ -225,7 +251,7 @@ def _claim_content_search_delivery(delivery_id: int):
             return None, "locked"
         if delivery.status in _terminal_statuses():
             return None, delivery.status
-        if not delivery.target.enabled:
+        if not _is_active_delivery_target(delivery.target):
             return None, _finish_content_search_delivery(
                 delivery,
                 owner=None,
@@ -438,6 +464,14 @@ def _complete_delivery(lease, status, error_code=""):
             error_code=error_code,
         )
     refresh_content_search_outbox_status(lease.event_id)
+    logger.info(
+        "content_search_delivery_finished delivery_id=%s outbox_pk=%s target_id=%s status=%s error_code=%s",
+        lease.delivery_id,
+        lease.event_id,
+        lease.target_id,
+        status,
+        error_code,
+    )
     return result
 
 
@@ -459,6 +493,14 @@ def _retry_or_dead_delivery(lease, error_code):
                 error_code=error_code,
             )
     refresh_content_search_outbox_status(lease.event_id)
+    logger.warning(
+        "content_search_delivery_retry_or_dead delivery_id=%s outbox_pk=%s target_id=%s status=%s error_code=%s",
+        lease.delivery_id,
+        lease.event_id,
+        lease.target_id,
+        result,
+        error_code,
+    )
     return result
 
 
@@ -469,7 +511,11 @@ def refresh_content_search_outbox_status(event_id: int):
     with transaction.atomic():
         event = ContentSearchOutbox.objects.select_for_update().get(pk=event_id)
         deliveries = list(event.deliveries.select_related("target").all())
-        active_deliveries = [delivery for delivery in deliveries if delivery.target.enabled]
+        active_deliveries = [
+            delivery
+            for delivery in deliveries
+            if _is_active_delivery_target(delivery.target)
+        ]
         if not active_deliveries:
             return event.status
 
@@ -543,7 +589,7 @@ def process_content_search_delivery(delivery_id: int) -> str:
             return _retry_or_dead_delivery(lease, "content_search_state_mismatch")
 
         target = ContentSearchTarget.objects.get(pk=lease.target_id)
-        if not target.enabled:
+        if not _is_active_delivery_target(target):
             return _complete_delivery(lease, ContentSearchStatus.SUPERSEDED)
 
         if event.operation == ContentSearchOperation.TOMBSTONE or not state.searchable:

@@ -190,6 +190,8 @@ def get_celery_config(time_zone, redis_host, redis_port, redis_password):
 	except ValueError:
 		broker_db, result_db = 2, 3
 	return {
+		# 所有显式任务投递都必须读取同一个队列名，测试环境才能与生产 Redis 队列隔离。
+		'CELERY_MAINTENANCE_QUEUE': maintenance_queue,
 		# --------------------------------------------------
 		# 基础时区配置
 		# --------------------------------------------------

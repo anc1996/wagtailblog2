@@ -54,7 +54,11 @@ class ContentSearchRebuildTests(BlogLifecycleFixtureMixin, TestCase):
         )
 
     def _formal_contents(self):
-        return {self.page.mongo_content_id: self.mongo.get_blog_content(self.page.mongo_content_id)}
+        state = ContentSearchState.objects.get(page_id=self.page.pk)
+        for document in self.mongo.body_versions.values():
+            if document["identity"]["body_version_id"] == state.body_version_id:
+                return {f"page:{self.page.pk}": {"body": document["body"]}}
+        return {}
 
     def test_online_rebuild_uses_formal_batch_and_stops_in_catching_up(self):
         with (
@@ -142,9 +146,10 @@ class ContentSearchRebuildTests(BlogLifecycleFixtureMixin, TestCase):
             second_page = self._publish(self._create_draft_page("第二篇回填正文"))
         second_state = ContentSearchState.objects.get(page_id=second_page.pk)
         formal_contents = self._formal_contents()
-        formal_contents[second_page.mongo_content_id] = self.mongo.get_blog_content(
-            second_page.mongo_content_id
-        )
+        for document in self.mongo.body_versions.values():
+            if document["identity"]["body_version_id"] == second_state.body_version_id:
+                formal_contents[f"page:{second_page.pk}"] = {"body": document["body"]}
+                break
         responses = [
             ContentSearchBulkWriteResult(succeeded=1, superseded=0),
             ContentSearchElasticsearchError("es_bulk_item_http_503", retryable=True),

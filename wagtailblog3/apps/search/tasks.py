@@ -13,6 +13,13 @@ from search.services.delivery import (
 logger = logging.getLogger(__name__)
 
 
+def _maintenance_queue() -> str:
+	"""返回当前环境的维护队列名称，拒绝空值回退到生产默认名称。"""
+
+	queue = getattr(settings, "CELERY_MAINTENANCE_QUEUE", "maintenance")
+	return queue.strip() if isinstance(queue, str) and queue.strip() else "maintenance"
+
+
 @shared_task(name="search.tasks.wake_content_search_delivery", ignore_result=True)
 def wake_content_search_delivery(event_id: Any = None) -> int:
     """提交后快速唤醒 dispatcher；数据库状态仍是唯一可靠的任务来源。"""
@@ -28,7 +35,7 @@ def wake_content_search_delivery(event_id: Any = None) -> int:
             logger.error("content_search_scope_wakeup_invalid event_id=%s", event_id)
             return 0
         return 1 if consume_content_search_scope_job.apply_async(
-            args=(job_id,), queue="maintenance"
+            args=(job_id,), queue=_maintenance_queue()
         ) else 0
 
     return dispatch_pending_content_search_deliveries()
@@ -54,7 +61,7 @@ def dispatch_pending_content_search_deliveries(limit: int | None = None) -> int:
         try:
             consume_content_search_delivery.apply_async(
                 args=(delivery_id,),
-                queue="maintenance",
+                queue=_maintenance_queue(),
             )
             dispatched_count += 1
         except Exception:
@@ -87,7 +94,9 @@ def dispatch_pending_content_search_scope_jobs(limit: int | None = None) -> int:
 
     for job_id in due_scope_job_ids(limit=limit):
         try:
-            consume_content_search_scope_job.apply_async(args=(job_id,), queue="maintenance")
+            consume_content_search_scope_job.apply_async(
+                args=(job_id,), queue=_maintenance_queue()
+            )
             dispatched_count += 1
         except Exception:
             logger.error("content_search_scope_dispatch_failed job_id=%s", job_id)

@@ -324,22 +324,35 @@ bash tools/start_test_stack.sh
 `python manage.py runserver`，否则组装任务可能进入无人消费的默认队列；userscript 的测试博客地址也必须填写 `http://192.168.20.5:8080`，不能使用 Windows `http://127.0.0.1:8080`。若 8080 已被占用，先定位占用进程，不要通过
 反复启动制造多个测试实例。
 
-需要验证异步维护任务时，在第二个终端完成公共准备步骤后启动只监听
-`maintenance` 队列的 Worker：
+独立内容搜索的发布唤醒、Delivery 消费和 ScopeJob 也必须使用同一组隔离变量：
+`WAGTAILBLOG_ENV=test`、`CELERY_MAINTENANCE_QUEUE=markdown-test-maintenance`、
+`CELERY_BROKER_DB=12`、`CELERY_RESULT_DB=13`。网站、Worker 与 Beat 任一进程遗漏这些变量时，
+新页面的 Outbox 会停在 `pending`，或任务可能误投生产 `maintenance` 队列；不得以 MySQL 搜索回退掩盖该故障。
+
+需要验证异步维护任务时，在第二个终端完成公共准备步骤后，显式导出与网站一致的
+隔离变量并启动只监听 `markdown-test-maintenance` 的 Worker：
 
 ```bash
+export WAGTAILBLOG_ENV=test
+export CELERY_MAINTENANCE_QUEUE=markdown-test-maintenance
+export CELERY_BROKER_DB=12
+export CELERY_RESULT_DB=13
 /root/anaconda3/envs/wagtailblog-test/bin/python -m celery -A wagtailblog3 worker \
   --pool=solo \
   --without-gossip --without-mingle --without-heartbeat \
   --loglevel=INFO \
-  --queues=maintenance \
+  --queues="$CELERY_MAINTENANCE_QUEUE" \
   --hostname=maintenance@test \
   --concurrency=1
 ```
 
-需要验证定时任务和失败补偿时，在第三个终端完成公共准备步骤后启动 Beat：
+需要验证定时任务和失败补偿时，在第三个终端完成公共准备步骤后，以同一组隔离变量启动 Beat：
 
 ```bash
+export WAGTAILBLOG_ENV=test
+export CELERY_MAINTENANCE_QUEUE=markdown-test-maintenance
+export CELERY_BROKER_DB=12
+export CELERY_RESULT_DB=13
 /root/anaconda3/envs/wagtailblog-test/bin/python -m celery -A wagtailblog3 beat --loglevel=INFO
 ```
 

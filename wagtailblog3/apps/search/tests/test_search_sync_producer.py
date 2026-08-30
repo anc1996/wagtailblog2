@@ -13,7 +13,7 @@ from search.models import (
     ContentSearchScopeJob,
     ContentSearchState,
 )
-from search.services.outbox import ContentSearchOutboxService
+from search.services.outbox import ContentSearchOutboxService, schedule_content_search_wakeup
 from search.tests.test_lifecycle_baseline import BlogLifecycleFixtureMixin
 
 
@@ -149,6 +149,16 @@ class ContentSearchProducerLifecycleTests(BlogLifecycleFixtureMixin, TestCase):
         event = ContentSearchOutbox.objects.get(page_id=page.pk)
         self.assertEqual(event.status, "pending")
         self.assertEqual(event.attempts, 0)
+
+    @override_settings(CELERY_MAINTENANCE_QUEUE="search-test-maintenance")
+    def test_wakeup_uses_configured_maintenance_queue(self):
+        with patch("search.services.outbox.wake_content_search_delivery.apply_async") as apply_async:
+            schedule_content_search_wakeup("event-uuid")
+
+        apply_async.assert_called_once_with(
+            kwargs={"event_id": "event-uuid"},
+            queue="search-test-maintenance",
+        )
 
     def test_restriction_change_creates_one_scope_job_without_enumerating_pages(self):
         with patch("search.services.outbox.schedule_content_search_wakeup"):

@@ -926,8 +926,10 @@ class BlogPage(Page):
 		# 同时把 Revision 的 body 置为空字符串表示，保持历史行轻量。
 		data['body'] = '[]'
 		logger.info(
-			"blog_body_revision_done page_id=%s elapsed_ms=%s",
+			"blog_body_revision_done page_id=%s body_version_id=%s draft_pointer=%s elapsed_ms=%s",
 			self.pk,
+			body_version.get('body_version_id') if isinstance(body_version, dict) else None,
+			draft_pointer,
 			round((time.monotonic() - started_at) * 1000, 1),
 		)
 		
@@ -946,6 +948,12 @@ class BlogPage(Page):
 		保留正式正文兼容读取，避免本批修复改变旧数据的既有范围。
 		"""
 		obj = super().from_serializable_data(data)
+		logger.info(
+			"blog_revision_restore_start page_id=%s revision_id=%s source=%s",
+			obj.pk if obj.pk is not None else data.get('id'),
+			data.get('id'),
+			"immutable" if 'mongo_body_version_id' in data else "legacy_revision" if 'mongo_draft_pointer' in data else "mysql",
+		)
 		# 新 Revision 优先按不可变版本读取；任何身份/哈希/模式错误都必须阻断恢复。
 		if 'mongo_body_version_id' in data or 'body_sha256' in data or 'body_schema_version' in data:
 			expected_page_id = obj.pk if obj.pk is not None else data.get('id')
@@ -981,6 +989,12 @@ class BlogPage(Page):
 					expected_page_id,
 				)
 				raise BlogRevisionBodyUnavailableError("body_version_deserialize_failed") from exc
+			logger.info(
+				"blog_revision_restore_complete page_id=%s revision_id=%s source=immutable body_version_id=%s",
+				expected_page_id,
+				data.get('id'),
+				data.get('mongo_body_version_id'),
+			)
 			return obj
 
 		has_revision_pointer = 'mongo_draft_pointer' in data
@@ -1025,6 +1039,12 @@ class BlogPage(Page):
 					type(exc).__name__,
 				)
 				raise BlogRevisionBodyUnavailableError("revision_deserialize_failed") from exc
+			logger.info(
+				"blog_revision_restore_complete page_id=%s revision_id=%s source=legacy_revision pointer=%s",
+				expected_page_id,
+				data.get('id'),
+				draft_pointer,
+			)
 			return obj
 
 		# 没有草稿指针的旧 Revision 由 Wagtail 超类从其 MySQL JSON 正文还原。
@@ -1061,12 +1081,19 @@ class BlogPage(Page):
 	def save(self, *args: Any, **kwargs: Any) -> None:
 		"""保存页面时同步 Mongo 正文，并确保 MySQL body 始终为空。
 
-		只有全量保存且非导入草稿模式才写正式 Mongo 内容；随后临时清空 body 调用
-		Wagtail 父类保存，finally 恢复内存 StreamField。新页面取得 MySQL 主键后再回填
-		Mongo ``page_id``，避免正式文档引用不存在的页面 ID。
+		只有带旧正式正文指针的既有页面才保留 ``blog_content`` 兼容写入；新页面和
+		新版页面的正文由 Revision 与不可变正文版本链路保存。随后临时清空 body 调用
+		Wagtail 父类保存，finally 恢复内存 StreamField。
 		"""
 		started_at = time.monotonic()
 		is_new = self.pk is None
+		logger.info(
+			"blog_lifecycle_save_start page_id=%s is_new=%s has_legacy_pointer=%s body_blocks=%s",
+			self.pk,
+			is_new,
+			bool(getattr(self, "mongo_content_id", None)),
+			len(self.body) if self.body else 0,
+		)
 		update_fields = kwargs.get('update_fields')
 		draft_only = bool(getattr(self, '_markdown_import_draft_only', False))
 		
@@ -1102,33 +1129,38 @@ class BlogPage(Page):
 				finally:
 					self.body = real_body
 				return
-			# 全量保存才写入正式集合；草稿正文已经由 serializable_data 保存到历史集合。
-			temp_body_raw = self.body.raw_data if hasattr(self.body, 'raw_data') else None
-			if temp_body_raw is None and self.body:
-				temp_body_raw = MongoDBStreamFieldAdapter.to_mongodb(self.body)
-			
-			content_data = {
-				'page_id': self.pk,
-				'title': self.title,
-				'intro': self.intro,
-				'last_updated': self.last_published_at.isoformat() if getattr(self, 'last_published_at',
-				                                                              None) else None,
-				'body': temp_body_raw or []
-			}
-			try:
-				mongo_started_at = time.monotonic()
-				mongo_manager = MongoManager()
-				content_id = mongo_manager.save_blog_content(content_data, getattr(self, 'mongo_content_id', None))
-				self.mongo_content_id = content_id
-				logger.info(
-					"blog_body_save_mongo_done page_id=%s content_id=%s blocks=%s elapsed_ms=%s",
-					self.pk,
-					content_id,
-					len(temp_body_raw or []),
-					round((time.monotonic() - mongo_started_at) * 1000, 1),
-				)
-			except Exception as e:
-				logger.error(f"保存线上主内容至 MongoDB 失败: {e}", exc_info=True)
+			# 旧集合已退出新写入链路。只有已有旧指针的页面才允许为兼容期内容更新旧文档，
+			# 避免新建草稿在第一次或后续保存时重新创建 blog_content。
+			if is_new or not self.mongo_content_id:
+				logger.info("blog_body_save_legacy_not_applicable page_id=%s is_new=%s", self.pk, is_new)
+			else:
+				# 全量保存才写入正式集合；草稿正文已经由 serializable_data 保存到历史集合。
+				temp_body_raw = self.body.raw_data if hasattr(self.body, 'raw_data') else None
+				if temp_body_raw is None and self.body:
+					temp_body_raw = MongoDBStreamFieldAdapter.to_mongodb(self.body)
+
+				content_data = {
+					'page_id': self.pk,
+					'title': self.title,
+					'intro': self.intro,
+					'last_updated': self.last_published_at.isoformat() if getattr(self, 'last_published_at',
+					                                                              None) else None,
+					'body': temp_body_raw or []
+				}
+				try:
+					mongo_started_at = time.monotonic()
+					mongo_manager = MongoManager()
+					content_id = mongo_manager.save_blog_content(content_data, self.mongo_content_id)
+					self.mongo_content_id = content_id
+					logger.info(
+						"blog_body_save_mongo_done page_id=%s content_id=%s blocks=%s elapsed_ms=%s",
+						self.pk,
+						content_id,
+						len(temp_body_raw or []),
+						round((time.monotonic() - mongo_started_at) * 1000, 1),
+					)
+				except Exception as e:
+					logger.error(f"保存线上主内容至 MongoDB 失败: {e}", exc_info=True)
 		
 		# 临时清空 body 后调用父类保存，确保关系数据库不落正文；finally 恢复内存对象供后续流程继续使用。
 		real_body = self.body
@@ -1139,24 +1171,13 @@ class BlogPage(Page):
 			# 立刻满血复原内存态，保障本次请求周期后续逻辑拿到的是完好的 body
 			self.body = real_body
 		logger.info(
-			"blog_body_save_mysql_done page_id=%s elapsed_ms=%s",
+			"blog_lifecycle_save_complete page_id=%s is_new=%s mongo_content_id=%s elapsed_ms=%s",
 			self.pk,
+			is_new,
+			getattr(self, "mongo_content_id", None),
 			round((time.monotonic() - started_at) * 1000, 1),
 		)
 		
-		# 新页面先完成 MySQL 自增主键，再把 page_id 回填到 Mongo 正式文档。
-		if is_new and self.pk and not is_draft_metadata_update and not draft_only:
-			type(self).objects.filter(pk=self.pk).update(mongo_content_id=self.mongo_content_id)
-			try:
-				mongo_manager = MongoManager()
-				if getattr(mongo_manager, 'blog_content', None) is not None:
-					mongo_manager.blog_content.update_one(
-						{'_id': self.mongo_content_id},
-						{'$set': {'page_id': self.pk}}
-					)
-			except Exception:
-				pass
-	
 	def publish(self, revision: Any, *args: Any, **kwargs: Any) -> Any:
 		"""发布前校验指定 Revision 的 Mongo 正文版本，再执行 Wagtail 发布。
 
@@ -1173,6 +1194,12 @@ class BlogPage(Page):
 			validate_scheduled_revision(revision)
 
 		with transaction.atomic():
+			logger.info(
+				"blog_lifecycle_publish_start page_id=%s revision_id=%s scheduled=%s",
+				self.pk,
+				revision.pk,
+				kwargs.get("log_action") == "wagtail.publish.scheduled",
+			)
 			candidate = BlogPublicationService.lock_and_validate_revision(self.pk, revision.pk)
 			# Revision.content 在 Wagtail 8.0 的历史数据中可能以 JSON 字符串返回，
 			# 排期判断必须与正文版本校验使用同一解析结果，避免过早切换正式指针。
@@ -1182,7 +1209,13 @@ class BlogPage(Page):
 			is_future_schedule = bool(go_live_at and not is_scheduled_execution)
 			if not is_future_schedule:
 				BlogPublicationService.promote_published_candidate(candidate)
-			return super().publish(revision, *args, **kwargs)
+			result = super().publish(revision, *args, **kwargs)
+			logger.info(
+				"blog_lifecycle_publish_complete page_id=%s revision_id=%s",
+				self.pk,
+				revision.pk,
+			)
+			return result
 
 	def unpublish(self, *args: Any, **kwargs: Any) -> Any:
 		"""将取消发布和墓碑事件置于同一 MySQL 事务，事件只在提交后被唤醒。"""
@@ -1192,6 +1225,11 @@ class BlogPage(Page):
 			self.live = locked_page.live
 			self.live_revision_id = locked_page.live_revision_id
 			was_live = bool(self.live)
+			logger.info(
+				"blog_lifecycle_unpublish_start page_id=%s was_live=%s",
+				self.pk,
+				was_live,
+			)
 			if was_live:
 				from blog.services.publication import BlogPublicationService
 
@@ -1199,6 +1237,7 @@ class BlogPage(Page):
 			result = super().unpublish(*args, **kwargs)
 			if was_live:
 				BlogPublicationService.clear_published_pointer(self.pk)
+			logger.info("blog_lifecycle_unpublish_complete page_id=%s was_live=%s", self.pk, was_live)
 			return result
 
 	# =========================================================================
@@ -1207,6 +1246,7 @@ class BlogPage(Page):
 	def delete(self, *args: Any, **kwargs: Any) -> Any:
 		"""删除页面并由 ``pre_delete`` 登记 Mongo 清理意图。"""
 		with transaction.atomic():
+			logger.info("blog_lifecycle_delete_start page_id=%s", self.pk)
 			if settings.CONTENT_SEARCH_PRODUCER_ENABLED:
 				from blog.services.publication import BlogPublicationService
 				from search.services.outbox import ContentSearchOutboxService
@@ -1217,7 +1257,9 @@ class BlogPage(Page):
 				if locked_page.live:
 					BlogPublicationService.advance_unpublish_generation(self.pk)
 				ContentSearchOutboxService.record_delete(locked_page)
-			return super().delete(*args, **kwargs)
+			result = super().delete(*args, **kwargs)
+			logger.info("blog_lifecycle_delete_complete page_id=%s", self.pk)
+			return result
 	
 	# =========================================================================
 	# 网关 4：前台数据读取网关 (用于博客详情页 serve 渲染时提取真实数据)

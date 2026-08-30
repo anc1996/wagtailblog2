@@ -16,6 +16,8 @@ from search.models import (
     SearchIndexBuildStatus,
 )
 from search.services.alias import (
+    ContentSearchAliasSwitchInProgress,
+    content_search_alias_switch_lock,
     get_content_search_read_alias_indices,
     switch_content_search_read_alias,
     validate_content_search_alias,
@@ -40,6 +42,7 @@ class Command(BaseCommand):
     def handle(self, *args: object, **options: object) -> None:
         environment = os.environ.get("WAGTAILBLOG_ENV", "unset")
         target_id = options["target"]
+        alias_changed = False
         try:
             alias = validate_content_search_alias(options.get("alias"))
         except ContentSearchElasticsearchError as error:
@@ -95,33 +98,64 @@ class Command(BaseCommand):
         ):
             raise CommandError("content_build_not_ready")
 
-        # READY 之后仍可能产生新 Delivery；切换前必须重新验证当前 checkpoint、投递和 ES 一致性。
-        gate = get_content_search_build_gate(target.target_id, mutate=False)
-        report["gate"] = gate
-        if not gate.get("clean"):
-            self.stdout.write(json.dumps(report, ensure_ascii=False, sort_keys=True))
-            raise CommandError("content_build_gate_not_clean")
-
         try:
-            verify_content_search_index(target)
-            result = switch_content_search_read_alias(
-                target,
-                target.index_name,
-                alias=alias,
-                expected_indices=current_indices,
-            )
+            with content_search_alias_switch_lock(settings.CONTENT_SEARCH_CONNECTION_NAME):
+                # 锁内重读避免等待其他切换命令时使用过期的 alias 或 Target 状态。
+                target.refresh_from_db()
+                build = SearchIndexBuild.objects.filter(target=target).order_by("-pk").first()
+                if not target.enabled or target.role not in (
+                    ContentSearchTargetRole.BUILDING,
+                    ContentSearchTargetRole.SERVING,
+                ):
+                    raise CommandError("content_target_not_switchable")
+                if build is None or build.status not in (
+                    SearchIndexBuildStatus.READY,
+                    SearchIndexBuildStatus.SERVING,
+                ):
+                    raise CommandError("content_build_not_ready")
+                current_indices = get_content_search_read_alias_indices(target, alias)
+                # READY 之后仍可能产生新 Delivery；在锁内重新验证，避免切换遗漏增量。
+                gate = get_content_search_build_gate(target.target_id, mutate=False)
+                report["gate"] = gate
+                if not gate.get("clean"):
+                    raise CommandError("content_build_gate_not_clean")
+                verify_content_search_index(target)
+                result = switch_content_search_read_alias(
+                    target,
+                    target.index_name,
+                    alias=alias,
+                    expected_indices=current_indices,
+                )
+                alias_changed = True
+                with transaction.atomic():
+                    locked_target = ContentSearchTarget.objects.select_for_update().get(pk=target.pk)
+                    # read alias 唯一指向的索引必须是 required serving，旧 serving 目标不得继续接收增量事件。
+                    ContentSearchTarget.objects.select_for_update().filter(
+                        connection_name=settings.CONTENT_SEARCH_CONNECTION_NAME,
+                        enabled=True,
+                        role=ContentSearchTargetRole.SERVING,
+                    ).exclude(pk=locked_target.pk).update(
+                        enabled=False,
+                        required=False,
+                        role=ContentSearchTargetRole.RETIRED,
+                    )
+                    locked_target.role = ContentSearchTargetRole.SERVING
+                    locked_target.required = True
+                    locked_target.enabled = True
+                    locked_target.save(update_fields=("role", "required", "enabled", "updated_at"))
+                    build.status = SearchIndexBuildStatus.SERVING
+                    build.save(update_fields=("status", "updated_at"))
+        except ContentSearchAliasSwitchInProgress as error:
+            raise CommandError("content_alias_switch_in_progress") from error
+        except CommandError:
+            raise
         except ContentSearchElasticsearchError as error:
             report["error"] = {"code": error.code, "retryable": error.retryable}
             self.stdout.write(json.dumps(report, ensure_ascii=False, sort_keys=True))
             raise CommandError("独立内容索引 read alias 切换失败") from error
-
-        try:
-            with transaction.atomic():
-                target.role = ContentSearchTargetRole.SERVING
-                target.save(update_fields=("role", "updated_at"))
-                build.status = SearchIndexBuildStatus.SERVING
-                build.save(update_fields=("status", "updated_at"))
         except Exception as error:
+            if not alias_changed:
+                raise
             report["warning"] = "alias_switched_target_state_update_failed"
             report["alias_changed"] = True
             report["new_indices"] = [result.new_index]

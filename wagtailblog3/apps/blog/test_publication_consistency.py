@@ -8,6 +8,7 @@ from unittest.mock import patch
 from django.core.management import call_command
 from django.test import TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
+from wagtail.actions.publish_page_revision import PublishPageRevisionAction
 
 from blog.models import (
     BlogPage,
@@ -44,6 +45,22 @@ class BlogPublicationConsistencyTests(BlogLifecycleFixtureMixin, TestCase):
         self.assertEqual(report["scanned"], 1)
         self.assertEqual(report["counts"].get("state_missing"), 1)
         self.assertEqual(report["samples"]["state_missing"], [page.pk])
+
+    def test_wagtail8_edit_publish_action_promotes_revision_state(self):
+        """Wagtail 8.0 编辑发布动作绕过 BlogPage.publish 时仍切换正式正文指针。"""
+        page = self._create_draft_page("Wagtail 8.0 编辑发布动作")
+        revision = page.save_revision()
+
+        with patch("search.services.outbox.schedule_content_search_wakeup"):
+            PublishPageRevisionAction(revision).execute(skip_permission_checks=True)
+
+        page.refresh_from_db()
+        state = BlogPublicationState.objects.get(page_id=page.pk)
+        content = json.loads(revision.content) if isinstance(revision.content, str) else revision.content
+        self.assertTrue(page.live)
+        self.assertEqual(page.live_revision_id, revision.pk)
+        self.assertEqual(state.published_body_version_id, content["mongo_body_version_id"])
+        self.assertEqual(state.published_body_sha256, content["body_sha256"])
 
     def test_consistency_cursor_advances_across_page_batches(self):
         """连续批次必须使用上一批最后一个 BlogPage 主键，避免重复扫描前一批。"""

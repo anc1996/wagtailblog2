@@ -121,6 +121,7 @@ def get_content_search_serving_target() -> ContentSearchTarget:
             ContentSearchTarget.objects.filter(
                 connection_name=settings.CONTENT_SEARCH_CONNECTION_NAME,
                 enabled=True,
+                required=True,
                 role=ContentSearchTargetRole.SERVING,
             )
             .order_by("-updated_at", "-pk")

@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from hashlib import sha256
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Any, Iterable, Iterator
 
 from django.conf import settings
+from django.db import connection
 
 from search.services.content_index import validate_content_index_name
 from search.services.elasticsearch import (
@@ -21,6 +24,44 @@ class ContentSearchAliasSwitchResult:
     alias: str
     previous_indices: tuple[str, ...]
     new_index: str
+
+
+class ContentSearchAliasSwitchInProgress(RuntimeError):
+    """同一连接已有内容搜索 alias 切换在执行。"""
+
+
+def _content_search_alias_switch_lock_name(connection_name: str) -> str:
+    """生成 MySQL 64 字符限制内的连接级锁名称。"""
+
+    digest = sha256(connection_name.encode("utf-8")).hexdigest()[:32]
+    return f"wagtailblog3:content-alias:{digest}"
+
+
+@contextmanager
+def content_search_alias_switch_lock(connection_name: str) -> Iterator[None]:
+    """串行化同一连接的 ES alias 切换和 MySQL Target 状态转换。
+
+    MySQL 事务无法覆盖 Elasticsearch 的 aliases API。本锁必须从读取 alias、
+    校验门禁开始持续到 Target 状态提交完成，防止两个命令把 ES 与 MySQL 写成相反结果。
+    非 MySQL 测试后端不提供跨进程 advisory lock，只保留调用契约以便单元测试。
+    """
+
+    if connection.vendor != "mysql":
+        yield
+        return
+
+    lock_name = _content_search_alias_switch_lock_name(connection_name)
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT GET_LOCK(%s, 0)", [lock_name])
+        row = cursor.fetchone()
+    if not row or row[0] != 1:
+        raise ContentSearchAliasSwitchInProgress("content_alias_switch_in_progress")
+    try:
+        yield
+    finally:
+        # advisory lock 绑定数据库连接；显式释放避免命令结束前阻塞下一次切换。
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT RELEASE_LOCK(%s)", [lock_name])
 
 
 def validate_content_search_alias(alias: str | None = None, index_prefix: str | None = None) -> str:

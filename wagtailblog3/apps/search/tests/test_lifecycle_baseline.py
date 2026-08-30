@@ -256,27 +256,39 @@ class BlogLifecycleFixtureMixin:
 class BlogLifecycleBaselineTests(BlogLifecycleFixtureMixin, TestCase):
 
 
-    def test_registered_page_reads_immutable_published_body_after_legacy_document_changes(self):
-        """已登记页面公开读取固定到 State 指针，不受旧 blog_content 后续改写影响。"""
+    def test_new_page_reads_immutable_published_body_without_legacy_document(self):
+        """新页面发布后只读取 State 指针，且不会生成旧正式正文文档。"""
         page = self._publish(self._create_draft_page("正式正文版本"))
-        content_id = page.mongo_content_id
-        self.mongo.live_documents[content_id]["body"] = self._markdown_body("不应公开的草稿")
 
         content = page.get_content_from_mongodb()
 
         self.assertIsNotNone(content)
         self.assertIn("正式正文版本", str(content["body"]))
-        self.assertNotIn("不应公开的草稿", str(content["body"]))
+        self.assertIsNone(page.mongo_content_id)
+        self.assertEqual(self.mongo.live_documents, {})
 
-    def test_registered_page_save_does_not_overwrite_legacy_formal_document(self):
-        """已有不可变公开版本时，普通页面保存不覆盖兼容层正式正文。"""
+    def test_registered_page_save_keeps_legacy_collection_empty(self):
+        """已发布的新页面编辑草稿时不能重新写入旧正式正文集合。"""
         page = self._publish(self._create_draft_page("保留的正式正文"))
-        content_id = page.mongo_content_id
         page.body = self._markdown_body("编辑中的草稿")
         page.save()
 
-        self.assertIn("保留的正式正文", str(self.mongo.live_documents[content_id]["body"]))
-        self.assertNotIn("编辑中的草稿", str(self.mongo.live_documents[content_id]["body"]))
+        self.assertEqual(self.mongo.live_documents, {})
+        self.assertIn("保留的正式正文", page.body_text)
+        self.assertNotIn("编辑中的草稿", page.body_text)
+
+    def test_unregistered_legacy_page_with_pointer_keeps_compatibility_write(self):
+        """未登记旧页面仍可用已有指针更新旧正文，避免迁移期内容链路中断。"""
+        page = self._create_draft_page("旧页面原正文")
+        page.mongo_content_id = "legacy-formal-page"
+        self.mongo.live_documents[page.mongo_content_id] = {
+            "page_id": page.pk,
+            "body": self._markdown_body("旧页面原正文"),
+        }
+        page.body = self._markdown_body("旧页面更新正文")
+        page.save()
+
+        self.assertIn("旧页面更新正文", str(self.mongo.live_documents[page.mongo_content_id]["body"]))
     """验证正文、草稿和公开 QuerySet 的当前行为。"""
 
     def test_draft_revision_does_not_replace_published_mongo_body_until_publish(self):
@@ -374,7 +386,10 @@ class BlogLifecycleBaselineTests(BlogLifecycleFixtureMixin, TestCase):
         form_class = page.get_edit_handler().get_form_class()
         form = form_class(instance=page)
 
-        self.assertEqual(form.instance.body_text, "不可变正文版本")
+        self.assertEqual(len(form.instance.body), 1)
+        self.assertEqual(form.instance.body[0].value, "不可变正文版本")
+        self.assertEqual(self.mongo.revision_reads, [])
+        self.assertEqual(len(self.mongo.body_version_reads), 1)
 
     def test_admin_form_rejects_cross_page_latest_revision_pointer(self):
         """编辑表单必须执行与历史预览相同的正文归属校验。"""

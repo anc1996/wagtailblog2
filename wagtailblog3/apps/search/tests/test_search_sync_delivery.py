@@ -19,6 +19,7 @@ from search.services.delivery import (
     due_content_search_delivery_ids,
     process_content_search_delivery,
     reclaim_expired_content_search_deliveries,
+    refresh_content_search_outbox_status,
 )
 from search.services.elasticsearch import (
     ContentSearchElasticsearchError,
@@ -342,7 +343,8 @@ class ContentSearchDeliveryTests(BlogLifecycleFixtureMixin, TestCase):
         self.assertEqual(write_counts[successful_target.pk], 1)
         self.assertEqual(write_counts[retrying_target.pk], 2)
 
-    def test_dispatcher_only_sends_due_delivery_ids_to_maintenance_worker(self):
+    @override_settings(CELERY_MAINTENANCE_QUEUE="search-test-maintenance")
+    def test_dispatcher_only_sends_due_delivery_ids_to_configured_maintenance_worker(self):
         _state, event = self._tombstone_event(page_id=80008, content_version=1)
         self._target()
 
@@ -351,7 +353,9 @@ class ContentSearchDeliveryTests(BlogLifecycleFixtureMixin, TestCase):
 
         delivery = ContentSearchDelivery.objects.get(event=event)
         self.assertEqual(dispatched_count, 1)
-        apply_async.assert_called_once_with(args=(delivery.pk,), queue="maintenance")
+        apply_async.assert_called_once_with(
+            args=(delivery.pk,), queue="search-test-maintenance"
+        )
 
     def test_permanent_es_mapping_failure_enters_dead_letter(self):
         _state, event = self._tombstone_event(page_id=80006, content_version=1)
@@ -403,6 +407,37 @@ class ContentSearchDeliveryTests(BlogLifecycleFixtureMixin, TestCase):
 
         self.assertIn(delivery.pk, delivery_ids)
         self.assertEqual(delivery.status, ContentSearchStatus.PENDING)
+
+    def test_optional_legacy_serving_target_does_not_receive_or_block_new_event(self):
+        state, event = self._tombstone_event(page_id=80010, content_version=1)
+        serving_target = self._target()
+        legacy_target = ContentSearchTarget.objects.create(
+            target_id="content-legacy-serving",
+            connection_name="default",
+            index_name="content-legacy-serving-v001",
+            role=ContentSearchTargetRole.SERVING,
+            required=False,
+            enabled=True,
+        )
+        legacy_delivery = ContentSearchDelivery.objects.create(
+            event=event,
+            target=legacy_target,
+            status=ContentSearchStatus.DEAD,
+            last_error_code="es_http_400",
+        )
+
+        delivery_ids = due_content_search_delivery_ids()
+        serving_delivery = ContentSearchDelivery.objects.get(
+            event=event, target=serving_target
+        )
+        event.refresh_from_db()
+
+        self.assertIn(serving_delivery.pk, delivery_ids)
+        self.assertNotIn(legacy_delivery.pk, delivery_ids)
+        self.assertEqual(event.status, ContentSearchStatus.PENDING)
+        self.assertEqual(refresh_content_search_outbox_status(event.pk), ContentSearchStatus.PENDING)
+        self.assertEqual(ContentSearchDelivery.objects.filter(event=event).count(), 2)
+        self.assertEqual(state.page_id, event.page_id)
 
 
 @override_settings(CONTENT_SEARCH_CONSUMER_ENABLED=False)

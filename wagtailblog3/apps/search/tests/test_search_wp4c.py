@@ -5,6 +5,7 @@ from io import StringIO
 
 from django.core.management import call_command
 from django.core.management.base import CommandError
+from django.db import connection, connections
 from django.test import SimpleTestCase, TestCase, override_settings
 
 from search.models import (
@@ -14,14 +15,19 @@ from search.models import (
     SearchIndexBuildStatus,
 )
 from search.services.alias import (
+	ContentSearchAliasSwitchInProgress,
+	_content_search_alias_switch_lock_name,
 	clear_content_search_read_alias,
+	content_search_alias_switch_lock,
 	get_content_search_read_alias_indices,
 	switch_content_search_read_alias,
 )
 from search.services.content_query import (
+    ContentSearchQueryUnavailable,
     ContentSearchQueryPage,
     build_content_search_query,
     build_content_search_sort,
+    get_content_search_serving_target,
     query_content_search_page,
 )
 from search.services.elasticsearch import ContentSearchElasticsearchError
@@ -256,6 +262,19 @@ class ContentSearchAliasCommandTests(TestCase):
         CONTENT_SEARCH_CONNECTION_NAME="default",
     )
     def test_confirm_switches_alias_and_marks_target_serving(self):
+        old_target = ContentSearchTarget.objects.create(
+            target_id="content-switch-old-serving",
+            connection_name="default",
+            index_name="wagtailblog-test-content-v000",
+            role=ContentSearchTargetRole.SERVING,
+            required=True,
+            enabled=True,
+        )
+        SearchIndexBuild.objects.create(
+            target=old_target,
+            mapping_version="content-v000-balanced",
+            status=SearchIndexBuildStatus.SERVING,
+        )
         output = StringIO()
         switched = SimpleNamespace(new_index=self.target.index_name)
         with (
@@ -287,7 +306,12 @@ class ContentSearchAliasCommandTests(TestCase):
         self.target.refresh_from_db()
         self.build.refresh_from_db()
         self.assertEqual(self.target.role, ContentSearchTargetRole.SERVING)
+        self.assertTrue(self.target.required)
         self.assertEqual(self.build.status, SearchIndexBuildStatus.SERVING)
+        old_target.refresh_from_db()
+        self.assertFalse(old_target.enabled)
+        self.assertFalse(old_target.required)
+        self.assertEqual(old_target.role, ContentSearchTargetRole.RETIRED)
 
     @override_settings(
         CONTENT_SEARCH_INDEX_PREFIX="wagtailblog-test-content",
@@ -346,6 +370,19 @@ class ContentSearchAliasCommandTests(TestCase):
         self.target.save(update_fields=("role",))
         self.build.status = SearchIndexBuildStatus.SERVING
         self.build.save(update_fields=("status",))
+        previous_target = ContentSearchTarget.objects.create(
+            target_id="content-switch-previous",
+            connection_name="default",
+            index_name="wagtailblog-test-content-v000",
+            role=ContentSearchTargetRole.BUILDING,
+            required=False,
+            enabled=True,
+        )
+        previous_build = SearchIndexBuild.objects.create(
+            target=previous_target,
+            mapping_version="content-v000-balanced",
+            status=SearchIndexBuildStatus.READY,
+        )
         output = StringIO()
         with (
             patch.dict("os.environ", {"WAGTAILBLOG_ENV": "test"}),
@@ -357,6 +394,10 @@ class ContentSearchAliasCommandTests(TestCase):
                 "search.management.commands.search_rollback_content_alias.switch_content_search_read_alias",
                 return_value=SimpleNamespace(new_index="wagtailblog-test-content-v000"),
             ) as switch_alias,
+            patch(
+                "search.management.commands.search_rollback_content_alias.get_content_search_build_gate",
+                return_value={"clean": True},
+            ),
         ):
             call_command(
                 "search_rollback_content_alias",
@@ -374,8 +415,111 @@ class ContentSearchAliasCommandTests(TestCase):
         switch_alias.assert_called_once()
         self.target.refresh_from_db()
         self.build.refresh_from_db()
-        self.assertEqual(self.target.role, ContentSearchTargetRole.BUILDING)
+        self.assertEqual(self.target.role, ContentSearchTargetRole.RETIRED)
+        self.assertFalse(self.target.enabled)
+        self.assertFalse(self.target.required)
         self.assertEqual(self.build.status, SearchIndexBuildStatus.READY)
+        previous_target.refresh_from_db()
+        previous_build.refresh_from_db()
+        self.assertEqual(previous_target.role, ContentSearchTargetRole.SERVING)
+        self.assertTrue(previous_target.enabled)
+        self.assertTrue(previous_target.required)
+        self.assertEqual(previous_build.status, SearchIndexBuildStatus.SERVING)
+        self.assertEqual(get_content_search_serving_target().pk, previous_target.pk)
+
+    @override_settings(
+        CONTENT_SEARCH_INDEX_PREFIX="wagtailblog-test-content",
+        CONTENT_SEARCH_CONNECTION_NAME="default",
+    )
+    def test_confirm_rollback_refuses_retired_target_before_alias_write(self):
+        self.target.role = ContentSearchTargetRole.SERVING
+        self.target.required = True
+        self.target.save(update_fields=("role", "required"))
+        self.build.status = SearchIndexBuildStatus.SERVING
+        self.build.save(update_fields=("status",))
+        previous_target = ContentSearchTarget.objects.create(
+            target_id="content-switch-retired",
+            connection_name="default",
+            index_name="wagtailblog-test-content-v000",
+            role=ContentSearchTargetRole.RETIRED,
+            required=False,
+            enabled=False,
+        )
+        SearchIndexBuild.objects.create(
+            target=previous_target,
+            mapping_version="content-v000-balanced",
+            status=SearchIndexBuildStatus.READY,
+        )
+        with (
+            patch.dict("os.environ", {"WAGTAILBLOG_ENV": "test"}),
+            patch(
+                "search.management.commands.search_rollback_content_alias.get_content_search_read_alias_indices",
+                return_value=(self.target.index_name,),
+            ),
+            patch(
+                "search.management.commands.search_rollback_content_alias.switch_content_search_read_alias"
+            ) as switch_alias,
+            self.assertRaisesMessage(CommandError, "previous_target_requires_rebuild"),
+        ):
+            call_command(
+                "search_rollback_content_alias",
+                "--target",
+                self.target.target_id,
+                "--previous-index",
+                previous_target.index_name,
+                "--confirm",
+            )
+
+        switch_alias.assert_not_called()
+
+    @override_settings(
+        CONTENT_SEARCH_INDEX_PREFIX="wagtailblog-test-content",
+        CONTENT_SEARCH_CONNECTION_NAME="default",
+    )
+    def test_confirm_rollback_requires_clean_rebuilt_target_before_alias_write(self):
+        self.target.role = ContentSearchTargetRole.SERVING
+        self.target.required = True
+        self.target.save(update_fields=("role", "required"))
+        self.build.status = SearchIndexBuildStatus.SERVING
+        self.build.save(update_fields=("status",))
+        previous_target = ContentSearchTarget.objects.create(
+            target_id="content-switch-rebuilding",
+            connection_name="default",
+            index_name="wagtailblog-test-content-v000",
+            role=ContentSearchTargetRole.BUILDING,
+            required=False,
+            enabled=True,
+        )
+        SearchIndexBuild.objects.create(
+            target=previous_target,
+            mapping_version="content-v000-balanced",
+            status=SearchIndexBuildStatus.READY,
+        )
+        with (
+            patch.dict("os.environ", {"WAGTAILBLOG_ENV": "test"}),
+            patch(
+                "search.management.commands.search_rollback_content_alias.get_content_search_read_alias_indices",
+                return_value=(self.target.index_name,),
+            ),
+            patch(
+                "search.management.commands.search_rollback_content_alias.get_content_search_build_gate",
+                return_value={"clean": False},
+            ),
+            patch(
+                "search.management.commands.search_rollback_content_alias.switch_content_search_read_alias"
+            ) as switch_alias,
+            self.assertRaisesMessage(CommandError, "previous_build_gate_not_clean"),
+        ):
+            call_command(
+                "search_rollback_content_alias",
+                "--target",
+                self.target.target_id,
+                "--previous-index",
+                previous_target.index_name,
+                "--confirm",
+            )
+
+        switch_alias.assert_not_called()
 
     @override_settings(
         CONTENT_SEARCH_INDEX_PREFIX="wagtailblog-test-content",
@@ -405,3 +549,39 @@ class ContentSearchAliasCommandTests(TestCase):
             )
 
         switch_alias.assert_not_called()
+
+
+class ContentSearchTargetSelectionTests(TestCase):
+    @override_settings(CONTENT_SEARCH_CONNECTION_NAME="default")
+    def test_query_rejects_optional_serving_target(self):
+        ContentSearchTarget.objects.create(
+            target_id="content-optional-serving",
+            connection_name="default",
+            index_name="wagtailblog-test-content-v099",
+            role=ContentSearchTargetRole.SERVING,
+            required=False,
+            enabled=True,
+        )
+
+        with self.assertRaisesMessage(ContentSearchQueryUnavailable, "content_serving_target_missing"):
+            get_content_search_serving_target()
+
+
+class ContentSearchAliasLockTests(TestCase):
+    def test_mysql_lock_refuses_parallel_alias_switch(self):
+        if connection.vendor != "mysql":
+            self.skipTest("仅 MySQL 支持跨连接 advisory lock")
+
+        other_connection = connections["default"].copy()
+        lock_name = _content_search_alias_switch_lock_name("default")
+        try:
+            with other_connection.cursor() as cursor:
+                cursor.execute("SELECT GET_LOCK(%s, 0)", [lock_name])
+                self.assertEqual(cursor.fetchone()[0], 1)
+            with self.assertRaises(ContentSearchAliasSwitchInProgress):
+                with content_search_alias_switch_lock("default"):
+                    self.fail("第二个切换不应取得同一连接的 alias 锁")
+        finally:
+            with other_connection.cursor() as cursor:
+                cursor.execute("SELECT RELEASE_LOCK(%s)", [lock_name])
+            other_connection.close()

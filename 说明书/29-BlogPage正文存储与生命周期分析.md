@@ -624,6 +624,33 @@ Elasticsearch unified typed projection
 - 清理：压测结束后已删除临时物理索引，未改变测试 v005 serving alias。
 - 解释：该结果只代表当前单节点测试 ES、短正文和单批 bulk 的基线，不等价于百万篇容量承诺；后续扩容仍须按 1 万、10 万、100 万脱敏数据分阶段压测。
 
+## 20A. 生产页面 1194 审计与本批次修复（2026-08-30）
+
+生产只读审计页面 1194（“习近平：提高防灾减灾救灾能力”）确认新版链路完整：MySQL `body=[]`，`BlogPublicationState` 有效，Mongo 不可变正文版本、Wagtail Revision、v005 Delivery 与搜索身份一致。旧 `mongo_content_id` 仍存在，是兼容字段，不作为新版正文必填条件。
+
+审计发现两项根因并完成代码修复：
+
+1. `BlogPage.save()` 对新页面仍调用旧 `blog_content` 写入，导致新建页面重新产生 legacy 文档。现在仅对“既有页面且已有旧指针、尚未登记新版 State”的兼容场景保留更新；新页面和新版页面不再创建或回填旧集合。
+2. ES v003 作为可选旧 serving target 时仍接收 Delivery，并可能因自身 4xx 使 Outbox 变 dead。增量投递和 Outbox 收敛现在只考虑 enabled 的 building，或 required serving；alias 切换命令会在事务中退役同连接上其他 serving target。
+
+实际修改文件：`wagtailblog3/apps/blog/models.py`、`wagtailblog3/apps/search/services/delivery.py`、`wagtailblog3/apps/search/management/commands/search_switch_production_content_alias.py`，以及对应三个搜索/生命周期测试文件；未修改迁移、配置、systemd、数据库、Mongo 正文、ES alias 或生产数据。
+
+验证结果：定向生命周期、Delivery、正文索引测试 58 项通过；`compileall`、`python manage.py check`、`makemigrations --check --dry-run`（No changes detected）和 `git diff --check` 均通过。测试环境已知 MySQL W036 条件唯一约束提示仍存在，非本批次回归。生产历史事件 1125/v003 dead 未自动重放或清理。
+
+事务与回滚边界：alias API 切换发生在 ES 后，随后 MySQL target 退役事务失败时可能出现 ES 已切换而数据库未同步，需通过重试/回滚命令处理；本批次未执行 alias 切换。代码回滚只需恢复上一个已验证 commit，保留 State、Outbox、Delivery、Mongo 版本和 Build 审计证据；任何生产提交、推送、服务重启或 Target 行修正均需独立授权。
+
+独立复核列出的后续风险按优先级登记：P1 为 alias 切换后的跨 ES/MySQL 补偿、共享 connection 时的 target 命名空间限定，以及 State 查询异常时 legacy 兼容写入的 fail-closed 策略；P2 为双投递诊断探针改用 active target 谓词、旧 Build 状态同步和历史 dead Outbox 的只读报告。它们不影响本批次已验证的新写入与 v005 投递修复，须单独设计、测试和授权。
+
+## 20B. 生命周期日志诊断批次（2026-08-30）
+
+为定位下一篇新建文章是否严格走新版链路，本批次在现有 `blog`、`mongo`、`search` 日志域补充结构化 key=value 事件，不记录标题、intro、正文、完整异常、凭据或请求体。关联字段约定如下：`page_id`、`revision_id`、`body_version_id`、`publication_generation`、`outbox_pk`、`event_uuid`、`delivery_id`、`target_id`、`operation`、`status`、`error_code`、`elapsed_ms`。
+
+覆盖阶段：`blog_lifecycle_save_start/complete`、`blog_body_revision_start/done`、Revision 恢复 start/complete、发布/取消发布/删除 start/complete；`blog_publication_candidate_validated/state_promoted/generation_advanced/pointer_cleared`；Search signal、Outbox 创建、Delivery 成功/重试/死信。日志写入仍走 `observability.registry` 的既有 domain 文件，后台可用 `view_logs --module blog|search|mongo` 查询。
+
+验收方法：新建页面后按 `page_id` 查询 blog activity、mongo activity、search activity/error，确认保存顺序为 immutable body version → Revision pointer → State/Outbox → Delivery → ES；删除须出现 generation advance → tombstone Outbox → Delivery 完成。若出现 `blog_body_save_mongo_done`（新页面）或 `event_uuid` 与 `outbox_pk` 混淆，应立即停留在诊断，不执行补偿写入。
+
+本批次仅增加日志和测试所需代码，未执行真实页面保存、发布、删除或生产服务重启。已知后续缺口：scope job、Mongo cleanup 成功路径、ES 写入前后仍需进一步日志；QuerySet.delete 可能绕过 BlogPage.delete，属于独立 P1 设计，不在本批次扩大范围。
+
 ## 20. 生产代码同步记录（2026-08-30）
 
 - 提交：`eceed3f4f57aecd8acfbd759f2c4add16f702233`，已推送 `origin/main` 并 fast-forward 同步生产。
@@ -633,3 +660,82 @@ Elasticsearch unified typed projection
 - 搜索：v005 Target enabled，1100 条 Delivery succeeded、无 pending/processing/retry/dead；read alias 唯一指向 `wagtailblog-prod-content-v005`。
 - 严格对账：发现 `missing=4`（page 1179、1187、1188、1192），其余 stale/ahead/hash/body version/generation/wrong tombstone 均为 0；按历史兼容策略不处理，需未来独立历史数据核对批次确认。
 - ES 集群为单节点 yellow（无主分片缺失，14 个副本未分配），属于既有容量状态；未擅自调整副本数或删除索引。
+## 21. 生产新页面与测试回归复核（2026-08-31）
+
+### 21.1 生产页面 1194 的事实
+
+生产只读核对页面“习近平：提高防灾减灾救灾能力”（ID 1194）得到：
+
+- MySQL `blog_blogpage.body=[]`，`mongo_content_id` 仍是兼容字段；
+- `BlogPublicationState` 的 draft/published 指针、SHA-256、schema=1、generation=1 完整；
+- Mongo `content_body_versions` 有正式不可变版本，`blog_page_revision_bodies` 有对应历史快照，旧 `blog_content` 没有该页面文档；
+- Wagtail Revision 的 `mongo_body_version_id`、哈希和 schema 与 State/Mongo 一致；
+- ES v005 的公开投影可由 State 指针读取，搜索正常。
+
+因此生产“只看到 Mongo 正文集合增加”是新链路的正常表现：新页面正文写入 `content_body_versions`，旧 `blog_content` 不再是必写表；`mongo_content_id` 可空不影响正文、编辑或搜索。生产当前磁盘仍为旧兼容版 `acea8998`，不能把生产运行结果当作测试工作区未提交代码的等价证明。
+
+### 21.2 Wagtail 8.0 编辑发布缺口与局部修复
+
+Wagtail 8.0 的新建发布会调用 `Revision.publish()`，而编辑页发布调用 `PublishPageRevisionAction.execute()`，后者直接对 `revision.as_object()` 执行 `object.save()`，绕过 `BlogPage.publish()`。这解释了测试页面 634 已有 Mongo 正文版本但没有 State、前台正文为空的现象。
+
+本批次增加 `BlogPublicationService.ensure_published_revision()`，并在 `page_published` 搜索信号收到确切 `revision` 时调用。该方法先锁定并校验 Revision 对应的 Mongo 正文版本，只有 State 指针缺失或版本变化时才切换正式指针，已有相同三元组时保持幂等，不重复增加 generation。随后再创建 Outbox；直接 `Revision.publish()` 的原有路径保持不变。
+
+### 21.3 测试环境“很多错误”的分类
+
+- 将 `wagtailblog3.apps.blog` 当作 Django 测试 label 会造成同一模型被第二个模块名加载，触发 `MongoCleanupIntent` 缺少 `app_label`；正确入口是 `manage.py test blog search`，该问题不是业务回归。
+- 搜索 rebuild 夹具仍假设新页面存在旧 `blog_content`，在现代页面 `mongo_content_id=NULL` 时误报 `mongo_formal_content_unavailable`；夹具已改为读取 `content_body_versions`，未放宽生产严格校验。
+- MySQL 条件唯一约束 `WorkflowState` 的 W036、模拟 Mongo 缺失、ES 429、broker 不可用等均为既有测试警告/故障注入，不能作为本批次失败依据。
+
+### 21.4 本批次实施与验证
+
+- 修改：`blog/services/publication.py`、`search/signals.py`、`blog/test_publication_consistency.py`、`search/tests/test_search_rebuild.py`；其余工作区改动属于前序搜索/生命周期批次。
+- 回归覆盖：直接调用 Wagtail 8.0 `PublishPageRevisionAction` 后，页面 `live/live_revision`、State 正式指针和正文哈希一致。
+- WSL2 `wagtailblog-test`：`manage.py test blog search --noinput` 共 514 项全部通过；`compileall` 通过；`git diff --check` 通过。
+- 未执行：生产代码同步、生产迁移、Mongo/ES/Outbox 写入、服务重启；生产 1194 未修改。
+
+### 21.5 后续门禁与残余风险
+
+1. 提交/发布前仍需在独立批次完成完整 diff 审查，确认前序未提交文件没有互相覆盖，并重新运行迁移检查。
+2. `page_published` 兼容层覆盖 Wagtail 8.0 编辑发布，但请求级事务是否由生产部署启用仍需按实际 settings 验证；若未启用，页面保存与信号补齐之间存在短暂可见窗口，必须通过监控和重试收敛。
+3. 生产 `blog_content` 只保留兼容历史，不得因本次观察直接删除；删除需另行备份、对账和授权。
+
+## 22. 测试环境新增内容无法搜索修复计划（2026-08-31）
+
+### 22.1 现状证据与目标
+
+- 测试页面 `635`“第三个”已发布，正式正文版本、`BlogPublicationState` 和 `ContentSearchState` 完整，但 Outbox 事件保持 `pending` 且没有 Delivery；read alias 的 v005 物理索引没有该文档。
+- 测试环境只运行开发网站和 Filebeat，未运行 `maintenance` Worker/Beat；同时当前 alias 指向的 v005 Target 是 `serving + enabled + required=False`，不符合增量投递的 active Target 规则。
+- 目标：测试环境新增、编辑发布和删除 BlogPage 都通过隔离队列写入 v005；前台 `blog`、`all` 搜索只显示公开文章，删除后的页面不再保留公开 ES 文档。
+- 非目标：不修改生产正文、历史页面、生产 alias、索引 mapping 或数据库 schema；不把前台查询回退为 MySQL 扫描来掩盖异步投递故障。
+
+### 22.2 实施与测试步骤
+
+1. 运行代码将搜索任务投递改为读取 `CELERY_MAINTENANCE_QUEUE`，测试进程统一使用 `markdown-test-maintenance` 和独立 Redis DB；为队列选择增加回归测试。
+2. 测试 alias 切换命令将当前索引标记为唯一 `required serving`，并退役其他 serving Target；为状态变更增加断言。
+3. 使用 transient systemd 启动测试网站、maintenance Worker 和 Beat；修复测试 v005 Target 的既有错误标记后，让现有 Outbox 通过正常 Delivery 收敛。
+4. BrowserSkill 在测试站完整验证新建草稿、编辑、发布、搜索、删除；日志、Outbox、Delivery、State 与 ES 的核验只输出页面 ID、版本、状态和错误码，不输出正文。
+5. 由 Sol 审查变更，随后执行定向测试、`manage.py check`、迁移检查、`compileall`、`git diff --check`。全部通过后才提交、推送和按生产 runbook 同步；生产数据库、Mongo 和 ES 仅在已说明的部署步骤中写入。
+
+### 22.3 数据、服务与回滚
+
+- 测试写入：Target 标记、现有/验收页的 Outbox、Delivery、测试 ES 文档和 tombstone；验收临时页面会通过 Wagtail 删除链路生成 tombstone，不直接删除 ES 文档。
+- 服务：测试 Django、maintenance Worker、Beat；`systemctl.md` 同步记录统一队列环境变量。生产服务在本测试阶段不重启。
+- 回滚：停止测试 Beat、Worker、网站，保留 Outbox/Delivery/Target 审计记录；测试 alias 回切到变更前物理索引。代码发布失败时回退到发布前 commit，绝不反向删除 Mongo 正文或 Revision。
+
+### 22.4 模型/推理强度建议与实际使用
+
+- 只读证据与日志：Terra 中推理；队列、alias、跨服务投递和生产发布复核：Sol 高推理；浏览器流程：Terra 高推理。
+- 升级条件：Delivery 出现 retry/dead、alias 多指向、生产工作树不干净、服务健康异常或浏览器流程与 State 不一致时停止并由 Sol 复核。
+- 验证门禁：测试页面的 Outbox/Delivery 收敛、v005 命中、删除 tombstone、日志链路、全套测试与 Sol 审查均通过。
+
+### 22.5 新建页面搜索与删除闭环验收（2026-08-31）
+
+- 实际修复：测试 v005 Target 必须是唯一 `enabled + required + serving`；增量 Delivery 只投递到 enabled building 或 required serving Target。测试 Worker、Beat 与 Django 进程统一使用 `CELERY_MAINTENANCE_QUEUE=markdown-test-maintenance` 和隔离 Redis DB，避免页面进程、Worker 与 Beat 投递到不同队列。
+- 回滚门禁：`search_rollback_content_alias` 不再允许把已退役 Target 直接重新公开。回滚候选必须为 enabled building Target，具有 READY Build 且 build gate 为 clean；否则在 ES alias 写入前拒绝。这样旧索引不会因退役期间的更新、取消发布或 tombstone 漏投递而重新暴露过期文档。
+- 浏览器验收：在测试站通过 Wagtail 创建临时 BlogPage `636`，保存草稿两次、发布、访问前台详情，并分别验证 `type=blog` 与 `type=all` 搜索均唯一命中。随后通过 Wagtail 标准删除页删除该页面；前台 `type=blog` 搜索返回零结果。
+- 数据证据：发布后 `BlogPublicationState`、`ContentSearchState`、Outbox 和 Delivery 均为版本 1 的成功 upsert，Mongo 正式不可变版本和 Revision 快照均存在。删除后 Page 不存在，State 为版本 2 tombstone 且 `searchable=false`，Outbox/Delivery 均 succeeded；ES v005 仅保留 `searchable=false` 的 tombstone，不含可搜索孤儿文档。
+- 日志证据：`blog`、`mongo` 与 `search` 日志按 page_id 记录了不可变正文写入、Revision 恢复、发布 State 提升、Outbox upsert、发布信号和删除 tombstone；日志未输出标题、intro 或正文。测试环境周期性对账中出现的历史 Revision 差异属于既有测试数据污染，不阻塞本次新页面闭环。
+- Sol 审查：先发现并阻断了“退役索引回滚可能复活已删除文档”的 P0；补齐重建/追平门禁、retired Target 拒绝测试与 non-clean gate 拒绝测试后复审通过。未发现可阻断提交的 P1/P2。
+- 验证：`search.tests.test_search_wp4c` 19 项通过；`blog.test_markdown_import_tasks + search.tests.test_search_wp4c` 24 项通过；`manage.py test blog search --noinput --keepdb` 519 项通过；`manage.py check` 通过；`makemigrations --check --dry-run` 为 No changes detected；`compileall wagtailblog3` 与 `git diff --check` 通过。MySQL 对 Wagtail WorkflowState 条件唯一约束的 W036 是既有能力提示。
+- 数据/服务影响：本轮仅写入并删除测试临时 Page 及其测试 Mongo/Outbox/Delivery/ES tombstone；未写入生产 MySQL、Mongo、Redis、Elasticsearch alias 或生产服务配置。生产部署不需要迁移、历史回填或 alias 切换。
+- 回滚：代码回滚点为本次提交前的 `main`。若生产部署后出现异常，先停止受影响的 maintenance 消费，再回退代码并保留 State、Outbox、Delivery、Build 与 Mongo 版本证据；不删除正文、Revision 或 tombstone。

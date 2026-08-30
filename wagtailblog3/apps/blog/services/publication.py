@@ -8,12 +8,16 @@ Wagtail Workflow 与定时发布提供精确 Revision 围栏。搜索 Outbox 和
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Mapping
 
 from django.db import transaction
 from django.utils import timezone
 from wagtailblog3.mongo import MongoRevisionReadError
+
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
 	from wagtail.models import Revision, WorkflowState
@@ -153,6 +157,13 @@ class BlogPublicationService:
 			state.draft_body_version_id = version_id
 			state.draft_body_sha256 = body_sha256
 			state.draft_body_schema_version = schema_version
+			logger.info(
+				"blog_publication_candidate_validated page_id=%s revision_id=%s body_version_id=%s approved_revision_id=%s",
+				page.pk,
+				revision.pk,
+				version_id,
+				approved_revision_id,
+			)
 			if approved_revision_id is not None:
 				if not isinstance(approved_revision_id, int) or isinstance(approved_revision_id, bool):
 					raise ValueError("approved_revision_id_invalid")
@@ -201,7 +212,37 @@ class BlogPublicationService:
 				"updated_at",
 			)
 		)
+		logger.info(
+			"blog_publication_state_promoted page_id=%s revision_id=%s body_version_id=%s generation=%s",
+			candidate.page.pk,
+			candidate.revision.pk,
+			version_id,
+			state.publication_generation,
+		)
 		return state
+
+	@classmethod
+	def ensure_published_revision(cls, page_id: int, revision_id: int) -> BlogPublicationState:
+		"""在 Wagtail 已完成页面保存后补齐指定 Revision 的正式指针。
+
+		Wagtail 8.0 的编辑发布动作直接调用 ``PublishPageRevisionAction``，不会经过
+		``BlogPage.publish``。该入口由 ``page_published`` 信号调用，因此必须保持幂等：
+		已有相同正文版本时不重复增加代次；版本缺失或发生变化时才重新校验并切换指针。
+		副作用：在当前 MySQL 事务中更新/创建 ``BlogPublicationState``；Mongo 正文缺失
+		或 Revision 身份不匹配时抛出发布校验异常，不写入正式指针。
+		"""
+		with transaction.atomic():
+			candidate = cls.lock_and_validate_revision(page_id, revision_id)
+			content = _revision_content(candidate.revision)
+			version_id, body_sha256, schema_version = _version_metadata(content)
+			state = candidate.state
+			if (
+				state.published_body_version_id == version_id
+				and state.published_body_sha256 == body_sha256
+				and state.published_body_schema_version == schema_version
+			):
+				return state
+			return cls.promote_published_candidate(candidate)
 
 	@classmethod
 	def advance_unpublish_generation(cls, page_id: int) -> BlogPublicationState:
@@ -214,6 +255,11 @@ class BlogPublicationService:
 		)
 		state.publication_generation = (state.publication_generation or 0) + 1
 		state.save(update_fields=("publication_generation", "updated_at"))
+		logger.info(
+			"blog_publication_generation_advanced page_id=%s generation=%s",
+			page_id,
+			state.publication_generation,
+		)
 		return state
 
 	@classmethod
@@ -226,6 +272,7 @@ class BlogPublicationService:
 			published_body_sha256=None,
 			published_body_schema_version=None,
 		)
+		logger.info("blog_publication_pointer_cleared page_id=%s", page_id)
 
 
 def _workflow_approved_revision(workflow_state: WorkflowState) -> Revision:

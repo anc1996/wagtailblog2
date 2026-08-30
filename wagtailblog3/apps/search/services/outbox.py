@@ -14,7 +14,7 @@ from search.models import (
     ContentSearchStatus,
 )
 from search.services.document import build_formal_content_snapshot
-from search.tasks import wake_content_search_delivery
+from search.tasks import _maintenance_queue, wake_content_search_delivery
 
 
 logger = logging.getLogger(__name__)
@@ -26,7 +26,7 @@ def schedule_content_search_wakeup(event_id: Any) -> None:
     try:
         wake_content_search_delivery.apply_async(
             kwargs={"event_id": str(event_id)},
-            queue="maintenance",
+            queue=_maintenance_queue(),
         )
     except Exception as error:
         logger.error("content_search_wakeup_enqueue_failed event_id=%s error=%s", event_id, error)
@@ -40,6 +40,7 @@ class ContentSearchOutboxService:
         if not settings.CONTENT_SEARCH_PRODUCER_ENABLED:
             return None
         if not cls._is_public(page.pk):
+            logger.info("content_search_publication_tombstone page_id=%s reason=not_public", page.pk)
             return cls._record_tombstone(page)
 
         body_version_id, publication_generation = cls._publication_metadata(page.pk)
@@ -57,7 +58,7 @@ class ContentSearchOutboxService:
                 publication_generation=publication_generation,
             )
 
-        return cls._record_change(
+        event = cls._record_change(
             page_id=page.pk,
             operation=ContentSearchOperation.UPSERT,
             searchable=True,
@@ -66,18 +67,31 @@ class ContentSearchOutboxService:
             body_version_id=body_version_id,
             publication_generation=publication_generation,
         )
+        logger.info(
+            "content_search_publication_recorded page_id=%s event_uuid=%s content_version=%s body_version_id=%s generation=%s",
+            page.pk,
+            event.event_id,
+            event.content_version,
+            event.body_version_id,
+            event.publication_generation,
+        )
+        return event
 
     @classmethod
     def record_unpublish(cls, page: Any) -> Any:
         if not settings.CONTENT_SEARCH_PRODUCER_ENABLED:
             return None
-        return cls._record_tombstone(page)
+        event = cls._record_tombstone(page)
+        logger.info("content_search_unpublish_recorded page_id=%s event_uuid=%s generation=%s", page.pk, event.event_id, event.publication_generation)
+        return event
 
     @classmethod
     def record_delete(cls, page: Any) -> Any:
         if not settings.CONTENT_SEARCH_PRODUCER_ENABLED:
             return None
-        return cls._record_tombstone(page)
+        event = cls._record_tombstone(page)
+        logger.info("content_search_delete_recorded page_id=%s event_uuid=%s generation=%s", page.pk, event.event_id, event.publication_generation)
+        return event
 
     @classmethod
     def request_scope_recalculation(cls, root_page_id: int) -> Any:
@@ -165,6 +179,16 @@ class ContentSearchOutboxService:
                 status=ContentSearchStatus.PENDING,
             )
             transaction.on_commit(lambda: schedule_content_search_wakeup(event.event_id))
+            logger.info(
+                "content_search_outbox_created page_id=%s event_id=%s operation=%s content_version=%s body_version_id=%s generation=%s searchable=%s",
+                page_id,
+                event.event_id,
+                event.operation,
+                event.content_version,
+                event.body_version_id,
+                event.publication_generation,
+                event.searchable,
+            )
             return event
 
     @staticmethod

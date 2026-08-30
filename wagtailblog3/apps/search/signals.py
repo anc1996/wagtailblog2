@@ -1,3 +1,6 @@
+"""搜索投影的 Wagtail 生命周期信号适配。"""
+
+import logging
 from typing import Any
 
 from django.conf import settings
@@ -7,7 +10,11 @@ from wagtail.models import PageViewRestriction
 from wagtail.signals import page_published, page_unpublished
 
 from blog.models import BlogPage
+from blog.services.publication import BlogPublicationService
 from search.services.outbox import ContentSearchOutboxService
+
+
+logger = logging.getLogger(__name__)
 
 
 @receiver(
@@ -16,10 +23,23 @@ from search.services.outbox import ContentSearchOutboxService
     dispatch_uid="search.record_blog_page_published",
 )
 def record_blog_page_published(sender: Any, instance: BlogPage, **kwargs: Any) -> None:
-    """Wagtail 已写入 live 状态后仅记录事务内事件，不直接访问 Elasticsearch。"""
+    """页面发布后补齐正式指针，并记录待投递的搜索事件。"""
 
     if settings.CONTENT_SEARCH_PRODUCER_ENABLED:
-        ContentSearchOutboxService.record_publication(instance)
+        revision = kwargs.get("revision")
+        if (
+            instance.live
+            and revision is not None
+            and getattr(revision, "pk", None) is not None
+        ):
+            # Wagtail 8.0 编辑发布绕过 BlogPage.publish；信号收到的 Revision 是唯一可信版本。
+            BlogPublicationService.ensure_published_revision(instance.pk, revision.pk)
+        event = ContentSearchOutboxService.record_publication(instance)
+        logger.info(
+            "content_search_publish_signal page_id=%s event_id=%s",
+            instance.pk,
+            getattr(event, "event_id", None),
+        )
 
 
 @receiver(
@@ -28,10 +48,15 @@ def record_blog_page_published(sender: Any, instance: BlogPage, **kwargs: Any) -
     dispatch_uid="search.record_blog_page_unpublished",
 )
 def record_blog_page_unpublished(sender: Any, instance: BlogPage, **kwargs: Any) -> None:
-    """取消发布必须先产生墓碑事件，读取层仍由 public() 防御性过滤。"""
+    """取消发布后记录不可搜索的墓碑事件。"""
 
     if settings.CONTENT_SEARCH_PRODUCER_ENABLED:
-        ContentSearchOutboxService.record_unpublish(instance)
+        event = ContentSearchOutboxService.record_unpublish(instance)
+        logger.info(
+            "content_search_unpublish_signal page_id=%s event_id=%s",
+            instance.pk,
+            getattr(event, "event_id", None),
+        )
 
 
 @receiver(
@@ -49,8 +74,7 @@ def request_scope_recalculation_on_restriction_change(
     instance: PageViewRestriction,
     **kwargs: Any,
 ) -> None:
-    """限制变更只创建范围任务，后续 Worker 按游标处理，避免在 signal 中枚举子树。"""
+    """权限范围变化后创建重算任务，避免在信号中递归扫描整棵页面树。"""
 
     if settings.CONTENT_SEARCH_PRODUCER_ENABLED:
         ContentSearchOutboxService.request_scope_recalculation(instance.page_id)
-from typing import Any

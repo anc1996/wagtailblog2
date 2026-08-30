@@ -2,6 +2,7 @@ import uuid
 from types import SimpleNamespace
 from unittest import mock
 
+from django.conf import settings
 from django.test import SimpleTestCase, override_settings
 
 from blog.models import MarkdownImportArtifactCleanupStatus
@@ -96,23 +97,23 @@ class MarkdownImportCleanupTaskTests(SimpleTestCase):
             config["CELERY_TASK_ROUTES"][
                 "blog.tasks.cleanup_markdown_import_artifact"
             ]["queue"],
-            "maintenance",
+            settings.CELERY_MAINTENANCE_QUEUE,
         )
         self.assertEqual(
             config["CELERY_TASK_ROUTES"][
                 "blog.tasks.assemble_markdown_import_session"
             ]["queue"],
-            "maintenance",
+            settings.CELERY_MAINTENANCE_QUEUE,
         )
         self.assertEqual(
             config["CELERY_BEAT_SCHEDULE"][
                 "dispatch-markdown-import-cleanup-retries"
             ]["options"]["queue"],
-            "maintenance",
+            settings.CELERY_MAINTENANCE_QUEUE,
         )
         self.assertEqual(
             config["CELERY_BEAT_SCHEDULE"][
                 "expire-markdown-import-sessions"
             ]["options"]["queue"],
-            "maintenance",
+            settings.CELERY_MAINTENANCE_QUEUE,
         )

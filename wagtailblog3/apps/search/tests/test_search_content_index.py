@@ -701,6 +701,14 @@ class ProductionContentAliasSwitchCommandTests(TestCase):
 
     @override_settings(**PRODUCTION_ALIAS_SWITCH_SETTINGS)
     def test_confirm_switches_only_production_alias_and_marks_serving(self):
+        old_target = ContentSearchTarget.objects.create(
+            target_id="prod-content-v000",
+            connection_name="content_production",
+            index_name="wagtailblog-prod-content-v000",
+            role=ContentSearchTargetRole.SERVING,
+            required=False,
+            enabled=True,
+        )
         output = StringIO()
         switched = SimpleNamespace(new_index=self.target.index_name)
         with (
@@ -735,4 +743,9 @@ class ProductionContentAliasSwitchCommandTests(TestCase):
         self.target.refresh_from_db()
         self.build.refresh_from_db()
         self.assertEqual(self.target.role, ContentSearchTargetRole.SERVING)
+        self.assertTrue(self.target.required)
         self.assertEqual(self.build.status, SearchIndexBuildStatus.SERVING)
+        old_target.refresh_from_db()
+        self.assertFalse(old_target.enabled)
+        self.assertFalse(old_target.required)
+        self.assertEqual(old_target.role, ContentSearchTargetRole.RETIRED)

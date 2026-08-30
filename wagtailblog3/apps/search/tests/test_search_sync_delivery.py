@@ -313,6 +313,7 @@ class ContentSearchDeliveryTests(BlogLifecycleFixtureMixin, TestCase):
         self._target()
         delivery_id = self._delivery_id_for(event)
         self.mongo.live_documents.clear()
+        self.mongo.body_versions.clear()
 
         with patch("search.services.delivery.write_content_search_document") as write_document:
             result = process_content_search_delivery(delivery_id)

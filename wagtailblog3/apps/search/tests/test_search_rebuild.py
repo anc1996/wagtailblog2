@@ -58,6 +58,7 @@ class ContentSearchRebuildTests(BlogLifecycleFixtureMixin, TestCase):
     def test_online_rebuild_uses_formal_batch_and_stops_in_catching_up(self):
         with (
             patch("search.services.rebuild.verify_content_search_index", return_value=True),
+            patch("search.services.rebuild.BlogPublicationState.objects.in_bulk", return_value={}),
             patch(
                 "search.services.rebuild.read_formal_contents_by_id",
                 return_value=self._formal_contents(),
@@ -109,6 +110,7 @@ class ContentSearchRebuildTests(BlogLifecycleFixtureMixin, TestCase):
 
         with (
             patch("search.services.rebuild.verify_content_search_index", return_value=True),
+            patch("search.services.rebuild.BlogPublicationState.objects.in_bulk", return_value={}),
             patch("search.services.rebuild.read_formal_contents_by_id", return_value=formal_contents),
             patch(
                 "search.services.rebuild.write_content_search_documents",
@@ -133,6 +135,7 @@ class ContentSearchRebuildTests(BlogLifecycleFixtureMixin, TestCase):
 
         with (
             patch("search.services.rebuild.verify_content_search_index", return_value=True),
+            patch("search.services.rebuild.BlogPublicationState.objects.in_bulk", return_value={}),
             patch("search.services.rebuild.read_formal_contents_by_id", return_value=formal_contents),
             patch(
                 "search.services.rebuild.write_content_search_documents",

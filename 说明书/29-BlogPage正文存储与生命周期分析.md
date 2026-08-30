@@ -1838,3 +1838,9 @@ Wagtail 的历史页本身主要读取 MySQL 的 `PageLogEntry`、`Revision` 元
 - 验证：测试库已应用 `0034`，对 page 38 以正确 expected-hash 连续执行两次 `--apply`，均返回 `already_registered`，审计记录仅 1 条、attempts=1、status=succeeded。
 - 测试：`manage.py check`、`makemigrations --check --dry-run`、`compileall` 及 `git diff --check` 通过；P0 测试 27 项通过。本批未执行生产迁移、ES alias 切换或服务重启。
 - 残余风险：审计锁与 Mongo 写入不在同一跨库事务，过期恢复、并发失败和批量断点恢复仍需压测；历史 Revision 未回写新版本指针、测试 ES v005 未全量建好。
+
+### 77. P1 集成复核与测试调整（2026-08-30）
+
+- 修正：批量 rebuild 的旧存储 mock 显式标记为无发布指针，保持旧测试用例的兼容语义；搜索正式快照复用 `blog.models.MongoManager` 适配器，确保运行时连接与 BlogPage 一致。
+- 测试：`blog.test_workflow_publication`、`blog.test_publication_service`、`search.tests.test_search_rebuild`、`search.tests.test_search_sync_delivery` 共 31 项通过；包含 Wagtail 8.0 Workflow 重新校验和 scheduled 发布边界的现有回归用例。
+- 变更范围：仅测试环境应用 `blog.0034_legacyblogregistrationaudit`；本批未对生产执行迁移、重建 ES、切 alias 或重启服务。

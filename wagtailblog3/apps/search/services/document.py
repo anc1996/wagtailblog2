@@ -44,7 +44,8 @@ def _published_body_version_content(page: object) -> tuple[bool, object | None]:
 		return False, None
 
 	try:
-		from wagtailblog3.mongo import MongoManager
+		# 复用 BlogPage 使用的 Mongo 适配器，保证测试替身和运行时连接配置一致。
+		from blog.models import MongoManager
 
 		body_version_id = state["published_body_version_id"]
 		body_sha256 = state.get("published_body_sha256")

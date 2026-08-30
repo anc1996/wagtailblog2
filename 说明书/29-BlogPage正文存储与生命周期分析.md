@@ -1844,3 +1844,18 @@ Wagtail 的历史页本身主要读取 MySQL 的 `PageLogEntry`、`Revision` 元
 - 修正：批量 rebuild 的旧存储 mock 显式标记为无发布指针，保持旧测试用例的兼容语义；搜索正式快照复用 `blog.models.MongoManager` 适配器，确保运行时连接与 BlogPage 一致。
 - 测试：`blog.test_workflow_publication`、`blog.test_publication_service`、`search.tests.test_search_rebuild`、`search.tests.test_search_sync_delivery` 共 31 项通过；包含 Wagtail 8.0 Workflow 重新校验和 scheduled 发布边界的现有回归用例。
 - 变更范围：仅测试环境应用 `blog.0034_legacyblogregistrationaudit`；本批未对生产执行迁移、重建 ES、切 alias 或重启服务。
+
+### 78. 测试环境历史孤儿数据清理与失败归因（2026-08-30）
+
+- 只读盘点：156 篇 BlogPage 均有 State 和 Mongo 不可变正文版本；Mongo `blog_content` 原有 1 条 `page_id=null` 文档，属于明确历史孤儿。SearchState/Outbox 中 page_id 576、577、578、579、594、609、621、622、623 为已删页面的 tombstone，不是错误数据，予以保留。
+- 备份与清理：定向备份位于 `/home/source/Django/wagtail/test-backups/orphan-null-page-20260830-100000/`，包含 `blog_content` 孤儿文档和校验和；已删除该 `page_id=null` 文档 1 条。未删除任何正式版本、Revision、State 或 tombstone。
+- 清理后对账：`state_missing=0`、`mongo_missing=0`、`outbox_missing=0`、`search_identity_mismatch=0`；`revision_body_mismatch=156` 仍在，原因是旧 Revision 没有 `mongo_body_version_id`，标记为“历史数据污染，需单独清理”。
+- ES 归因：当前 serving alias 仍指向旧 replica 索引，v005 仍是 building；stale/missing 属于历史索引欠数，不是本批登记或清理造成。
+- 测试与风险：清理后相关 blog/search 定向套件 31 项通过；测试服务未启动，本次未修改服务配置。剩余实现顺序为历史 Revision 绑定方案、ES v005 全量重建/切换门禁和 tombstone 保留期管理。
+
+### 79. 测试迁移夹具污染修复与完整套件归因（2026-08-30）
+
+- 测试夹具修复：`search.tests.test_search_content_index` 的 Mongo mock 路径改为与运行时代码实际导入位置一致的 `blog.models.MongoManager`；`ContentSearchMigrationTests.test_initial_migration_can_reverse_and_reapply` 在回滚到 0002 后通过 `finally` 恢复 search 最新迁移，避免后续测试看到缺失 `body_version_id` 的降级 schema。
+- 验证：`search.tests.test_search_content_index` 24 项通过；迁移回滚测试单独运行 1 项通过；修复后现有 test DB 的 blog+search 全量 483 项通过。此前 483 项中的 2 个 `Unknown column search_contentsearchstate.body_version_id` 错误归因于迁移测试污染，不是孤儿 Mongo 数据或运行时代码回归。另一次全新 test DB 重建曾因 MySQL 测试库残留/创建状态返回 1049，未作为全新库门禁证据；业务库未受影响。
+- 历史污染边界：测试日志中的 `revision_snapshot_missing`、Mongo 历史快照异常和旧 ES serving/v005 欠数均为历史夹具/索引状态，标记“历史数据污染，需单独清理”；本批不修改生产库、测试业务库、ES alias 或服务配置。
+- 变更文件：仅测试夹具 `wagtailblog3/apps/search/tests/test_search_content_index.py`、`wagtailblog3/apps/search/tests/test_search_sync_models.py` 与本方案文档；运行时代码、数据模型和迁移文件未改。

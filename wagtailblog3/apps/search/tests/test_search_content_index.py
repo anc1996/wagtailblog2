@@ -211,7 +211,7 @@ class ContentIndexDefinitionTests(SimpleTestCase):
 
         with (
             patch("blog.models.BlogPublicationState.objects.filter", return_value=state_filter),
-            patch("wagtailblog3.mongo.MongoManager", return_value=manager),
+            patch("blog.models.MongoManager", return_value=manager),
         ):
             document = build_formal_content_document(page, content_version=8)
 

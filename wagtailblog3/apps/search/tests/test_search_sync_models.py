@@ -139,6 +139,14 @@ class ContentSearchMigrationTests(TransactionTestCase):
 
     def test_initial_migration_can_reverse_and_reapply(self):
         executor = MigrationExecutor(connection)
-        executor.migrate([("search", None)])
-        executor.loader.build_graph()
-        executor.migrate([("search", "0002_contentsearchoutbox_mongo_content_id_and_more")])
+        try:
+            executor.migrate([("search", None)])
+            executor.loader.build_graph()
+            executor.migrate([("search", "0002_contentsearchoutbox_mongo_content_id_and_more")])
+        finally:
+            # 迁移回滚测试必须恢复最新 schema，避免污染同一进程中的后续测试。
+            executor.loader.build_graph()
+            latest_search = [
+                node for node in executor.loader.graph.leaf_nodes() if node[0] == "search"
+            ]
+            executor.migrate(latest_search)

@@ -739,3 +739,12 @@ Wagtail 8.0 的新建发布会调用 `Revision.publish()`，而编辑页发布�
 - 验证：`search.tests.test_search_wp4c` 19 项通过；`blog.test_markdown_import_tasks + search.tests.test_search_wp4c` 24 项通过；`manage.py test blog search --noinput --keepdb` 519 项通过；`manage.py check` 通过；`makemigrations --check --dry-run` 为 No changes detected；`compileall wagtailblog3` 与 `git diff --check` 通过。MySQL 对 Wagtail WorkflowState 条件唯一约束的 W036 是既有能力提示。
 - 数据/服务影响：本轮仅写入并删除测试临时 Page 及其测试 Mongo/Outbox/Delivery/ES tombstone；未写入生产 MySQL、Mongo、Redis、Elasticsearch alias 或生产服务配置。生产部署不需要迁移、历史回填或 alias 切换。
 - 回滚：代码回滚点为本次提交前的 `main`。若生产部署后出现异常，先停止受影响的 maintenance 消费，再回退代码并保留 State、Outbox、Delivery、Build 与 Mongo 版本证据；不删除正文、Revision 或 tombstone。
+
+### 22.6 生产 v005 required 状态修复与搜索验收（2026-08-31）
+
+- 背景：生产 `prod-content-v005` 已是 serving 且 enabled，但历史状态 `required=false`，与新版增量投递的 required-serving 门禁不一致；v003 虽 enabled 但非 required，不作为活动投递目标。
+- 变更：在生产备份完成后，仅通过事务锁定并更新 `ContentSearchTarget(target_id=prod-content-v005, connection_name=content_production).required` 为 `true`。未修改 ES 索引、read alias、正文、Mongo、Revision、Outbox 或 Delivery。
+- 备份：备份目录 `/home/source/Django/wagtail/backups/required-fix-20260831/`，文件 `content_search_target.dumpdata`，SHA-256 `e436fa9a37838e73c06aaa12898dcd87de04733347dd071f70c6655fd641412f`。
+- 核验：`search_sync_status` 显示 v005 为 `enabled=true, required=true, role=serving`，且不存在第二个同时满足三条件的 Target；v005 Delivery `succeeded=1101`，pending/processing/retry/dead 均为 0。Django `check` 无问题，四个应用服务均 active，生产搜索 API 查询 Django 返回 HTTP 200 和结果。
+- 服务影响：此前已按代码发布重启 Django/uWSGI、maintenance Worker、Beat；本次单字段状态修复无需再次重启，未重启基础设施、Nginx、Filebeat、Elasticsearch、MySQL、MongoDB 或 Redis。
+- 回滚边界：如需回滚，仅恢复备份中的 `required=false` 或回退代码至上一已验证 commit；不得删除正文、ES 文档、alias、State、Outbox 或 Delivery。恢复后必须重新执行唯一性、服务、Django check 与搜索验收。

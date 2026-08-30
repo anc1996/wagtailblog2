@@ -1859,3 +1859,32 @@ Wagtail 的历史页本身主要读取 MySQL 的 `PageLogEntry`、`Revision` 元
 - 验证：`search.tests.test_search_content_index` 24 项通过；迁移回滚测试单独运行 1 项通过；修复后现有 test DB 的 blog+search 全量 483 项通过。此前 483 项中的 2 个 `Unknown column search_contentsearchstate.body_version_id` 错误归因于迁移测试污染，不是孤儿 Mongo 数据或运行时代码回归。另一次全新 test DB 重建曾因 MySQL 测试库残留/创建状态返回 1049，未作为全新库门禁证据；业务库未受影响。
 - 历史污染边界：测试日志中的 `revision_snapshot_missing`、Mongo 历史快照异常和旧 ES serving/v005 欠数均为历史夹具/索引状态，标记“历史数据污染，需单独清理”；本批不修改生产库、测试业务库、ES alias 或服务配置。
 - 变更文件：仅测试夹具 `wagtailblog3/apps/search/tests/test_search_content_index.py`、`wagtailblog3/apps/search/tests/test_search_sync_models.py` 与本方案文档；运行时代码、数据模型和迁移文件未改。
+
+### 80. 后续收尾任务 dry-run 复核与实施边界（2026-08-30）
+
+#### 80.1 历史 Revision 正文绑定
+
+- 只读证据：`register_legacy_blog_page --after-page-id 0 --limit 5 --dry-run` 显示 page 38、271--274 均已有 `BlogPublicationState` 和唯一的 Mongo 不可变正式正文版本，但它们的 live Revision 没有 `mongo_body_version_id`；五页均分类为 `legacy_revision_unbound + modern_body_version_present`。全量 `blog_publication_consistency_check` 同样保留 156 条 `revision_body_mismatch`。
+- 可安全绑定范围：仅限仍为 live 的 `page.live_revision`，且 Revision JSON 可解析、未带冲突正文指针、State 的 published 指针/hash/schema 完整，并能按该三元组从 Mongo 读回正文的记录。写入时只能保留原 Revision JSON 的所有字段并补入 `mongo_body_version_id`、`body_sha256`、`body_schema_version`；不得创建新 Revision、不得改 Page/live_revision、不得触发发布、Outbox 或搜索事件。
+- 明确排除：草稿、非 live 的历史 Revision、正文指针已冲突、State/Mongo 不完整或哈希不一致的页面一律输出 `unresolved`，不得用当前正式正文覆盖其历史内容。该限制是防止预览、比较、恢复时把旧草稿错误替换为当前公开版本。
+- 下一实现：新增默认只读的 Revision 绑定 dry-run，以 `(revision_id, page_id)` 游标输出候选、拒绝原因、原 JSON 摘要和建议指针的脱敏 manifest；`--apply` 需要独立确认、备份 Revision 行、manifest SHA-256 和稳定游标，且逐小批次复核 Wagtail 预览/比较。当前未回写任何 Revision。
+
+#### 80.2 测试 ES v005 alias 门禁
+
+- 只读结果：read alias `wagtailblog-test-content-read` 仍唯一指向 `wagtailblog-test-content-replica0-v001`。候选 `content-v005-fix` 的物理索引 `wagtailblog-test-content-v005` 为 green（102 文档），但 Build 为 `failed`，checkpoint 为 530/632，尚有 23 个 pending Delivery。
+- 一致性：v005 相对 165 个 Search State 的只读结果为 `missing=64`、`stale=100`、`extra=1`；extra 是 page 990001 的不可搜索 tombstone，不构成公开搜索泄露。page 531 之后抽样的 56 篇页面均已有不可变正文且可从 Mongo 读取，因此此前 build 失败属于登记前历史状态，不是本批代码回归。
+- 已执行且未写入：`search_rebuild_content_index --target content-v005-fix --dry-run --check-catch-up`、`search_switch_content_alias --target content-v005-fix`、v005 `search_consistency_check` 和 `search_cluster_preflight`。alias dry-run 明确显示 `build_status=failed`、`alias_changed=false`。
+- 后续门禁：须先经确认以 `--confirm --resume-build --max-batches 1` 小批恢复 rebuild，逐批复核 Delivery；连续两次 catch-up 均清洁、build 进入 READY、pending/retry/dead 为 0、严格一致性无公开 missing/stale 后，才能另行确认 `search_switch_content_alias --target content-v005-fix --confirm`。回滚仅切回旧 alias，两个物理索引都保留；当前禁止切换。
+
+#### 80.3 Tombstone 归档策略
+
+- 长期保留：`ContentSearchState.desired_operation=tombstone` 是防迟到 upsert、重放和异常恢复造成搜索复活的高水位围栏，长期热存，不按时间删除；ES tombstone 也不逐文档物理删除，而通过新空索引回填、追平与 alias 切换自然压缩。
+- 拟归档对象：只考虑已完成的 `ContentSearchOutbox` 和关联 `ContentSearchDelivery` 审计。默认建议热存 180 天、归档副本至少两年，但这不是已启用配置，也不是当前可执行的删除策略。
+- dry-run 候选门禁：事件为 tombstone；State 仍为 tombstone 且版本不低于事件；所有 enabled/required target 的 Delivery 均为 succeeded 或 superseded；任一 pending、processing、retry、dead、过期租约、运行中的 index build/alias 切换/replay 均拒绝。dry-run 只输出无正文 manifest、分类、拒绝原因和 `(completed_at, id)` 游标。
+- 实现顺序：先增加显式 `tombstoned_at`、只读 `search_archive_tombstones --dry-run`、归档 manifest 和 10 万级查询/锁等待基线；再经独立确认实现 `--apply --expected-manifest-sha256`。apply 顺序必须是锁定候选与 State、写归档记录/manifest、先迁移或删除 Delivery、后处理 Outbox，绝不删除 State。当前未设计自动清理任务，也未删除任何 tombstone。
+
+#### 80.4 测试、模型调度与授权边界
+
+- 本批实际执行的是 MySQL/Mongo/ES 只读查询与 dry-run，没有执行 Revision 回写、ES rebuild、alias 切换、Outbox/Delivery 归档、服务重启或生产操作。
+- 模型/推理实际调度：Sol 高推理负责 Revision/ES 数据一致性与回滚门禁核查；Terra 高推理负责 tombstone 生命周期和归档可行性审查；主 agent 负责整合、授权边界和验证。升级条件是任何 Revision 回写、ES alias 切换、批量归档、生产数据或跨服务回滚。
+- 回滚点：本批仅文档变更，可回退该提交；未来 Revision apply 以逐批 MySQL Revision 行备份恢复，ES 以旧 alias 回切，Outbox/Delivery 以 manifest/归档副本恢复。所有 apply 前仍需用户明确确认。

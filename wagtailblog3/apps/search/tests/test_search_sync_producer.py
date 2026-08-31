@@ -6,7 +6,7 @@ from django.db import close_old_connections, transaction
 from django.test import TestCase, TransactionTestCase, override_settings
 from wagtail.models import PageViewRestriction
 
-from blog.models import BlogPage, BlogPublicationState
+from blog.models import BlogPage, BlogPublicationState, PageDeletionIntent, PageDeletionIntentStatus
 from search.models import (
     ContentSearchOperation,
     ContentSearchOutbox,
@@ -125,7 +125,10 @@ class ContentSearchProducerLifecycleTests(BlogLifecycleFixtureMixin, TestCase):
         self.assertEqual(observed["generation"], 1)
 
     def test_unpublish_and_delete_create_tombstones_and_keep_state(self):
-        with patch("search.services.outbox.schedule_content_search_wakeup"):
+        with (
+            patch("search.services.outbox.schedule_content_search_wakeup"),
+            patch("blog.tasks.process_page_deletion.apply_async"),
+        ):
             page = self._publish(self._create_draft_page("待取消发布正文"))
             with self.captureOnCommitCallbacks(execute=True):
                 page.unpublish()
@@ -150,11 +153,17 @@ class ContentSearchProducerLifecycleTests(BlogLifecycleFixtureMixin, TestCase):
         state.refresh_from_db()
         self.assertEqual(state.content_version, 3)
         self.assertEqual(delete_event.operation, ContentSearchOperation.TOMBSTONE)
-        self.assertFalse(BlogPage.objects.filter(pk=state.page_id).exists())
+        # 删除请求只登记页面级意图；页面需等 Worker 完成 Mongo 清理后才物理删除。
+        self.assertTrue(BlogPage.objects.filter(pk=state.page_id).exists())
+        intent = PageDeletionIntent.objects.get(page_id=state.page_id)
+        self.assertEqual(intent.status, PageDeletionIntentStatus.DELETING)
 
     def test_direct_delete_of_live_page_advances_generation_and_writes_tombstone(self):
         """直接删除仍在线页面时，墓碑必须拥有更高公开代次，避免迟到 upsert 复活。"""
-        with patch("search.services.outbox.schedule_content_search_wakeup"):
+        with (
+            patch("search.services.outbox.schedule_content_search_wakeup"),
+            patch("blog.tasks.process_page_deletion.apply_async"),
+        ):
             page = self._publish(self._create_draft_page("直接删除在线正文"))
             state_before = BlogPublicationState.objects.get(page_id=page.pk)
             self.assertEqual(state_before.publication_generation, 1)
@@ -166,7 +175,9 @@ class ContentSearchProducerLifecycleTests(BlogLifecycleFixtureMixin, TestCase):
             page_id=page.pk,
             operation=ContentSearchOperation.TOMBSTONE,
         ).order_by("-content_version").first()
-        self.assertFalse(BlogPage.objects.filter(pk=page.pk).exists())
+        self.assertTrue(BlogPage.objects.filter(pk=page.pk).exists())
+        intent = PageDeletionIntent.objects.get(page_id=page.pk)
+        self.assertEqual(intent.status, PageDeletionIntentStatus.DELETING)
         self.assertGreaterEqual(delete_event.publication_generation, 2)
         self.assertEqual(state.publication_generation, delete_event.publication_generation)
 

@@ -9,6 +9,7 @@ from django.utils.html import format_html
 from django.db.models import Sum
 from django.shortcuts import render, get_object_or_404
 from django.shortcuts import redirect
+from django.contrib import messages
 from django.core.exceptions import PermissionDenied
 from django.http import HttpResponse
 from django.core.paginator import Paginator
@@ -32,6 +33,8 @@ from .admin import (
 	TagsSnippetViewSet,
 )
 from .models import PageViewCount
+from .models import BlogPage
+from .services.page_deletion import request_page_deletion
 from .services.content_analytics import ContentAnalyticsFilters, ContentAnalyticsQueryService
 from .admin_image_upload import upload_vditor_image
 from .ai_metadata_views import generate_blog_metadata, list_blog_metadata_templates
@@ -39,6 +42,63 @@ from . import widget_adapters  # noqa: F401
 
 # 设置日志记录器
 logger = logging.getLogger(__name__)
+
+
+@hooks.register("before_delete_page")
+def intercept_blog_page_delete(request, page):
+	"""在 Wagtail 原生 DeletePageAction 前登记异步删除，避免跨库清理时页面先被物理删除。"""
+	if not isinstance(page, BlogPage) or request.method != "POST":
+		return None
+	from wagtail.admin.views.pages.delete import type_to_delete_confirmation
+	from wagtail.models import ReferenceIndex
+	# Wagtail 8.0 的保护引用标记位于 ReferenceGroups，而不是 QuerySet。
+	if ReferenceIndex.get_references_to(page).group_by_source_object().is_protected:
+		raise PermissionDenied
+	if not type_to_delete_confirmation(request):
+		return None
+	intent = request_page_deletion(
+		page,
+		actor_id=str(getattr(request.user, "pk", "")),
+		request_id=request.META.get("HTTP_X_REQUEST_ID"),
+	)
+	messages.success(request, f"页面删除任务已提交（{intent.intent_id}），将在后台完成正文和搜索清理。")
+	parent_id = page.get_parent().id
+	return redirect("wagtailadmin_explore", parent_id)
+
+
+@hooks.register("before_bulk_action")
+def intercept_blog_page_bulk_delete(request, action_type, objects, action):
+	"""拦截 Wagtail 8.0 批量删除，在原生 Collector 运行前逐页登记异步清理意图。
+
+	批量删除不会调用 ``before_delete_page``，而是直接执行 ``page.delete``；若放行，
+	BlogPage 的 ``pre_delete`` 防线会将请求视为绕过受控入口。仅当本批对象全部为
+	BlogPage 时接管；混合页面类型拒绝执行，避免异步与原生删除在同一批次中交错。
+	"""
+	if action_type != "delete" or request.method != "POST":
+		return None
+
+	specific_pages = [getattr(page, "specific", page) for page in objects]
+	blog_pages = [page for page in specific_pages if isinstance(page, BlogPage)]
+	if not blog_pages:
+		return None
+	if len(blog_pages) != len(specific_pages):
+		# 混合类型无法在同一事务中安全地拆分异步 BlogPage 和原生页面删除。
+		raise PermissionDenied("bulk_delete_mixed_page_types_not_supported")
+
+	# 父页面删除会由 Wagtail Collector 级联后代，后代也必须各自有清单，避免 Mongo 孤儿。
+	pages_by_id = {int(page.pk): page for page in blog_pages}
+	for page in blog_pages:
+		for descendant in page.get_descendants().specific():
+			if isinstance(descendant, BlogPage):
+				pages_by_id.setdefault(int(descendant.pk), descendant)
+
+	request_id = request.META.get("HTTP_X_REQUEST_ID")
+	actor_id = str(getattr(request.user, "pk", ""))
+	for page in pages_by_id.values():
+		request_page_deletion(page, actor_id=actor_id, request_id=request_id)
+
+	messages.success(request, f"已提交 {len(pages_by_id)} 个博客页面的删除任务，将在后台完成正文和搜索清理。")
+	return redirect(action.next_url)
 
 
 @hooks.register("register_admin_urls")

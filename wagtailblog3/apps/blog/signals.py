@@ -1,6 +1,8 @@
 # 博客正文与 Revision 的清理信号
 import json
 import logging
+from contextlib import contextmanager
+from contextvars import ContextVar
 from django.db import transaction
 from django.db.models.signals import pre_delete, post_save
 from django.dispatch import receiver
@@ -8,11 +10,25 @@ from taggit.models import Tag
 from wagtail.models import PageViewRestriction, Revision, Site
 from wagtail.signals import page_published, page_unpublished
 
-from .models import Author, BlogCategory, BlogPage, MongoCleanupIntent
+from .models import Author, BlogCategory, BlogPage, MongoCleanupIntent, PageDeletionIntent, PageDeletionIntentStatus
 from .services.feed_cache import BlogFeedInvalidationService
 from wagtailblog3.mongo import MongoManager
 
 logger = logging.getLogger(__name__)
+
+_ALLOWED_PAGE_DELETE_IDS: ContextVar[frozenset[int]] = ContextVar(
+	"blog_allowed_page_delete_ids", default=frozenset()
+)
+
+
+@contextmanager
+def allow_page_delete_for_ids(page_ids: set[int]):
+	"""在 Wagtail Collector 级联期间临时放行指定页面及其子页面的 ``pre_delete``。"""
+	token = _ALLOWED_PAGE_DELETE_IDS.set(frozenset(page_ids))
+	try:
+		yield
+	finally:
+		_ALLOWED_PAGE_DELETE_IDS.reset(token)
 
 
 # =============================================================================
@@ -24,7 +40,27 @@ logger = logging.getLogger(__name__)
 	dispatch_uid="blog.delete_blog_content_from_mongodb",
 )
 def delete_blog_content_from_mongodb(sender, instance, **kwargs):
-	_record_page_cleanup_intents(instance)
+	"""阻断绕过受控删除入口的物理删除；最终步骤携带标记后才允许级联。"""
+	if getattr(instance, "_allow_page_delete_finalize", False) or instance.pk in _ALLOWED_PAGE_DELETE_IDS.get():
+		return
+	active = PageDeletionIntent.objects.filter(
+		page_id=instance.pk,
+		status__in={
+		PageDeletionIntentStatus.DELETING,
+		PageDeletionIntentStatus.PROCESSING,
+			PageDeletionIntentStatus.SEARCH_PENDING,
+			PageDeletionIntentStatus.MONGO_PENDING,
+			PageDeletionIntentStatus.PARTIAL_FAILED,
+			PageDeletionIntentStatus.BLOCKED_REFERENCE,
+			PageDeletionIntentStatus.MYSQL_FINALIZE_PENDING,
+		},
+	).exists()
+	if not active:
+		from .services.page_deletion import request_page_deletion
+
+		request_page_deletion(instance)
+	# 直接调用 Page.delete/queryset.delete 不得绕过页面级清单和 Mongo 引用检查。
+	raise RuntimeError("page_deletion_requires_controlled_entrypoint")
 
 
 # =============================================================================
@@ -36,6 +72,15 @@ def delete_blog_content_from_mongodb(sender, instance, **kwargs):
 	dispatch_uid="blog.cascade_delete_single_mongo_revision",
 )
 def cascade_delete_single_mongo_revision(sender, instance, **kwargs):
+	if int(getattr(instance, "object_id", 0) or 0) in _ALLOWED_PAGE_DELETE_IDS.get():
+		# 页面最终级联已按页面清单处理正文，Revision 信号不得再生成单指针任务。
+		return
+	if PageDeletionIntent.objects.filter(
+		page_id=getattr(instance, "object_id", None),
+		status=PageDeletionIntentStatus.MYSQL_FINALIZE_PENDING,
+	).exists():
+		# 页面最终级联删除已包含该 Revision，避免再次创建单指针清理任务。
+		return
 	_record_revision_cleanup_intent(instance)
 
 

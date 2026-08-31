@@ -125,9 +125,11 @@ class BlogPublicationService:
 
 		with transaction.atomic():
 			from wagtail.models import Revision
-			from blog.models import BlogPage, BlogPublicationState
+			from blog.models import BlogPage, BlogPublicationState, assert_blog_page_writable
 
 			page = BlogPage.objects.select_for_update().get(pk=page_id)
+			# 与删除请求共享 BlogPage 行锁；删除意图存在时禁止发布覆盖 tombstone。
+			assert_blog_page_writable(page.pk)
 			state, _ = BlogPublicationState.objects.select_for_update().get_or_create(
 				page_id=page.pk,
 				defaults={"publication_generation": 0},

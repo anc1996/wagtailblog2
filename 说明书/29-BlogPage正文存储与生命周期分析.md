@@ -789,3 +789,235 @@ Wagtail 8.0 的新建发布会调用 `Revision.publish()`，而编辑页发布�
 - 检查：`python manage.py check`、`makemigrations --check --dry-run`、`python -m compileall wagtailblog3`、`git diff --check` 均通过；仅保留既有 `wagtailcore.WorkflowState W036` 警告。未执行生产数据写入、Mongo/ES 修复、alias 切换或服务重启。
 - 数据/服务影响：测试回归使用 Django 测试数据库并自动销毁；未改变共享测试库、生产库或外部索引。用户未提交的 `blog/blocks.py` 修改及 Beat 调度文件未纳入本批次。
 - 回滚与后续：可回退本批三个运行时代码/测试文件恢复修复前行为；部署前仍需在测试共享环境按正确 Celery 队列变量完成“导入草稿→编辑→发布→搜索→删除”验收，确认 Delivery succeeded、v005 命中及 tombstone 生效，再申请生产发布授权。
+
+### 22.12 删除页面的 Mongo 全版本清理风险与验收（2026-08-31）
+
+删除 `BlogPage` 时，不能只检查 `mongo_content_id`。一个页面可能同时拥有正式版本、多个编辑草稿和多个 Wagtail 历史 Revision：
+
+- `content_body_versions`：按 `aggregate_type=blog_page`、`aggregate_id=page_id` 找出该页面全部不可变正文版本，并逐一核验是否仍被其他状态或页面引用。
+- `blog_page_revision_bodies`：按 `page_id` 找出全部历史/草稿正文；还要从已删除前读取的 Wagtail Revision 指针中核对是否存在遗漏。
+- 旧 `blog_content`：只处理明确记录的兼容指针，不得用“按 page_id 全删”替代 ObjectId/指针校验。
+
+安全清理必须满足：页面删除事务已提交、搜索 tombstone 在当前 serving alias 投递成功、没有旧 upsert 事件待处理、没有其他页面或未删除 Revision 引用。随后由 maintenance Worker 执行幂等批量删除；任一集合删除失败都保留剩余数据并进入 retry/dead，不能标记整体成功。
+
+删除验收报告必须同时给出 `page_id`、正式版本数、草稿/历史版本数、`content_body_versions` 删除数、`blog_page_revision_bodies` 删除数、旧 `blog_content` 删除数、引用冲突数、ES tombstone 状态和最终清理意图状态。只有两张新版集合的匹配记录数均为 0，且无未终态清理意图，才能认定 1197 这类页面“Mongo 正文及历史版本已清理干净”。
+
+当前代码已有按指针清理正式旧正文和单条历史草稿的任务，但尚未完成按 `page_id/aggregate_id` 汇总清理 `content_body_versions`；因此现阶段不能保证删除 1197 会清空其全部发布与草稿版本，必须先补齐该清理意图和集成测试。
+
+### 22.13 Mongo 孤儿正文识别与清理方案（待实现）
+
+#### 定义与目标
+
+“孤儿正文”是 Mongo 中仍存在，但 MySQL 页面已经不存在、且没有任何有效 Wagtail Revision、`BlogPublicationState`、清理意图或其他页面引用的正文记录。典型来源是旧版本页面删除流程只删除了 MySQL 页面，未成功投递 Mongo 清理任务。该能力的目标是**发现并安全清理孤儿数据，不能把仍被页面或历史 Revision 使用的正文误判为孤儿**。
+
+#### 只读扫描范围
+
+扫描必须限定测试或生产指定数据库，并输出脱敏报告，不直接修改数据：
+
+1. `content_body_versions`：按 `aggregate_type=blog_page` 扫描 `aggregate_id`，检查对应 MySQL `BlogPage`、`BlogPublicationState`、Wagtail Revision 和未完成 `MongoCleanupIntent`。
+2. `blog_page_revision_bodies`：按 `page_id` 检查 Wagtail `Revision.object_id`、Revision 正文指针和页面是否仍存在。
+3. `blog_content`：按 `_id` 检查 `blog_blogpage.mongo_content_id` 及其他兼容读取方引用。
+4. MySQL 搜索状态和 Outbox/Delivery：确认该页面是否已经有成功 tombstone，是否还存在 pending、retry、processing 或 dead 的 upsert/tombstone 事件。
+
+报告字段至少包括：集合、Mongo 主键、page_id、版本/指针、创建时间、MySQL 页面是否存在、State/Revision 引用数、清理意图状态、ES tombstone 状态、判定分类和阻断原因。正文内容本身不得输出。
+
+#### 判定分类
+
+| 分类 | 含义 | 默认动作 |
+| --- | --- | --- |
+| `live_referenced` | 页面、State 或 Revision 仍引用 | 禁止清理 |
+| `pending_cleanup` | 已有清理意图但任务未终态 | 由原任务重试，不生成重复删除 |
+| `search_not_tombstoned` | 页面已删除但当前 serving alias 尚无成功 tombstone | 禁止清理，先补搜索事件 |
+| `legacy_orphan_candidate` | 页面不存在、无有效引用、无未终态事件且 tombstone 已确认 | 进入人工复核清单 |
+| `blocked_unknown` | 引用解析失败、数据库异常或状态冲突 | 禁止清理并告警 |
+
+#### `--dry-run` 与 `--apply` 门禁
+
+- `orphan_report --dry-run`：只读扫描，输出 JSON/CSV 清单和按集合、原因、创建时间分组统计；这是默认且唯一允许的初始操作。
+- `orphan_report --apply`：暂不实现。实现时必须要求候选的精确 Mongo 主键哈希清单、报告生成时间、操作者、备份 ID 和二次确认；执行前重新读取并锁定引用状态，不能接受“按时间早于某日期全部删除”这类宽泛条件。
+- `--apply` 只能删除 `legacy_orphan_candidate`，并为每条记录写入审计事件；发现新引用、搜索状态变化或报告 hash 不一致时立即跳过该条。
+- 删除任务必须幂等、可重试、分批执行；部分失败保留失败记录和错误码，不得继续扩大删除范围。
+
+#### 1197/1198 的处理结论
+
+1197、1198 当前属于“历史删除页面的 Mongo 残留候选”，但在完成只读交叉核验前不能直接删除。它们应先进入 `legacy_orphan_candidate` 或 `blocked_unknown` 报告，并记录 `content_body_versions`、`blog_page_revision_bodies` 的实际记录数、引用检查结果和 ES tombstone 证据。由于没有新版删除快照，不能通过恢复流程重建页面；孤儿清理能力上线并完成备份及人工复核后，才可按精确版本 ID 执行物理删除。
+
+#### 当前状态与实现边界
+
+本节是待实现的能力定义，不代表系统已经完成孤儿扫描或删除。当前未对 1197、1198 或任何 Mongo 集合执行写入、删除或清理。后续实现顺序为：只读扫描命令和报告测试 → 测试库历史孤儿复核 → `--apply` 精确清理与审计 → 生产备份、授权和小批量演练。任何一步失败都停止，不自动进入下一步。
+
+### 22.14 删除时序的架构裁决（2026-08-31）
+
+对“先标记、清理 Mongo、最后物理删除 MySQL”的建议，实际采用其安全目标，但不把它描述成跨数据库事务。MySQL 与 Mongo 无法共享一个原子提交，必须用持久化状态机和补偿任务承接中间失败。
+
+#### 采用的两阶段流程
+
+1. 删除请求进入受控的 BlogPage 删除服务；MySQL 事务锁定页面、`BlogPublicationState` 和删除编排记录 `PageDeletionIntent`。记录页面 ID、generation、全部正文版本清单、Revision 指针清单、旧兼容指针、操作者和请求 ID，并把状态设为 `deleting`。
+2. 同一事务写入 `ContentSearchState` tombstone 和 Outbox。页面在 `deleting` 状态期间对前台、后台编辑和新发布均不可用。
+3. 事务提交后，先投递并确认 ES tombstone；搜索失败时只重试搜索，不删除 Mongo。
+4. 删除 Worker 重新读取清单并检查引用，然后按集合执行幂等删除：`content_body_versions`、`blog_page_revision_bodies`、旧 `blog_content`。
+5. 三个集合均清理成功后，再在新的 MySQL 事务中确认 Wagtail Revision 已无残留、删除页面及其关联记录，并将 `PageDeletionIntent` 置为 `succeeded`。
+
+这样即使 Mongo 清理失败，页面仍是可观测的 `deleting` 记录，可以重试；即使 Mongo 已清理而 MySQL 物理删除失败，也不会重新对外可见，只会重试最后的 MySQL 删除步骤。它不能提供真正的跨库回滚，但能避免“页面已消失且没有任何清理状态”的孤儿黑洞。
+
+#### Revision 依赖的实际规则
+
+Wagtail 的 `Page.delete()` 通常会通过外键级联删除该页面的 Revision，但不能只凭经验假定所有部署和批量删除入口都已完成级联。删除 Worker 必须：
+
+- 在第一阶段保存该页面全部 Revision 的 `content_type`、`object_id`、Revision 主键和 Mongo 指针；
+- 在删除 `blog_page_revision_bodies` 前查询 MySQL 是否仍有这些 Revision，或存在其他页面/内容类型引用同一指针；
+- 发现本页面 Revision 残留时，先执行受控的 Revision 清理步骤；发现其他页面引用时，阻止对应正文版本删除并报警；
+- 只有 Revision 确认无残留、页面删除事务即将提交时，才允许删除历史正文集合。
+
+如果产品必须保留 Wagtail 历史页，则不能采用“删除后立即清空 `blog_page_revision_bodies`”；当前产品已选择不可恢复删除，因此页面进入 `deleting` 后历史预览关闭，最终清理成功后历史正文不可再读。
+
+#### 引用检查的精确定义
+
+检查范围是“其他页面或其他有效聚合”的引用，不把正在删除页面自身的草稿和 Revision 当作阻断条件：
+
+- 其他 `BlogPublicationState.published_body_version_id` 或 `draft_body_version_id`：命中即阻止删除；
+- 其他 BlogPage 的 `mongo_content_id`：命中即阻止旧正文删除；
+- 其他页面的 Wagtail Revision 正文指针：命中即阻止历史正文删除；
+- 同一页面自身的 State、Revision 和清理意图：纳入本次删除清单，不视为冲突；
+- `MongoCleanupIntent` 仅作为任务协调记录，不是正文所有权；状态为 pending/retry/processing 时必须合并或等待，不能重复创建删除任务。
+
+发现其他引用时，不删除“未冲突的部分”来掩盖问题；该页面删除意图进入 `blocked_reference`，保留全部相关正文，待人工确认共享版本归属后再继续。
+
+#### 三个集合的清理规则
+
+- `content_body_versions`：按已固化的 `body_version_id` 精确删除，并复查 `aggregate_type=blog_page`、`aggregate_id=page_id`；禁止只按时间范围删除。
+- `blog_page_revision_bodies`：按已固化的 Mongo `_id`/指针逐条删除；`page_id` 只用于候选查询，不能替代指针核验。
+- `blog_content`：优先按 `blog_blogpage.mongo_content_id` 的 ObjectId 精确删除；没有指针但发现 `page_id` 兼容字段时，逐条读取 `_id`、确认无其他引用后删除，禁止直接 `deleteMany({page_id: ...})`。
+
+#### 部分失败与重试
+
+删除编排状态至少需要 `deleting`、`search_pending`、`mongo_pending`、`partial_failed`、`blocked_reference`、`mysql_finalize_pending`、`succeeded` 和 `dead`。每个集合单独记录 `attempts`、最后错误码、已删除数量和剩余数量；已经成功删除的集合不回滚，只重试失败集合。超过重试上限进入 `dead`，告警并提供人工重试/精确清理入口。
+
+#### 对原建议的裁决
+
+- “先标记再清理”是正确方向；“给 Wagtail Page 增加 deleting 字段”不是必要条件，优先使用独立 `PageDeletionIntent`，避免修改核心页面表和页面树查询。
+- “清理成功后再删 MySQL”可作为最终目标，但必须由受控删除服务执行；仅依赖 `pre_delete` 信号无法阻止所有 Wagtail 8.0 删除入口，因此需要统一入口、信号兜底和重复调用幂等保护。
+- “其他页面引用阻止、自己页面引用不阻止”采用该规则；共享引用不能局部静默删除。
+- “部分失败不回滚已删 Mongo，只重试剩余部分”采用该规则，同时保留精确审计和死信状态。
+
+本节仍是待实现设计。当前系统尚未具备 `PageDeletionIntent`、页面级 `content_body_versions` 清理和删除前阻断物理删除的完整能力，因此 1197/1198 不能据此直接执行生产清理。
+
+#### 追加的生产级补强门禁
+
+1. **Wagtail 原生删除入口兜底**：`pre_delete` 信号检查是否存在当前页面的活动 `PageDeletionIntent`。没有时只创建/登记删除意图并阻断本次物理删除，要求调用方改走受控删除服务；有 `mysql_finalize_pending` 且持有有效执行令牌时才允许最终删除。信号不得直接清理 Mongo，也不得在重复触发时创建第二条意图。
+2. **重复删除幂等**：以 `page_id + deletion_generation` 建立唯一幂等键；同一页面处于 `deleting`、`partial_failed`、`blocked_reference` 或 `mysql_finalize_pending` 时，重复点击删除只返回现有任务状态。Mongo 删除使用精确主键并接受“已不存在”作为幂等成功。
+3. **Worker 崩溃恢复**：`PageDeletionIntent` 增加 `step`、`lease_owner`、`lease_expires_at`、`attempts`、每集合删除计数和最后错误字段。步骤至少为 `snapshot`、`tombstone`、`check_references`、`delete_content_versions`、`delete_revision_bodies`、`delete_legacy_content`、`finalize_mysql`、`done`；租约过期后从最后一个未完成步骤继续，不重复执行已确认完成的步骤。
+4. **`blocked_reference` 人工解锁**：提供只读详情和受权限保护的 `blog resume-page-deletion --page-id ... --confirm ...` 命令。命令必须重新扫描引用并记录操作者、审批/工单号和新的报告 hash；仍存在其他页面引用时拒绝解锁，不允许强制忽略引用继续删除。
+5. **历史页面补录删除意图**：提供 `blog register-legacy-deletion --dry-run --page-id ...` 只读命令，按页面 ID 发现 1197/1198 等残留的正式、草稿和旧兼容指针，生成精确版本清单。`--apply` 必须要求备份 ID、候选清单 hash、二次确认，并在写入 `PageDeletionIntent` 前再次执行完整引用和 tombstone 检查；不按时间或集合全量生成删除任务。
+
+以上门禁是实现完成的必要条件，而非对现有代码能力的描述。任一门禁未实现时，生产环境只能运行只读报告，不能执行页面物理删除或历史孤儿清理。
+
+### 22.15 不可恢复删除与孤儿清理实施计划（待执行）
+
+本计划按《24-多agent协作与模型技能调度方案》执行。主 agent 负责架构裁决、文件边界、集成、最终测试、生产授权和交付；子 agent 不单独执行生产删除、迁移、发布或回滚。
+
+#### 批次与分工
+
+| 批次 | 员工角色/模型 | 独立文件边界 | 交付物与门禁 |
+| --- | --- | --- | --- |
+| P0 现状核对 | `data` / Sol 高 | 只读，不改文件 | 核对 Mongo 三集合、MySQL State/Revision/Intent、ES tombstone 和 1197/1198 候选；输出字段级证据。 |
+| P1 架构与状态模型 | `arch` / Sol 高 | 方案文档及模型草案，不改运行时代码 | 固化 `PageDeletionIntent` 字段、状态机、唯一键、step/lease、部分失败语义和回滚边界。 |
+| P2 删除编排后端 | `backend` / Sol 高 | `apps/blog` 删除服务、模型、迁移、任务和单元测试 | 受控删除入口、`pre_delete` 兜底、引用检查、Mongo 三集合精确清理、断点续传；必须阅读第 22 号运行时代码注释方案，新增中文注释和准确类型。 |
+| P3 孤儿只读报告 | `data` / Terra 高 | `apps/blog/management/commands` 及数据测试 | `orphan_report --dry-run`、`register-legacy-deletion --dry-run`；不得提供写入默认路径，不输出正文。 |
+| P4 搜索与事件联调 | `backend` / Terra 高 | `apps/search` 相关服务和测试 | tombstone 成功门禁、旧 upsert 阻断、Delivery/alias 一致性测试；不改生产 alias。 |
+| P5 独立审查 | `review` / Sol 高 | 只读审查，不与 P2 同时写同一文件 | 检查权限、并发、跨库时序、死信、敏感日志、误删和回滚风险；不通过则退回 P2/P3。 |
+| P6 测试验收 | `qa` / Terra 高 | 测试文件、`output/playwright/`（如需浏览器） | 测试库模拟新增/编辑/发布/删除、Worker 崩溃恢复、共享引用阻断、ES tombstone、三集合清理；浏览器只做授权的用户流程。 |
+| P7 生产准备 | `ops` / Sol 高 | 发布记录和 `systemctl.md`（仅服务有变化时） | WSL2 check/迁移/compileall、备份方案、Git 提交推送和生产只读健康检查；未获 `/confirm-production` 不执行数据清理。 |
+
+#### 并行和依赖关系
+
+P0 可与 P1 并行，但 P1 必须吸收 P0 的真实字段证据；P2 与 P3 可并行开发，P3 只能依赖只读数据库接口，不修改 P2 文件；P4 依赖 P2 的事件契约；P5 必须在 P2/P3/P4 完成后独立审查；P6 只能测试审查通过的 commit；P7 只能在 P6 通过且用户明确授权后执行。
+
+#### 实施顺序与停止条件
+
+1. 先完成 P0/P1 和方案记录，确认当前代码缺口，不触碰生产数据。
+2. 完成 P2/P3/P4 后，在测试环境只运行 `--dry-run` 和自动化测试；发现历史孤儿污染时标记为“历史数据污染，需单独清理”，不得修改测试数据掩盖问题。
+3. Sol 审查通过后，执行完整测试环境闭环：新建、保存草稿、编辑、发布、搜索、删除，确认页面进入 `deleting`、tombstone 成功、三集合精确清理、最终 MySQL 删除和无孤儿报告。
+4. 生产阶段先备份并运行只读报告；任何 `--apply`、页面删除、Mongo 物理删除、ES alias 变更或服务重启都必须单独说明影响并获得授权。
+5. 任一步出现引用冲突、状态不一致、报告 hash 变化、服务不可用或清理部分失败，立即停止后续批次，保留数据和审计，进入人工处理。
+
+#### 最终验收标准
+
+- 新删除流程不再产生“页面已删除但 Mongo 无清理意图”的孤儿；
+- `content_body_versions`、`blog_page_revision_bodies` 和明确兼容 `blog_content` 记录均按精确清单清理；
+- 其他页面共享引用会阻止删除，自己的 Revision 不会造成误阻断；
+- Worker 可从 `step` 断点恢复，重复请求不会重复创建任务；
+- ES tombstone、Outbox、Delivery 与 MySQL 最终状态一致；
+- 1197/1198 仅在只读报告、备份、人工复核和明确生产授权后才允许清理。
+
+#### 实施记录：删除编排首批（2026-08-31）
+
+- 状态：测试代码实现完成，尚未提交、推送或同步生产。
+- 实际修改：新增 `PageDeletionIntent`/状态迁移 `blog.0035`、`blog.0036`；新增 `apps/blog/services/page_deletion.py`；扩展 `apps/blog/tasks.py` 的租约、步骤、引用检查、Mongo 三集合精确清理、最终 MySQL 删除和补偿投递；`BlogPage.delete()` 改为登记异步意图；`pre_delete` 增加绕过入口阻断；`wagtail_hooks.py` 增加 `before_delete_page` 受控后台入口；新增 `test_page_deletion.py`。
+- 关键修正：Wagtail 8.0 `DeletePageAction` 绕过模型 `delete()` 的问题由 `before_delete_page` hook 截获；Worker 开始清理前扫描该页面 Mongo 中未被 State/Revision 指针覆盖的全部版本，避免只删清单指针造成残留。
+- 验证：WSL2 `wagtailblog-test` 执行 `python manage.py check` 通过；`python manage.py makemigrations --check --dry-run` 在生成 `0036` 前发现 choices 变化，生成迁移后需再次确认；`python manage.py test blog.test_page_deletion blog.test_mongo_cleanup_intent --keepdb` 共 9 项通过；`python -m compileall` 和 `git diff --check` 待本批最终门禁执行。
+- 数据/服务影响：仅测试数据库测试库自动复用，未执行共享测试库 Mongo/ES 写入、生产数据删除、alias 切换或服务重启；新增任务使用既有 `maintenance` 队列，不新增 Worker。
+- 回滚点：可回退本批代码和 `0035/0036` 迁移；已创建的删除意图、Outbox、Delivery 或 Mongo 文档不通过代码回滚自动恢复，需按状态机重试或人工处理。
+- 残余风险：仍需在测试环境用真实页面完成“新建→草稿→编辑→发布→搜索→删除”，确认三个 Mongo 集合清理数量为零；需验证带子页面的级联删除、ES tombstone 代次绑定和生产服务配置后，才能申请备份与生产授权。
+
+#### 实施记录：删除入口与孤儿报告补强（2026-08-31）
+
+- 状态：P2 删除编排与 P3 孤儿只读报告实现完成；未提交、未推送、未同步生产。
+- 实际修改：`before_delete_page` hook 截获 Wagtail 8.0 原生删除动作并创建页面删除意图；`pre_delete` 保留绕过入口阻断；删除 Worker 增加 Mongo 全版本 manifest 扩展、ES tombstone 事件代次校验、级联页面上下文、`processing` 状态、租约回收和维护队列补偿。新增 `orphan_report` 只读命令，扫描三 Mongo 集合与 MySQL/State/Revision/Outbox/Intent 引用，明确拒绝 `--apply`。
+- 测试：`blog.test_page_deletion`、`blog.test_mongo_cleanup_intent`、`blog.test_orphan_report`、`search.tests.test_search_sync_producer` 合计 30 项通过；`python manage.py check`、`makemigrations --check --dry-run`、`python -m compileall -q wagtailblog3`、`git diff --check` 通过。仅有既有 Wagtail MySQL 条件唯一约束警告；测试日志中的 broker unavailable 为测试主动模拟，不是代码失败。
+- 只读数据证据：测试环境 `orphan_report --dry-run` 成功，无 Mongo 连接错误；报告不输出正文。候选必须按分类、精确 Mongo ID 和引用状态人工复核，当前未执行任何 `--apply` 或 Mongo 删除。
+- 测试服务：已重启 WSL2 `0.0.0.0:8080` Django 和 `markdown-test-maintenance` Worker；端口可访问，Worker 已注册 `process_page_deletion`、`dispatch_page_deletion_retries`。
+- 生产门禁：生产备份、迁移、Mongo/ES 写入、页面删除、服务重启和 alias 操作均未执行；需用户单独确认备份范围、保留路径和生产授权后才能继续。
+
+#### 实施记录：测试环境真实删除验收与 Wagtail 8.0 修复（2026-08-31）
+- 状态：测试环境真实用户链路完成；生产备份、迁移、删除和发布仍未执行。
+- 验收对象：通过 browser-skill 在 `0.0.0.0:8080` 创建页面“删除链路验证-20260831”，保存草稿两次（含编辑正文），发布后搜索命中，再提交后台删除。
+- 发现并修复：Wagtail 8.0 的 `ReferenceIndex.get_references_to()` 返回 `ReferenceIndexQuerySet`，保护标记位于 `group_by_source_object().is_protected`；原实现直接访问 QuerySet 的 `is_protected` 导致删除 POST 500。已在 `apps/blog/wagtail_hooks.py` 改为 Wagtail 8.0 API，并通过 `compileall`、`manage.py check`。
+- 删除结果：删除意图 `c3c9d8b4-cbb9-4f6a-9776-d63443724fd7` 最终 `succeeded/done`；Mongo 清理计数为 `content_body_versions=1`、`blog_page_revision_bodies=1`、`blog_content=0`；MySQL BlogPage 已物理删除；State 保留 tombstone（`searchable=false`）；相关 Delivery 已 `succeeded`；`orphan_report --dry-run --page-id 640` 返回 `candidate_count=0`。
+- 搜索证据：发布后完成 ES v005 搜索命中；删除 tombstone 处理完成后不再进行写入型浏览器操作，搜索最终查询需在独立 session 复核并留存结果。测试 Worker 未消费自动派发的队列任务，验收期间按现有服务函数手动处理了测试 Delivery；队列名称与 Worker 启动参数不一致是测试环境运维残余风险。
+- 未覆盖边界：真实 Wagtail 8.0 翻译/alias 与子页面级联、受保护引用、`blocked_reference` 解锁、producer 关闭门禁、编辑/发布并发和 Worker 自动消费仍需独立批次；不能据此宣称生产可发布。
+- 自动化复核：`blog.test_page_deletion`、`blog.test_orphan_report`、`search.tests.test_search_sync_producer` 共 23 项通过；仅出现既有 MySQL 条件唯一约束警告和测试 Redis broker unavailable 日志，未改变测试结论。
+- 回滚点：本次代码改动尚未提交；640 页面及其测试 Mongo 正文已按用户授权删除，无法通过产品流程恢复；生产数据未触碰。
+
+### 22.17 Wagtail 8.0 批量删除 500 修复（2026-08-31）
+
+- 根因：Wagtail 8.0 的 `DeleteBulkAction` 在 `before_bulk_action` 中完成校验后，直接对每个对象执行 `page.delete(user=...)`；该路径不会调用单页的 `before_delete_page` hook。BlogPage 的 `pre_delete` 防线因此将请求判定为绕过受控入口，并抛出 `page_deletion_requires_controlled_entrypoint`，导致批量确认 POST 返回 HTTP 500。
+- 修改：在 `apps/blog/wagtail_hooks.py` 注册 `before_bulk_action`，仅接管全为 BlogPage 的删除批次；按页面 ID 去重，为所选页面及 BlogPage 后代分别调用 `request_page_deletion`，写入独立 tombstone/清理意图并重定向回 `next`。混合页面类型拒绝执行，避免异步 BlogPage 与原生页面删除交错。
+- 保持：`pre_delete` 仍阻止任何未携带最终删除令牌的物理删除；Worker 的租约、manifest、Mongo 三集合精确清理、ES tombstone 和幂等状态机未改变。Wagtail ReferenceIndex 的受保护引用仍由 bulk action 原生 `ReferenceIndexMixin` 检查。
+- 测试：`python manage.py test blog.test_page_deletion.PageDeletionTaskTests.test_bulk_delete_hook_registers_each_blog_page_before_native_action --keepdb` 通过；`python manage.py test blog.test_page_deletion --keepdb` 7 项通过；`python manage.py check` 和 `makemigrations --check --dry-run` 通过（仅保留既有 WorkflowState 条件唯一约束警告）；`compileall`、`git diff --check` 通过。
+- 运行验证：重启测试栈后 Django `0.0.0.0:8080`、隔离 maintenance Worker/Beat 正常启动。通过 browser-skill 对批量确认页提交 642、643，POST 返回 HTTP 302，日志无 500；两页删除意图均为 `succeeded/done`（642 清理 1 个正文版本和 1 个 Revision 快照，643 清理 2 个正文版本和 2 个 Revision 快照）。MySQL 页面记录已不存在，Mongo `content_body_versions`、`blog_page_revision_bodies`、旧 `blog_content` 对应记录均为 0，ES tombstone Outbox 均为 `succeeded`，前台搜索不再返回“永久删除页面2”标题。未写入生产数据。
+- 回滚点与残余风险：回滚 `wagtail_hooks.py` 即恢复旧入口，但会重新暴露批量 500；已完成的删除意图不会因代码回滚自动恢复页面或正文。混合类型批量删除仍明确拒绝，包含子页面的批量删除由各页面独立意图处理；BlogPublicationState 记录按当前设计保留用于对账，需由后续孤儿 State 清理任务统一治理。
+
+### 22.16 测试异步栈启动一致性修复（2026-08-31）
+
+- 背景与证据：测试 Django 被直接以 `manage.py runserver` 启动，使用默认 Redis broker DB 2 和 `maintenance` 队列；测试 Worker 虽监听 `markdown-test-maintenance`，但同样连接 DB 2，且 Beat 未运行。Celery 只读检查同时发现生产 `maintenance@ziliao` 与测试 `markdown-test-isolated@ming` 节点，页面 641/642 的发布 Outbox 停在 `pending` 且没有 Delivery。
+- 目标：由一个受版本管理的启动脚本统一启动测试 Django、maintenance Worker 和 Beat，三者固定使用 `WAGTAILBLOG_ENV=test`、`CELERY_MAINTENANCE_QUEUE=markdown-test-maintenance`、`CELERY_BROKER_DB=12`、`CELERY_RESULT_DB=13`；测试页面发布后自动生成并消费 Delivery，不能进入生产队列。
+- 非目标：不修改生产 systemd unit、生产环境文件、搜索业务代码、数据库 schema、ES alias 或 Mongo 正文；不以同步索引或 MySQL 回退掩盖异步服务故障。
+- 实施步骤：补强 `tools/start_test_stack.sh` 的 Beat 启动、PID 生命周期、端口/孤立进程冲突检查和启动健康检查；同步更新 `systemctl.md`，明确测试只能由该脚本启动、生产只能由既有 systemd unit 启动；重启测试栈后通过正常补偿任务收敛现有 pending Outbox。
+- 影响与回滚：仅重启测试 Django/Worker/Beat，并可能使测试库既有 pending Outbox 生成 Delivery、写入测试 ES 索引。回滚时停止测试三进程并恢复脚本和文档；不删除 State、Outbox、Delivery、Mongo 版本或 ES 审计文档。
+- 验收：确认测试三进程共享 DB12/13 和同一队列，Celery 检查不再从测试 broker 看到生产节点；页面 641/642 Outbox/Delivery 收敛，前台 `all`/`blog` 搜索命中公开页面；执行 `bash -n`、`manage.py check` 和 `git diff --check`。
+- 模型/推理强度建议：运维事实采集使用 Luna 低/中推理；跨环境队列隔离与服务修复使用 Terra 高推理；若发现生产任务被测试进程消费、生产数据写入或回滚失败风险，则升级 Sol 高推理并停止测试写入。实际使用当前会话可用模型完成本批，验证门禁不因模型选择而降低。
+- 实施结果：`tools/start_test_stack.sh` 已统一启动 `0.0.0.0:8080`、隔离 Worker 和隔离 Beat，增加受控 PID 停止、未知端口/Worker 冲突拒绝、最长 30 秒网站健康等待和失败清理；Beat 调度文件改写入 `output/`。测试三进程实际使用 broker/result DB `12/13`，Worker 只监听 `markdown-test-maintenance`。
+- 自动补偿证据：测试 broker 的 `active_queues` 只返回 `markdown-test-isolated@ming`，不再看到生产节点。Beat 每 30 秒投递 pending Delivery 补偿，Worker 已自动消费；页面 641、642 的 Outbox 与 `content-v005-fix` Delivery 均为 `succeeded`、`attempts=1`、无错误码。
+- 浏览器验收：browser-skill 分别访问 `type=all` 与 `type=blog`，均返回已发布页面 641“永久删除博客页面测试”；搜索结果不再依赖手工服务函数补写。浏览器 session 已按规范关闭，未生成 Playwright 产物。
+- 检查结果：`bash -n tools/start_test_stack.sh`、`python manage.py check`、`python manage.py makemigrations --check --dry-run`、`git diff --check` 均通过；未新增迁移。
+- 生产只读复核：生产仓库为 `main` 且工作树干净，精确 HEAD 为 `4e7146128774419d4216255cfe7c716068386913`；Django、maintenance Worker、Beat、Filebeat 均 `active/enabled`，四个 unit 均引用 `.env.production`。Worker 实际监听 `maintenance`，Beat 使用生产日志目录调度文件。本批未重启生产、未写生产 MySQL/Mongo/Redis/ES、未修改 unit。
+- 残余风险与回滚：测试 Worker 仍以 root 运行并产生 Celery 安全警告，这是既有 WSL 测试运行方式；生产不受影响。回滚仅停止测试三进程并恢复本批脚本/文档，保留已经成功的测试 Outbox/Delivery/ES 审计，不删除正文或索引记录。
+
+#### 实施记录：发布草稿页物理删除验收（2026-08-31）
+
+- 验收对象：测试页面 `641`“永久删除博客页面测试”，先保存草稿并发布，再从 Wagtail 删除确认页执行物理删除。
+- MySQL/Wagtail：`BlogPage` 不再存在；Wagtail `Revision.object_id=641` 为 0；`PageDeletionIntent` 为 `succeeded/done`，删除计数为 `content_body_versions=2`、`blog_page_revision_bodies=2`、`blog_content=0`；`BlogPublicationState` 保留该页面的 tombstone 记录，`ContentSearchState` 为 `content_version=4`、`desired_operation=tombstone`、`searchable=false`。
+- 搜索事件：该页面的 upsert 与历史 tombstone Delivery 均已收敛；最终 tombstone Delivery 目标为 `content-v005-fix`、状态 `succeeded`、无错误码。v005 物理索引按 `page_id=641` 查询仅剩一个 `searchable=false` tombstone，未保留可搜索文档。
+- Mongo：`content_body_versions`（按字符串 `aggregate_id=641`）、`blog_page_revision_bodies`（整数/字符串 `page_id=641`）和旧 `blog_content` 均为 0，正式正文、草稿快照和历史版本已物理清理。
+- 孤儿核验：`python manage.py orphan_report --dry-run --page-id 641` 返回 `candidate_count=0`、`read_only=true`、`mongo_error=null`。
+- 浏览器核验：删除后按原标题查询 `type=blog`，结果中出现的“永久删除页面3”是另一篇文章正文引用了该标题；ES 按 `page_id=641` 的 tombstone 查询确认不存在页面 641 的可搜索记录，不能把文本相关结果误判为已删除页面复活。
+- 数据/服务影响：本次只处理用户在测试环境明确删除的页面 641，未修改其他页面、生产数据、Mongo 或 ES alias；浏览器 session 已关闭，未执行额外写操作。
+
+#### 实施记录：删除与发布并发门禁、失败重试（2026-09-01）
+
+- 状态：代码修复和测试完成，待提交推送；生产迁移尚未执行。
+- 修改：`BlogPage.save()` 在页面行锁内检查活动 `PageDeletionIntent`；发布服务在普通和定时发布路径统一拒绝删除中页面，避免旧 tombstone 被新 upsert 超越后仍物理删页。Worker 完成 MySQL 物理删除前清空 `BlogPublicationState` 正文与 Revision 指针但保留审计行；新增 `retry_page_deletion` 只读预览与 `--apply` 人工解锁。
+- 测试：`python manage.py check`、`makemigrations --check --dry-run`、`blog.test_page_deletion blog.test_mongo_cleanup_intent search.tests.test_search_sync_producer` 共 30 项通过；`compileall`、`bash -n tools/start_test_stack.sh`、`git diff --check` 通过。仅有既有 Wagtail MySQL 条件唯一约束警告。
+- 生产只读核对：`blog.0035/0036` 尚未应用（当前最后为 `0034`）；因新代码依赖 `PageDeletionIntent` 表，生产迁移必须单独备份、说明影响并获得授权后执行，不能在未迁移状态下重启新代码。
+- 回滚点与残余风险：可回滚到上一个已验证 commit；重试命令不自动恢复已物理删除的正文。生产仅在迁移完成且服务健康检查通过后才能启用新删除链路。

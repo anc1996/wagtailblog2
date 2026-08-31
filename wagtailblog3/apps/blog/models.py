@@ -128,6 +128,82 @@ class BlogPublicationState(models.Model):
 		return f"page={self.page_id} generation={self.publication_generation}"
 
 
+class PageDeletionIntentStatus(models.TextChoices):
+	"""页面不可恢复删除编排的状态；状态推进由 maintenance Worker 负责。"""
+
+	DELETING = "deleting", "删除中"
+	PROCESSING = "processing", "处理中"
+	SEARCH_PENDING = "search_pending", "等待搜索墓碑"
+	MONGO_PENDING = "mongo_pending", "等待 Mongo 清理"
+	PARTIAL_FAILED = "partial_failed", "部分失败"
+	BLOCKED_REFERENCE = "blocked_reference", "被共享引用阻断"
+	MYSQL_FINALIZE_PENDING = "mysql_finalize_pending", "等待 MySQL 完成"
+	SUCCEEDED = "succeeded", "已完成"
+	DEAD = "dead", "终止"
+
+
+_ACTIVE_PAGE_DELETION_STATUSES = frozenset(
+	{
+		PageDeletionIntentStatus.DELETING,
+		PageDeletionIntentStatus.PROCESSING,
+		PageDeletionIntentStatus.SEARCH_PENDING,
+		PageDeletionIntentStatus.MONGO_PENDING,
+		PageDeletionIntentStatus.PARTIAL_FAILED,
+		PageDeletionIntentStatus.BLOCKED_REFERENCE,
+		PageDeletionIntentStatus.MYSQL_FINALIZE_PENDING,
+		# dead 仍可能保留页面或 Mongo 残片，须人工解锁后才允许继续编辑。
+		PageDeletionIntentStatus.DEAD,
+	}
+)
+
+
+def assert_blog_page_writable(page_id: int) -> None:
+	"""阻止删除编排期间的页面再次保存或发布。
+
+	页面行锁由调用方持有；本检查必须在同一事务中执行，确保删除意图
+	创建与页面写入不会交错。检测到活动意图时抛出稳定错误码，交由后台
+	显示为“删除处理中”，而不是让新正文覆盖删除 tombstone。
+	"""
+	if PageDeletionIntent.objects.filter(
+		page_id=page_id,
+		status__in=_ACTIVE_PAGE_DELETION_STATUSES,
+	).exists():
+		raise RuntimeError("page_deletion_in_progress")
+
+
+class PageDeletionIntent(models.Model):
+	"""页面级删除清单与断点；Mongo 物理删除仅使用此处固化的精确指针。"""
+
+	intent_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+	dedupe_key = models.CharField(max_length=160, unique=True)
+	page_id = models.PositiveBigIntegerField()
+	deletion_generation = models.PositiveBigIntegerField(default=1)
+	request_id = models.CharField(max_length=128, blank=True, default="")
+	actor_id = models.CharField(max_length=128, blank=True, default="")
+	status = models.CharField(max_length=32, choices=PageDeletionIntentStatus.choices, default=PageDeletionIntentStatus.DELETING)
+	step = models.CharField(max_length=32, default="snapshot")
+	manifest = models.JSONField(default=dict)
+	deleted_counts = models.JSONField(default=dict)
+	attempts = models.PositiveIntegerField(default=0)
+	lease_reclaims = models.PositiveIntegerField(default=0)
+	lease_owner = models.CharField(max_length=128, blank=True, default="")
+	lease_expires_at = models.DateTimeField(null=True, blank=True)
+	last_error_code = models.CharField(max_length=64, blank=True, default="")
+	available_at = models.DateTimeField(default=timezone.now)
+	created_at = models.DateTimeField(auto_now_add=True)
+	updated_at = models.DateTimeField(auto_now=True)
+	completed_at = models.DateTimeField(null=True, blank=True)
+
+	class Meta:
+		constraints = [
+			models.UniqueConstraint(fields=("page_id", "deletion_generation"), name="blog_page_delete_generation_uq"),
+		]
+		indexes = [
+			models.Index(fields=("status", "available_at"), name="blog_page_delete_status_idx"),
+			models.Index(fields=("status", "lease_expires_at"), name="blog_page_delete_lease_idx"),
+		]
+
+
 class LegacyBlogRegistrationStatus(models.TextChoices):
 	"""旧正文登记审计的持久化状态。"""
 
@@ -1112,6 +1188,24 @@ class BlogPage(Page):
 		)
 
 	def save(self, *args: Any, **kwargs: Any) -> None:
+		"""在页面行锁内执行保存，避免删除意图与正文写入竞态。"""
+		if self.pk and not getattr(self, "_allow_page_delete_finalize", False):
+			with transaction.atomic():
+				# 删除请求同样锁定页面行；任一方先取得锁，另一方都会在意图检查后
+				# 停止，从而不会出现 tombstone 后又写入正文的窗口。
+				locked_page = type(self).objects.select_for_update().filter(pk=self.pk).first()
+				if locked_page is None:
+					if PageDeletionIntent.objects.filter(
+						page_id=self.pk,
+						status__in=_ACTIVE_PAGE_DELETION_STATUSES,
+					).exists():
+						raise RuntimeError("page_deletion_in_progress")
+				else:
+					assert_blog_page_writable(self.pk)
+				return self._save_unlocked(*args, **kwargs)
+		return self._save_unlocked(*args, **kwargs)
+
+	def _save_unlocked(self, *args: Any, **kwargs: Any) -> None:
 		"""保存页面时同步 Mongo 正文，并确保 MySQL body 始终为空。
 
 		只有带旧正式正文指针的既有页面才保留 ``blog_content`` 兼容写入；新页面和
@@ -1273,12 +1367,14 @@ class BlogPage(Page):
 	# 核心网关 4：物理删除与异构集群同步 (在后台点击“删除页面”时触发)
 	# =========================================================================
 	def delete(self, *args: Any, **kwargs: Any) -> Any:
-		"""删除页面并由 ``pre_delete`` 登记 Mongo 清理意图。"""
-		with transaction.atomic():
-			logger.info("blog_lifecycle_delete_start page_id=%s", self.pk)
-			result = super().delete(*args, **kwargs)
-			logger.info("blog_lifecycle_delete_complete page_id=%s", self.pk)
-			return result
+		"""登记页面级删除意图；只有 Worker 最终步骤才允许 Wagtail 物理删除。"""
+		if getattr(self, "_allow_page_delete_finalize", False):
+			return super().delete(*args, **kwargs)
+		from blog.services.page_deletion import request_page_deletion
+
+		request_page_deletion(self)
+		# 保持 Wagtail 删除调用方的返回契约，但页面会在异步最终步骤删除。
+		return (0, {})
 	
 	# =========================================================================
 	# 网关 4：前台数据读取网关 (用于博客详情页 serve 渲染时提取真实数据)

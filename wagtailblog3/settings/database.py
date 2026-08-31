@@ -437,6 +437,11 @@ def get_celery_config(time_zone, redis_host, redis_port, redis_password):
 				'schedule': 60,
 				'options': {'queue': maintenance_queue},
 			},
+			'dispatch-page-deletion-retries': {
+				'task': 'blog.tasks.dispatch_page_deletion_retries',
+				'schedule': 30,
+				'options': {'queue': maintenance_queue},
+			},
 			'check-blog-publication-consistency': {
 				'task': 'blog.tasks.check_publication_consistency',
 				'schedule': 300,

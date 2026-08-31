@@ -24,7 +24,7 @@ uWSGI 的 6051 是仅供本机诊断的 HTTP 端口，不作为对外入口。
 | --- | --- | --- |
 | `wagtailblog3.service` | uWSGI / Django 网站 | 是 |
 | `wagtailblog3-celery-maintenance.service` | 日志索引同步和维护队列；执行 Markdown 导入会话组装、媒体精确补偿、Mongo 清理意图和内容搜索 Delivery 的租约消费与重试 | 是 |
-| `wagtailblog3-celery-beat.service` | 补偿日志索引 outbox、内容搜索与 Mongo 清理意图的 pending/过期租约任务，每日调度博客分析明细清理；定时投递过期 Markdown 导入会话和媒体 cleanup retry | 是 |
+| `wagtailblog3-celery-beat.service` | 补偿日志索引 outbox、内容搜索、Mongo 清理意图和 BlogPage 删除意图的 pending/过期租约任务，每日调度博客分析明细清理；定时投递过期 Markdown 导入会话和媒体 cleanup retry | 是 |
 | `wagtailblog3-filebeat.service` | 采集项目日志并写入 Elasticsearch | 是 |
 
 ## 分支与环境配置
@@ -290,10 +290,11 @@ Redis 中没有历史邮件任务，并明确需要处理这些任务。当前 W
 
 测试环境当前在 Windows 主机 `192.168.20.1` 的 WSL2 `Debian`（Hyper-V 第二代虚拟机
 `192.168.20.5`）中运行，使用 Conda 环境 `wagtailblog-test`，只允许
-保留 `wagtailblog3/settings/.env.test`。当前调试会话使用 transient systemd unit
-`wagtailblog-test-web-8080.service`、`wagtailblog-test-search-worker.service` 和
-`wagtailblog-test-search-beat-v2.service`，网站仅监听 `192.168.20.5:8080`，不使用 Windows `127.0.0.1:8080` 自动转发。这些临时 unit 不是仓库部署资产，
-Windows 或 WSL 重启后必须重新核对，不得假定自动恢复。需要手工启动时仍可按下列前台命令运行。
+保留 `wagtailblog3/settings/.env.test`。测试环境的唯一标准启动入口是
+`bash tools/start_test_stack.sh`；脚本统一启动 Django、隔离 maintenance Worker 和隔离 Beat，
+网站监听 `0.0.0.0:8080` 并通过 `192.168.20.5:8080` 访问。不要再直接运行
+`python manage.py runserver`，也不要用临时 systemd unit 或手工 Celery 命令作为日常启动方式；
+这些入口容易遗漏队列和 Redis DB 隔离变量。
 
 每个终端先执行公共准备步骤：
 
@@ -310,15 +311,16 @@ export WAGTAILBLOG_ENV=test
 python manage.py check
 ```
 
-启动测试网站和 Markdown 导入维护 Worker：
+启动测试网站、maintenance Worker 和 Beat：
 
 ```bash
 cd /mnt/f/openclaw/workspace/wagtail/wagtailblog2
 bash tools/start_test_stack.sh
 ```
 
-脚本会同时启动仅绑定桥接地址的测试网站 `192.168.20.5:8080` 和只监听
-`markdown-test-maintenance` 的 Worker，并统一使用测试环境队列参数。浏览器访问
+脚本会同时启动监听 `0.0.0.0:8080` 的测试网站、只监听
+`markdown-test-maintenance` 的 Worker 和使用同一 broker 的 Beat，并统一使用测试环境队列参数。
+运行 PID、Beat 调度文件和日志只写入 Git ignored 的 `output/`。浏览器访问
 `http://192.168.20.5:8080/`，后台登录页为
 `http://192.168.20.5:8080/admin/login/`。以后测试项目必须使用上述脚本，不要只执行
 `python manage.py runserver`，否则组装任务可能进入无人消费的默认队列；userscript 的测试博客地址也必须填写 `http://192.168.20.5:8080`，不能使用 Windows `http://127.0.0.1:8080`。若 8080 已被占用，先定位占用进程，不要通过
@@ -329,8 +331,8 @@ bash tools/start_test_stack.sh
 `CELERY_BROKER_DB=12`、`CELERY_RESULT_DB=13`。网站、Worker 与 Beat 任一进程遗漏这些变量时，
 新页面的 Outbox 会停在 `pending`，或任务可能误投生产 `maintenance` 队列；不得以 MySQL 搜索回退掩盖该故障。
 
-需要验证异步维护任务时，在第二个终端完成公共准备步骤后，显式导出与网站一致的
-隔离变量并启动只监听 `markdown-test-maintenance` 的 Worker：
+下面的 Worker 与 Beat 命令仅用于故障排查；正常启动必须使用脚本。故障排查时必须先停止
+脚本管理的三进程，并显式导出与网站一致的隔离变量，禁止与标准测试栈并行运行：
 
 ```bash
 export WAGTAILBLOG_ENV=test
@@ -346,7 +348,7 @@ export CELERY_RESULT_DB=13
   --concurrency=1
 ```
 
-需要验证定时任务和失败补偿时，在第三个终端完成公共准备步骤后，以同一组隔离变量启动 Beat：
+故障排查需要单独观察定时任务时，以同一组隔离变量启动 Beat：
 
 ```bash
 export WAGTAILBLOG_ENV=test
@@ -356,9 +358,11 @@ export CELERY_RESULT_DB=13
 /root/anaconda3/envs/wagtailblog-test/bin/python -m celery -A wagtailblog3 beat --loglevel=INFO
 ```
 
-`tools/start_test_stack.sh` 使用 `setsid` 为隔离 Worker 创建独立会话；不要改回仅用
-`nohup` 的启动方式。Celery 会接管 `SIGHUP` 并尝试自重启，若仍绑定原终端，Python 3.13
-可能在自重启时触发 `celery.__main__` 相对导入错误，导致 Markdown 组装任务无人消费。
+`tools/start_test_stack.sh` 使用 `setsid` 为网站、隔离 Worker 和 Beat 创建独立会话；不要改回仅用
+`nohup` 的启动方式。脚本按 PID 文件执行 Beat → Worker → 网站的停止顺序，并在端口或未知同名
+Worker 已存在时拒绝启动，避免重复消费者。停止测试栈使用
+`bash tools/start_test_stack.sh stop`，不要直接按 PID 猜测或强杀进程。Celery 会接管 `SIGHUP` 并尝试自重启，若仍绑定原终端，
+Python 3.13 可能在自重启时触发 `celery.__main__` 相对导入错误，导致维护任务无人消费。
 
 测试 Filebeat 只有在已安装并核对 `ops/filebeat/wagtailblog-test.service`、生成的
 Filebeat 配置、Elasticsearch 地址以及数据/日志目录后才能启用。该服务不是启动
@@ -371,9 +375,21 @@ sudo systemctl is-active wagtailblog-test.service
 sudo systemctl is-enabled wagtailblog-test.service
 ```
 
-测试环境停止顺序为 Beat、Worker、网站；前台进程均使用 `Ctrl+C` 优雅停止。
+测试环境停止顺序为 Beat、Worker、网站：
+
+```bash
+cd /mnt/f/openclaw/workspace/wagtail/wagtailblog2
+bash tools/start_test_stack.sh stop
+```
+
+脚本只会停止 PID 文件中、工作目录和命令行均匹配的受管进程；发现 PID 被复用或端口由未知进程占用时会拒绝操作，需先人工核对。
 
 ## 生产环境启动
+
+生产环境不得执行 `tools/start_test_stack.sh`、`manage.py runserver` 或测试 Celery 命令。
+生产唯一启动入口是既有 systemd unit；所有 unit 必须继续读取 `.env.production`，使用生产
+`maintenance` 队列和生产 broker/result DB。启动或重启前必须先核对生产目录、分支、精确 commit、
+环境文件、依赖服务和当前 unit 状态，再按本节顺序操作。
 
 ### 生产关机重启与新搜索前置条件
 
@@ -569,7 +585,7 @@ Markdown 导入不会新增 systemd unit 或 Worker，复用现有 `maintenance`
 - cleanup 成功将状态置为 `cleaned`；对象或模型已不存在视为幂等成功。引用保护、storage 不可用、删除异常会保留 `retry`、错误码、尝试次数和下一次退避时间；达到上限后不再自动投递，审计行保留供人工核查。
 - 大批量会话导入复用同一 Worker：`blog.tasks.assemble_markdown_import_session(session_id)` 只处理已完成上传的会话，并可重复投递；`blog.tasks.expire_markdown_import_sessions()` 每 300 秒标记过期会话，再仅按已记录的 artifact UUID 投递精确 cleanup。两者都不扫描 bucket，不创建或发布页面以外的内容。
 - 测试环境不得与生产共用该队列：测试通过 `CELERY_MAINTENANCE_QUEUE=markdown-test-maintenance`、`CELERY_BROKER_DB=12`、`CELERY_RESULT_DB=13` 启动独立 Worker；生产 `.env.production` 不设置这些覆盖项，继续使用 `maintenance`、DB 2/3。不同代码版本的 Worker 禁止混消费同一 Celery 队列。
-- WSL2 测试启动必须同时启动网站和上述独立 Worker：在仓库根目录执行 `bash tools/start_test_stack.sh`。脚本使用 `output/test-runserver-8080.pid` 和 `output/test-worker-markdown.pid` 管理本次测试进程，网站和 Worker 始终共享同一队列环境变量；不要只执行 `manage.py runserver`。
+- WSL2 测试启动必须同时启动网站、上述独立 Worker 和 Beat：在仓库根目录执行 `bash tools/start_test_stack.sh`。脚本使用 `output/test-runserver-8080.pid`、`output/test-worker-markdown.pid` 和 `output/test-beat.pid` 管理本次测试进程，网站、Worker 和 Beat 始终共享同一队列环境变量；不要只执行 `manage.py runserver`。
 - 部署该功能时必须同时确认 maintenance Worker 已注册这两个任务、Beat 已出现 `expire-markdown-import-sessions`，并在 MySQL、MongoDB、MinIO 和 Redis 可用后再重启 Django、maintenance Worker、Beat。会话迁移、生产限额、MinIO 分片生命周期规则和队列并发均需另行授权。
 - 任务依赖 MySQL、配置的对象存储和已有 Wagtail 媒体模型；不读取文章正文，不删除 MongoDB 正文或 revision，不创建页面，不发布内容。
 
@@ -834,3 +850,5 @@ Wagtail 默认 Page 索引更新必须在旧 7.4.3 代码下先执行并记录 `
 ### BlogPage 发布一致性只读对账
 
 Beat 每 300 秒向 `maintenance` 队列投递 `blog.tasks.check_publication_consistency`。该任务按 `BLOG_PUBLICATION_CONSISTENCY_BATCH_SIZE` 限制 BlogPage 批次，读取 BlogPage、BlogPublicationState、Revision、Search State/Outbox；周期模式只更新独立的 `BlogPublicationConsistencyCheckpoint` 游标、high-water、租约和统计元数据，不执行业务数据修复、删除、发布或外部写入。checkpoint 使用 MySQL 行锁租约，租约冲突返回 `lease_busy`，扫描异常释放租约并记录脱敏错误类型；需监控 `last_error`、租约过期和周期推进。启用前需先应用对应迁移（当前为 `blog.0033`）并确认 maintenance Worker 已注册任务；回滚时先停 Beat/Worker，再恢复上一个已验证代码版本，保留 checkpoint 与业务 State/Outbox 数据。
+
+页面不可恢复删除编排：`blog.tasks.process_page_deletion` 和 `blog.tasks.dispatch_page_deletion_retries` 仅使用 `maintenance` 队列。删除入口先在 MySQL 创建 `PageDeletionIntent`、State tombstone 和搜索 Outbox；Worker 等待当前 serving alias 的 ES tombstone 成功后，按固化清单检查其他页面引用，再精确清理 `content_body_versions`、`blog_page_revision_bodies` 和兼容 `blog_content`，最后完成 Wagtail 页面物理删除。Beat 每 30 秒投递到期或租约过期的页面删除意图；状态、step、lease、已删除计数和错误码必须纳入日志与告警。部署前需先应用 `blog.0035`、`blog.0036`，确认 maintenance Worker 注册新任务并在测试环境完成新增→草稿→编辑→发布→搜索→删除闭环；生产 `--apply`、历史孤儿清理和服务重启仍需独立备份及明确授权。回滚只回退代码/服务，不恢复已物理删除的 Mongo 正文。

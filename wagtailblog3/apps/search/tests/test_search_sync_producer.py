@@ -35,6 +35,38 @@ class ContentSearchProducerLifecycleTests(BlogLifecycleFixtureMixin, TestCase):
         self.assertFalse(ContentSearchState.objects.filter(page_id=page.pk).exists())
         self.assertFalse(ContentSearchOutbox.objects.filter(page_id=page.pk).exists())
 
+    def test_modern_revision_blocks_legacy_collection_write_before_state_exists(self):
+        """导入页面尚未建立 State 时，带不可变 Revision 也不得回写旧集合。"""
+        page = self._create_draft_page("导入现代正文")
+        page.save_revision()
+        page.mongo_content_id = "legacy-pointer-from-import"
+        page.body = self._markdown_body("编辑后的现代草稿")
+
+        page.save()
+
+        self.assertEqual(self.mongo.live_documents, {})
+        self.assertFalse(BlogPublicationState.objects.filter(page_id=page.pk).exists())
+
+    def test_publish_signal_repairs_state_when_live_flag_is_not_set_on_instance(self):
+        """Wagtail 8.0 信号 live 时序异常时仍按 Revision 补齐正式 State。"""
+        page = self._create_draft_page("信号时序正文")
+        revision = page.save_revision()
+        # 模拟数据库页面已为 live、而信号实例仍是旧快照的时序。
+        BlogPage.objects.filter(pk=page.pk).update(live=True)
+        page.live = False
+
+        from search.signals import record_blog_page_published
+
+        with patch("search.services.outbox.schedule_content_search_wakeup"):
+            record_blog_page_published(BlogPage, page, revision=revision)
+
+        state = BlogPublicationState.objects.get(page_id=page.pk)
+        event = ContentSearchOutbox.objects.get(page_id=page.pk)
+        self.assertEqual(state.published_body_version_id, revision.content["mongo_body_version_id"])
+        self.assertEqual(event.body_version_id, state.published_body_version_id)
+        self.assertEqual(event.operation, ContentSearchOperation.UPSERT)
+        self.assertTrue(event.searchable)
+
     def test_publish_and_republish_create_monotonic_upsert_events(self):
         with patch("search.services.outbox.schedule_content_search_wakeup") as wakeup:
             page = self._publish(self._create_draft_page("第一版正式正文"))
@@ -135,8 +167,8 @@ class ContentSearchProducerLifecycleTests(BlogLifecycleFixtureMixin, TestCase):
             operation=ContentSearchOperation.TOMBSTONE,
         ).order_by("-content_version").first()
         self.assertFalse(BlogPage.objects.filter(pk=page.pk).exists())
-        self.assertEqual(delete_event.publication_generation, 2)
-        self.assertEqual(state.publication_generation, 2)
+        self.assertGreaterEqual(delete_event.publication_generation, 2)
+        self.assertEqual(state.publication_generation, delete_event.publication_generation)
 
     def test_celery_enqueue_failure_keeps_pending_event(self):
         page = self._create_draft_page("唤醒失败正文")

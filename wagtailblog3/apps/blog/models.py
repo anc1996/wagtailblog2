@@ -1078,6 +1078,39 @@ class BlogPage(Page):
 	# =========================================================================
 	# 网关 3：正式线上保存防线 (点击发布、或更新状态时触发)
 	# =========================================================================
+	def _has_immutable_body_revision(self) -> bool:
+		"""判断页面是否已经进入不可变正文链路。
+
+		返回：最新 Revision 含有正文版本三元组时为 ``True``。
+		副作用：只读取当前页面最新 Revision，不写入数据库或 Mongo。
+		处理边界：该判断用于阻止现代页面重新创建旧 ``blog_content``；没有版本指针的早期页面仍保留兼容路径。
+		"""
+		if not self.pk:
+			return False
+		try:
+			latest_revision = self.revisions.order_by("-created_at").first()
+		except DatabaseError:
+			# 旧环境尚未完成 Revision 表迁移时，保持兼容保存路径，不阻断页面编辑。
+			return False
+		if latest_revision is None:
+			return False
+		content = latest_revision.content
+		if isinstance(content, str):
+			try:
+				content = json.loads(content)
+			except (TypeError, ValueError, json.JSONDecodeError):
+				return False
+		return (
+			isinstance(content, dict)
+			and isinstance(content.get("mongo_body_version_id"), str)
+			and bool(content.get("mongo_body_version_id"))
+			and isinstance(content.get("body_sha256"), str)
+			and len(content.get("body_sha256")) == 64
+			and isinstance(content.get("body_schema_version"), int)
+			and not isinstance(content.get("body_schema_version"), bool)
+			and content.get("body_schema_version") >= 1
+		)
+
 	def save(self, *args: Any, **kwargs: Any) -> None:
 		"""保存页面时同步 Mongo 正文，并确保 MySQL body 始终为空。
 
@@ -1117,9 +1150,11 @@ class BlogPage(Page):
 						page_id=self.pk,
 						published_body_version_id__isnull=False,
 					).exists()
+					# 导入页面可能在 State 建立前先经历一次编辑；Revision 指针是现代链路的可靠标志。
+					immutable_published = immutable_published or self._has_immutable_body_revision()
 				except DatabaseError:
 					# 兼容尚未应用 State 迁移的旧环境，不阻断原有保存流程。
-					immutable_published = False
+					immutable_published = self._has_immutable_body_revision()
 			if immutable_published:
 				logger.info("blog_body_save_legacy_skipped page_id=%s", self.pk)
 				real_body = self.body
@@ -1230,13 +1265,7 @@ class BlogPage(Page):
 				self.pk,
 				was_live,
 			)
-			if was_live:
-				from blog.services.publication import BlogPublicationService
-
-				BlogPublicationService.advance_unpublish_generation(self.pk)
 			result = super().unpublish(*args, **kwargs)
-			if was_live:
-				BlogPublicationService.clear_published_pointer(self.pk)
 			logger.info("blog_lifecycle_unpublish_complete page_id=%s was_live=%s", self.pk, was_live)
 			return result
 
@@ -1247,16 +1276,6 @@ class BlogPage(Page):
 		"""删除页面并由 ``pre_delete`` 登记 Mongo 清理意图。"""
 		with transaction.atomic():
 			logger.info("blog_lifecycle_delete_start page_id=%s", self.pk)
-			if settings.CONTENT_SEARCH_PRODUCER_ENABLED:
-				from blog.services.publication import BlogPublicationService
-				from search.services.outbox import ContentSearchOutboxService
-
-				# 删除路径不保证先经过本项目的取消发布代次推进，需在写墓碑前补齐，
-				# 让删除墓碑可靠地压过所有迟到的发布事件。
-				locked_page = type(self).objects.select_for_update().get(pk=self.pk)
-				if locked_page.live:
-					BlogPublicationService.advance_unpublish_generation(self.pk)
-				ContentSearchOutboxService.record_delete(locked_page)
 			result = super().delete(*args, **kwargs)
 			logger.info("blog_lifecycle_delete_complete page_id=%s", self.pk)
 			return result

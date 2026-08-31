@@ -748,3 +748,44 @@ Wagtail 8.0 的新建发布会调用 `Revision.publish()`，而编辑页发布�
 - 核验：`search_sync_status` 显示 v005 为 `enabled=true, required=true, role=serving`，且不存在第二个同时满足三条件的 Target；v005 Delivery `succeeded=1101`，pending/processing/retry/dead 均为 0。Django `check` 无问题，四个应用服务均 active，生产搜索 API 查询 Django 返回 HTTP 200 和结果。
 - 服务影响：此前已按代码发布重启 Django/uWSGI、maintenance Worker、Beat；本次单字段状态修复无需再次重启，未重启基础设施、Nginx、Filebeat、Elasticsearch、MySQL、MongoDB 或 Redis。
 - 回滚边界：如需回滚，仅恢复备份中的 `required=false` 或回退代码至上一已验证 commit；不得删除正文、ES 文档、alias、State、Outbox 或 Delivery。恢复后必须重新执行唯一性、服务、Django check 与搜索验收。
+
+### 22.7 Mongo 正文集合职责与测试服务重启记录（2026-08-31）
+
+- 集合职责：`content_body_versions` 是新架构的不可变正文版本库。每条记录由 `aggregate_type + aggregate_id + body_sha256 + body_schema_version` 唯一确定，保存 `body_version_id`、哈希、模式版本和正文；BlogPublicationState、Wagtail Revision、ContentSearchState 与 ES 投影通过版本 ID 指向它，正式页面和搜索只读取已发布版本。
+- 集合职责：`blog_page_revision_bodies` 是兼容 Wagtail 历史/草稿预览的快照库。每次生成带历史指针的 Revision 时保存 `page_id + body + created_at`，Revision 只保存快照指针；后台历史预览、比较或旧 Revision 恢复按该指针读取，不能用当前正式正文替代历史正文。
+- 两处同时存在 `body` 是有意的双写：一份是可审计、不可变、可被正式指针引用的版本正文；另一份是 Wagtail Revision 历史快照。两者内容通常相同，但身份、保留策略和读取入口不同，不能互相覆盖或任意删除。新页面不再依赖旧 `blog_content`，`mongo_content_id` 可为空。
+- 本次服务操作：因测试主机重启，使用当前工作区代码重新启动测试 Django（`192.168.20.5:8080`）、maintenance Worker（`markdown-test-maintenance`）和一个隔离 Beat；测试 Filebeat 保持 active。首页和后台均 HTTP 200，`manage.py check` 通过。未修改 MySQL、MongoDB、ES、alias、迁移或生产服务。
+- 工作区边界：重启前发现用户未提交的 `wagtailblog3/apps/blog/blocks.py` 修改及 Beat 调度文件；本次未回退、覆盖、提交或格式化这些文件。后续任何属于本项目的代码或配置改动，必须在本节之后追加日期、文件、测试、数据/服务影响和回滚点。
+
+### 22.8 测试页面 637 删除后 tombstone 核验（2026-08-31）
+
+- 页面状态：标题“第四个测试”的 BlogPage `page_id=637` 已按 Wagtail 标准删除，MySQL 页面记录不存在；旧 Mongo `blog_content` 中没有该页面记录。
+- 正文保护：`content_body_versions` 仍保留正式版本 `6f5681371e814153b4f52b141486c36c`，`blog_page_revision_bodies` 仍保留对应历史快照；删除流程不回收正文和 Revision，符合不可变版本与审计边界。
+- 搜索闭环：`BlogPublicationState` 保留版本指针；`ContentSearchState` 已为 `content_version=2`、`desired_operation=tombstone`、`searchable=false`；删除 Outbox 与 Delivery 均为 `succeeded`。v005 物理索引中 `page_id=637` 仅剩 `searchable=false` 的 tombstone，不再有可搜索文档；前台搜索接口 HTTP 200 且不返回该页面。
+- 数据/服务影响：本次仅核对用户已执行的测试页面删除结果，未额外写入或删除任何数据，未修改生产环境、代码、迁移、alias 或服务配置。
+
+### 22.9 生产页面 1195 导入草稿后发布核验（2026-08-31）
+
+- 页面：生产 BlogPage `1195`（“习近平抵达比什凯克出席2026年上海合作组织峰会并对吉尔吉斯斯坦进行国事访问”）已发布，Wagtail Revision 两条均包含 `mongo_body_version_id`、SHA 和 schema 元数据，Mongo `content_body_versions` 有两条不可变版本，`blog_page_revision_bodies` 有两条历史快照。
+- 异常：该页面同时在旧 Mongo `blog_content` 新增了一条记录，MySQL `mongo_content_id` 指向该旧记录；`BlogPublicationState` 不存在，`ContentSearchState.body_version_id` 和 `publication_generation` 为空。生产搜索 Outbox 事件使用了旧 `mongo_content_id`，而不是正式 `body_version_id`。
+- 搜索投递：该事件当前 Outbox/Delivery 均 succeeded，v005 可正常投影，但数据实际走的是兼容旧正文路径；不能把“搜索命中”当作新架构链路完整通过。v003 也出现同事件 Delivery，需后续确认其是否为历史进程/旧投递逻辑遗留。
+- 初步判断：Markdown 导入或其发布入口仍在页面保存阶段调用旧 `blog_content` 写入，且 Wagtail 8.0 本次发布未触发 `ensure_published_revision` 补齐 State（需继续核对信号 kwargs 与导入入口）。这是新建/导入页面流程的 P1 缺口，不影响已存在页面正文，但会使新页面无法获得 State 版本围栏。
+- 处理边界：本次仅读取生产 MySQL、Mongo、日志和搜索状态，未回填 State、未删除 `blog_content`、未重投 Delivery、未修改 ES 或服务。后续修复前应先在测试环境复现导入草稿路径，并为“导入→保存→编辑→发布”增加 State、旧集合无新增、v005 单目标投递的集成门禁。
+
+### 22.10 导入草稿发布链路修复方案（2026-08-31）
+
+- 目标：新建或导入页面只使用 `content_body_versions` 与 Revision 快照；发布后必有 `BlogPublicationState`，搜索事件携带 `body_version_id`，旧 `blog_content` 不再被新页面编辑保存重新创建。
+- 实施：`BlogPage.save()` 将“存在不可变正文 Revision”视为现代页面，即使兼容字段暂时带有旧指针也跳过 `blog_content` 写入；旧页面若没有不可变 Revision 且已有旧指针，继续保留兼容更新路径。`search` 的 `page_published` 信号不再以 `instance.live` 作为唯一门槛，在非 alias 且带有效 Revision 时调用 `ensure_published_revision`，随后生成带正文版本指针的 Outbox。
+- 测试门禁：测试环境复现“导入草稿→保存→编辑→发布”，断言旧 `blog_content` 无新增、State 正式指针与 Revision 版本一致、Outbox/Delivery 成功且 v005 可搜索；同时覆盖 alias、无 Revision 和旧页面兼容场景。
+- 非目标：不删除生产页面 1195 的旧 `blog_content`，不回填其 State，不修改 Mongo 正文、ES 文档或 alias；这些属于独立数据修复批次，需备份和单独授权。
+- 回滚：代码回退到修复前 commit；测试数据通过标准页面删除和 tombstone 清理，不删除受保护正文版本。生产部署前必须通过测试、`check`、迁移检查、compileall 和 `git diff --check`。
+
+### 22.11 现代 Revision 阻断旧集合写入与发布信号修复（2026-08-31）
+- Wagtail 8.0 后台 Unpublish/DeleteAction 会绕过 BlogPage 子类方法；本批将代次推进、正式指针清理和 tombstone 登记统一到信号，并以实例标记防止重复事件。测试页 639 已完成新建、编辑、发布、搜索、删除闭环，v005 Delivery 成功且旧 blog_content 未新增。
+
+- 状态：代码修复完成，尚未提交或同步生产。
+- 实际修改：`wagtailblog3/apps/blog/models.py` 新增不可变正文 Revision 判定；页面已有现代正文版本时，即使兼容字段暂存旧 `mongo_content_id`，保存也只写 MySQL 页面元数据，不再创建或更新旧 Mongo `blog_content`。判定查询遇到旧环境数据库迁移异常时降级为原兼容路径，并记录中文边界注释。`wagtailblog3/apps/search/signals.py` 的 `page_published` 接收器改为以非 alias 的有效 Revision 作为可信发布依据，调用 `ensure_published_revision` 后再生成搜索 Outbox，避免 Wagtail 8.0 `live` 时序导致 State 缺失或事件携带旧指针。
+- 测试：新增现代 Revision 阻断旧集合写入、`live=False` 发布信号仍补齐 State/Outbox 两个回归测试。WSL2 `wagtailblog-test` 执行 `search.tests.test_search_sync_producer` 共 12 个通过；执行 `blog.test_markdown_import_service blog.test_markdown_import_api blog.test_publication_service search.tests.test_search_sync_producer search.tests.test_lifecycle_baseline` 共 67 个通过。
+- 检查：`python manage.py check`、`makemigrations --check --dry-run`、`python -m compileall wagtailblog3`、`git diff --check` 均通过；仅保留既有 `wagtailcore.WorkflowState W036` 警告。未执行生产数据写入、Mongo/ES 修复、alias 切换或服务重启。
+- 数据/服务影响：测试回归使用 Django 测试数据库并自动销毁；未改变共享测试库、生产库或外部索引。用户未提交的 `blog/blocks.py` 修改及 Beat 调度文件未纳入本批次。
+- 回滚与后续：可回退本批三个运行时代码/测试文件恢复修复前行为；部署前仍需在测试共享环境按正确 Celery 队列变量完成“导入草稿→编辑→发布→搜索→删除”验收，确认 Delivery succeeded、v005 命中及 tombstone 生效，再申请生产发布授权。

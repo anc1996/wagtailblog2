@@ -1049,3 +1049,18 @@ P0 可与 P1 并行，但 P1 必须吸收 P0 的真实字段证据；P2 与 P3 �
 - 验证：文档内容与 `models.py`、`mongo.py`、搜索服务交叉核对；`git diff --check` 通过。
 - 提交与发布：随提交 `bd30882609ac67ce5f6c014fd89390653a3d5f5a` 推送并同步生产。
 - 回滚点：恢复本次文档提交即可，不涉及数据回滚。
+
+#### 方案：测试代码按应用归档（2026-09-01）
+
+- 背景与现状证据：根测试包 `wagtailblog3/tests/` 仍混放首页、基础设置、博客统计和日志系统测试；`comments`、`content_ai` 仍使用单文件 `tests.py`。这些测试均可被 Django 发现，不能仅因目录位置删除。迁移前运行 `python manage.py test wagtailblog3.tests --keepdb`，共发现 71 项，其中首页轮播资源版本断言和日志 traceback 约束各有一项既有失败，与本次目录整理无关。
+- 目标：将测试移入对应 Django 应用的 `tests/` 包，减少跨域扫描和定位成本；保留所有有效测试及其断言语义。非目标：不修改运行时代码、数据库、MongoDB、Elasticsearch、服务配置或历史数据；不通过删除或放宽测试掩盖既有失败。
+- 实施：首页轮播测试移入 `home/tests/`；社交链接移入 `base/tests/`；博客统计、Feed 与质量契约移入 `blog/tests/`；日志配置与审计测试移入 `observability/tests/`；`comments/tests.py`、`content_ai/tests.py` 转为同应用测试包。仅修正因文件路径变化造成的 `Path(__file__)` 定位和日志测试中的期望相对路径。
+- 验收与回滚：迁移后按应用标签运行测试，确认迁移文件均可导入且目标覆盖未减少；执行 `manage.py check`、`compileall` 和 `git diff --check`。全量自动发现中的既有包路径重复导入、日志约束和草稿生命周期失败单独记录为遗留缺陷，不删除测试。回滚仅恢复测试文件原位置和本节记录，无数据或服务回滚。
+- 模型/推理强度建议：文件盘点和格式核对适用 `luna` 低/中；跨应用测试迁移适用 `terra` 中；只有迁移暴露 Django/Wagtail 测试发现或运行时兼容性冲突时，升级 `sol` 高复核。验证门禁始终以真实 Django 测试、`check` 和 diff 为准。实际本批使用当前可用会话完成盘点和迁移，未调用外部模型，也未传输源码或数据。
+
+#### 实施记录：测试代码按应用归档（2026-09-01）
+
+- 状态：目录迁移完成，未修改运行时代码、数据库或服务。
+- 实际修改：将根测试包中的首页、基础设置、博客统计/Feed/质量、日志测试分别移入 `home/tests/`、`base/tests/`、`blog/tests/`、`observability/tests/`；将 `comments/tests.py` 和 `content_ai/tests.py` 转为同应用测试包；删除仅用于旧根包的空 `__init__.py`；修正路径断言、`content_ai` 绝对导入和首页资源版本断言。
+- 验证：应用标签测试 56 项通过；日志配置/过滤/辅助测试 22 项通过；`manage.py check`、目标 `compileall`、`git diff --check` 通过。全量自动发现 726 项仍有 3 个既有断言失败、2 个既有包重复导入错误（`wagtailblog3.apps.blog.tests.*` 模型未注册及草稿 SimpleTestCase 数据库访问），不属于目录迁移引入的运行时回归，后续应单独治理测试入口和遗留用例。
+- 回滚点与残余风险：未提交。回滚为恢复被移动文件和旧包初始化文件；当前测试命令应优先使用 `home.tests`、`base.tests`、`blog.tests`、`observability.tests`、`comments.tests`、`content_ai.tests` 等应用标签，避免项目根目录自动发现重复导入。

@@ -4,9 +4,9 @@ from django.core.exceptions import ValidationError
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
-from .models import BlogMetadataPromptTemplate
-from .services.blog_metadata import PromptTemplateError, generate_blog_metadata
-from .wagtail_hooks import PromptTemplatePermissionPolicy
+from content_ai.models import BlogMetadataPromptTemplate
+from content_ai.services.blog_metadata import PromptTemplateError, generate_blog_metadata
+from content_ai.wagtail_hooks import PromptTemplatePermissionPolicy
 
 
 class FakeResponsesClient:

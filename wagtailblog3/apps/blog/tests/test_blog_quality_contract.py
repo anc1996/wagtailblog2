@@ -6,7 +6,7 @@ from wagtail.blocks.stream_block import StreamValue
 from blog.models import BlogPage
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
 class BlogQualityContractTests(TestCase):

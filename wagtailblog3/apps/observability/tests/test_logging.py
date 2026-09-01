@@ -101,7 +101,7 @@ class LoggingConfigTests(SimpleTestCase):
 
     def test_config_does_not_contain_log_path_literals(self):
         path = (
-            Path(__file__).resolve().parents[1]
+            Path(__file__).resolve().parents[3]
             / "apps"
             / "observability"
             / "config.py"
@@ -300,8 +300,8 @@ class LoggingConfigTests(SimpleTestCase):
         for secret in ("hunter2", "raw-token", "sessionid=abc", "plain-key"):
             self.assertNotIn(secret, content)
         self.assertIn("[REDACTED]", content)
-        self.assertNotIn(str(Path(__file__).resolve().parents[2]), content)
-        self.assertIn("wagtailblog3/tests/test_logging.py", content)
+        self.assertNotIn(str(Path(__file__).resolve().parents[3]), content)
+        self.assertIn("wagtailblog3/apps/observability/tests/test_logging.py", content)
 
 
 class LoggingFilterTests(SimpleTestCase):
@@ -325,7 +325,7 @@ class LoggingFilterTests(SimpleTestCase):
         )
 
     def test_project_path_filter_never_returns_parent_segments(self):
-        root = Path(__file__).resolve().parents[2]
+        root = Path(__file__).resolve().parents[3]
         filter_instance = ProjectRelativePathFilter(root)
         project_record = logging.LogRecord(
             "test", logging.INFO, str(root / "wagtailblog3/apps/blog/views.py"), 1, "", (), None
@@ -365,7 +365,7 @@ class LoggingHelperTests(SimpleTestCase):
 
 
 class LoggingConventionTests(SimpleTestCase):
-    project_root = Path(__file__).resolve().parents[1]
+    project_root = Path(__file__).resolve().parents[3]
 
     def _source_logger_name(self, path):
         relative = path.relative_to(self.project_root)

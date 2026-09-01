@@ -230,7 +230,7 @@ class BlogFeedTests(SimpleTestCase):
         schedule_all.assert_called_once_with()
 
     def test_public_templates_advertise_both_feed_formats_and_footer_has_no_form(self):
-        project_root = Path(__file__).resolve().parents[2]
+        project_root = Path(__file__).resolve().parents[3]
         base_template = (project_root / "templates/base.html").read_text(encoding="utf-8")
         footer_template = (project_root / "templates/includes/footer.html").read_text(
             encoding="utf-8"

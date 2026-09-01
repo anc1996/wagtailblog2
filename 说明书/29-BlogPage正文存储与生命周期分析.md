@@ -1021,3 +1021,10 @@ P0 可与 P1 并行，但 P1 必须吸收 P0 的真实字段证据；P2 与 P3 �
 - 测试：`python manage.py check`、`makemigrations --check --dry-run`、`blog.test_page_deletion blog.test_mongo_cleanup_intent search.tests.test_search_sync_producer` 共 30 项通过；`compileall`、`bash -n tools/start_test_stack.sh`、`git diff --check` 通过。仅有既有 Wagtail MySQL 条件唯一约束警告。
 - 生产只读核对：`blog.0035/0036` 尚未应用（当前最后为 `0034`）；因新代码依赖 `PageDeletionIntent` 表，生产迁移必须单独备份、说明影响并获得授权后执行，不能在未迁移状态下重启新代码。
 - 回滚点与残余风险：可回滚到上一个已验证 commit；重试命令不自动恢复已物理删除的正文。生产仅在迁移完成且服务健康检查通过后才能启用新删除链路。
+
+#### 实施记录：生产草稿搜索隔离验收（2026-09-01）
+
+- 通过 browser-skill 在生产页面 526 下新建并保存草稿 4 篇：1199–1202，标题分别为 A–D，正文各不相同。四页均 `live=false`，各自有 1 条 Wagtail Revision。
+- 前台以共同前缀查询 `type=all` 返回未找到；ES 生产 read alias 按 `page_id` 1199–1202 查询命中 0 条，草稿未进入公开索引。
+- Mongo 只读核对：每页 `content_body_versions=1`、`blog_page_revision_bodies=1`、旧 `blog_content=0`；未发布因此不写 Outbox/ES。生产日志可见四页编辑请求，无异常。
+- 四篇草稿当前仍保留在生产；如需删除，应逐页走受控删除流程并核对 Mongo 物理清理与 ES tombstone。

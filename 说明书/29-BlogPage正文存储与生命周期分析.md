@@ -1028,3 +1028,10 @@ P0 可与 P1 并行，但 P1 必须吸收 P0 的真实字段证据；P2 与 P3 �
 - 前台以共同前缀查询 `type=all` 返回未找到；ES 生产 read alias 按 `page_id` 1199–1202 查询命中 0 条，草稿未进入公开索引。
 - Mongo 只读核对：每页 `content_body_versions=1`、`blog_page_revision_bodies=1`、旧 `blog_content=0`；未发布因此不写 Outbox/ES。生产日志可见四页编辑请求，无异常。
 - 四篇草稿当前仍保留在生产；如需删除，应逐页走受控删除流程并核对 Mongo 物理清理与 ES tombstone。
+
+#### 实施记录：生产草稿批量发布与搜索验收（2026-09-01）
+
+- 用户单独发布 1199，并批量发布 1200–1202；后台返回单页发布成功与“3 pages have been published”。
+- 前台 `type=all` 和 `type=blog` 均找到 4 篇，显示各自不同的 intro 摘要。
+- MySQL 四页均 `live=true`，每页有 `published_body_version_id`，`publication_generation=1`；每页 Outbox/Delivery 均为 `upsert/succeeded`。Mongo 每页保留 1 条正文版本和 1 条 Revision 快照，旧 `blog_content=0`。ES v005 查询可见四页。
+- 生产应用、maintenance Worker 和 Beat 日志无错误；搜索、Outbox、Mongo 和页面状态已收敛。

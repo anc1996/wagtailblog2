@@ -852,3 +852,20 @@ Wagtail 默认 Page 索引更新必须在旧 7.4.3 代码下先执行并记录 `
 Beat 每 300 秒向 `maintenance` 队列投递 `blog.tasks.check_publication_consistency`。该任务按 `BLOG_PUBLICATION_CONSISTENCY_BATCH_SIZE` 限制 BlogPage 批次，读取 BlogPage、BlogPublicationState、Revision、Search State/Outbox；周期模式只更新独立的 `BlogPublicationConsistencyCheckpoint` 游标、high-water、租约和统计元数据，不执行业务数据修复、删除、发布或外部写入。checkpoint 使用 MySQL 行锁租约，租约冲突返回 `lease_busy`，扫描异常释放租约并记录脱敏错误类型；需监控 `last_error`、租约过期和周期推进。启用前需先应用对应迁移（当前为 `blog.0033`）并确认 maintenance Worker 已注册任务；回滚时先停 Beat/Worker，再恢复上一个已验证代码版本，保留 checkpoint 与业务 State/Outbox 数据。
 
 页面不可恢复删除编排：`blog.tasks.process_page_deletion` 和 `blog.tasks.dispatch_page_deletion_retries` 仅使用 `maintenance` 队列。删除入口先在 MySQL 创建 `PageDeletionIntent`、State tombstone 和搜索 Outbox；Worker 等待当前 serving alias 的 ES tombstone 成功后，按固化清单检查其他页面引用，再精确清理 `content_body_versions`、`blog_page_revision_bodies` 和兼容 `blog_content`，最后完成 Wagtail 页面物理删除。Beat 每 30 秒投递到期或租约过期的页面删除意图；状态、step、lease、已删除计数和错误码必须纳入日志与告警。部署前需先应用 `blog.0035`、`blog.0036`，确认 maintenance Worker 注册新任务并在测试环境完成新增→草稿→编辑→发布→搜索→删除闭环；生产 `--apply`、历史孤儿清理和服务重启仍需独立备份及明确授权。回滚只回退代码/服务，不恢复已物理删除的 Mongo 正文。
+
+### 2026-09-01 生产运维记录：PageDeletionIntent 迁移已应用
+
+- 生产代码：`8435110b45d4012dd915ea90a521908afcd7dad7`，分支 `main`，工作树干净。
+- 迁移：在冻结 Django、maintenance Worker 和 Beat 写入后，已完成 `blog.0035_pagedeletionintent` 和 `blog.0036_alter_pagedeletionintent_status`；`showmigrations blog` 均为 `[X]`。迁移只创建/更新 MySQL 删除编排表，未删除业务数据、Mongo 正文或 ES 索引。
+- 备份：`/home/source/Django/wagtail/backups/wagtailblog3-pre-blog-deletion-migration-20260901-091121/`；MySQL 全库 dump 与 `checksums.sha256` 已完成校验。
+- 启动顺序：基础设施就绪后，按 `wagtailblog3.service` → `wagtailblog3-celery-maintenance.service` → `wagtailblog3-celery-beat.service` → `wagtailblog3-filebeat.service` 恢复；仅当日志格式变更时才重启 Filebeat，Nginx 配置未改时不重载。
+- 当前状态：迁移完成后应用三个核心 unit 仍保持停止，待按下方命令启动并完成健康检查：
+
+```bash
+systemctl start wagtailblog3.service
+systemctl start wagtailblog3-celery-maintenance.service
+systemctl start wagtailblog3-celery-beat.service
+systemctl is-active wagtailblog3.service wagtailblog3-celery-maintenance.service wagtailblog3-celery-beat.service wagtailblog3-filebeat.service
+```
+
+- 回滚：如启动后检查失败，停止上述应用 unit，回退到上一个已验证 commit；保留迁移表和备份，不擅自执行反向迁移。

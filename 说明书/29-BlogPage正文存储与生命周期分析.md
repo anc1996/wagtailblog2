@@ -1035,3 +1035,10 @@ P0 可与 P1 并行，但 P1 必须吸收 P0 的真实字段证据；P2 与 P3 �
 - 前台 `type=all` 和 `type=blog` 均找到 4 篇，显示各自不同的 intro 摘要。
 - MySQL 四页均 `live=true`，每页有 `published_body_version_id`，`publication_generation=1`；每页 Outbox/Delivery 均为 `upsert/succeeded`。Mongo 每页保留 1 条正文版本和 1 条 Revision 快照，旧 `blog_content=0`。ES v005 查询可见四页。
 - 生产应用、maintenance Worker 和 Beat 日志无错误；搜索、Outbox、Mongo 和页面状态已收敛。
+
+#### 实施记录：生产单页与批量物理删除验收（2026-09-01）
+
+- 用户确认删除 1199，并批量确认删除 1200–1202。四页 MySQL 均已物理删除，`PageDeletionIntent` 均为 `succeeded/done`。
+- Mongo 三个集合按页面查询均为 0：`content_body_versions` 、`blog_page_revision_bodies` 、旧 `blog_content`。
+- Outbox/Delivery 的最终 tombstone 均已 `succeeded`；ES v005 仅保留 `searchable=false` tombstone 文档，前台 `type=all` 查询不再返回四篇标题。
+- 生产应用、maintenance Worker 日志无错误；该批证明单页和 Wagtail 8 批量删除都会经过新删除状态机并物理清理正文。

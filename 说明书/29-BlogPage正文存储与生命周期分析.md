@@ -1046,5 +1046,6 @@ P0 可与 P1 并行，但 P1 必须吸收 P0 的真实字段证据；P2 与 P3 �
 
 - 状态：已完成文档同步，未修改运行时代码、数据库或服务。
 - 实际修改：重写 `wagtailblog3/apps/blog/models.md`，以当前 BlogPage、BlogPublicationState、Wagtail Revision、Mongo 三集合、Outbox/Delivery、ES v005 和删除状态机为准，明确 `body` 为空及 `mongo_content_id` 可空的现代语义。
-- 验证：文档内容与 `models.py`、`mongo.py`、搜索服务交叉核对；`git diff --check` 待本批统一执行。
+- 验证：文档内容与 `models.py`、`mongo.py`、搜索服务交叉核对；`git diff --check` 通过。
+- 提交与发布：随提交 `bd30882609ac67ce5f6c014fd89390653a3d5f5a` 推送并同步生产。
 - 回滚点：恢复本次文档提交即可，不涉及数据回滚。

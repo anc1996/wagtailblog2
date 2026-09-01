@@ -750,7 +750,7 @@ Markdown 导入脚本属于跨站点浏览器入口，新增网站不能只修�
 - 在 `wagtailblog3/settings/base.py` 的 `CORS_ALLOWED_ORIGIN_REGEXES` 增加精确的 HTTP/HTTPS 来源（仅在该网站确实提供 HTTP 页面时保留 HTTP），不得使用任意来源通配符；`CORS_URLS_REGEX` 仍只覆盖 Markdown 导入 API。
 - 在 `wagtailblog3/apps/blog/test_markdown_import_cors.py` 和相关 userscript 静态测试中锁定来源、预检头、实际 Bearer 响应、`@match`、正文容器和版本；同步更新 TEST 构建脚本并重新生成 `output/userscript-blog-import/` 下的本地调试副本。
 - 当前已登记的人民数据库页面包括 `https://jhsjk.people.cn/article/<id>`；其正文容器为 `.d2txt_con.clearfix`，标题使用 `.d2txt > h1`，页面标题不能作为文章标题回退值。
-- 先在 WSL2 `wagtailblog-test` 环境运行 Django 定向测试、`manage.py check`、迁移检查和两个 userscript 的 `node --check`，再提交和发布。浏览器验收必须确认入口、标题、正文、OPTIONS 和实际响应；不得用 401/Token 错误误判为 CORS 失败。
+- 先在 WSL2 `wagtailblog-test` 环境运行 Django 定向测试（Blog 测试位于 `blog.tests.*`）、`manage.py check`、迁移检查和两个 userscript 的 `node --check`，再提交和发布。浏览器验收必须确认入口、标题、正文、OPTIONS 和实际响应；不得用 401/Token 错误误判为 CORS 失败。
 
 该类改动会影响 Django/uWSGI 的 CORS 配置，生产同步后必须重启 `wagtailblog3.service`；只有实际涉及任务代码或服务配置时才按本文件既有顺序重启 maintenance Worker、Beat、Filebeat。userscript 版本必须递增，在 Tampermonkey 等用户脚本管理器中停用旧副本，避免同一页面运行多个版本。生产发布不创建草稿、session、媒体或 revision，除非另有明确授权。
 

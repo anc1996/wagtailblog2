@@ -5,8 +5,8 @@ from django.core.exceptions import ValidationError
 from django.template import Context, Template
 from django.test import SimpleTestCase
 
-from .inline_title_renderer import InlineTitleRenderer
-from .models import BlogPage
+from ..inline_title_renderer import InlineTitleRenderer
+from ..models import BlogPage
 
 
 class InlineTitleRendererTests(SimpleTestCase):
@@ -135,7 +135,7 @@ class MarkdownTitleIntegrationTests(SimpleTestCase):
         self.assertNotIn("formatted_title", field_names)
 
     def test_all_public_title_surfaces_use_shared_template_tag(self):
-        project_root = Path(__file__).resolve().parents[2]
+        project_root = Path(__file__).resolve().parents[3]
 
         for relative_path in self.public_title_templates:
             with self.subTest(template=relative_path):
@@ -143,7 +143,7 @@ class MarkdownTitleIntegrationTests(SimpleTestCase):
                 self.assertIn("render_display_title", content)
 
     def test_seo_title_uses_plain_text_filter(self):
-        project_root = Path(__file__).resolve().parents[2]
+        project_root = Path(__file__).resolve().parents[3]
         base_template = (project_root / "templates/base.html").read_text(
             encoding="utf-8"
         )

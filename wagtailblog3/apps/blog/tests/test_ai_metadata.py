@@ -52,7 +52,7 @@ class BlogMetadataTests(SimpleTestCase):
             self.assertNotIn("ai", FormPage._meta.get_field(field_name).features)
 
     def test_metadata_script_uses_project_owned_editor_context(self):
-        script = Path(__file__).resolve().parents[2] / "static" / "blog" / "js" / "blog_editor_context.js"
+        script = Path(__file__).resolve().parents[3] / "static" / "blog" / "js" / "blog_editor_context.js"
         source = script.read_text(encoding="utf-8")
 
         self.assertIn("window.blogEditorContext", source)

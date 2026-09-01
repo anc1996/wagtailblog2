@@ -1,249 +1,130 @@
-好的，没问题。这次我们更全面地分析您的 `models.py` 中所有自定义 Wagtail 模型和 Django 模型之间的关系，并重新组织分析过程，以便更清晰地理解整个博客系统的架构。
+# Blog 应用模型与正文存储说明
 
-我们将按照模型类型和它们之间的关联来组织分析。
+本文以当前 `wagtailblog3/apps/blog/models.py`、`wagtailblog3/mongo.py` 和搜索服务实现为准。旧文档曾把 `BlogPage.body` 描述为 Mongo 正文主存储，这已经不准确。
 
-**一、核心内容模型**
+## 1. 总体分层
 
-*   **`BlogPage` (博客页面)**
-    *   **作用：** 代表一篇独立的博客文章，是博客系统的核心内容单元。
-    *   **继承：** 继承自 Wagtail 的 `Page` 模型，因此具备 Wagtail 页面的所有基本特性（标题、slug、URL、修订历史、发布状态等）。
-    *   **重要字段：**
-        *   `date`: 文章发布日期。
-        *   `intro`: 文章简介。
-        *   `body`: StreamField，用于存储文章的结构化内容（富文本、Markdown、图片、视频等），但实际内容存储在 MongoDB 中。
-        *   `featured_image`: 特色图片，与 `BlogImage` 模型关联。
-        *   `mongo_content_id`: 存储 MongoDB 中对应文章内容的 ID。
-    *   **重要方法：**
-        *   `save()`: 重写以将 StreamField 内容保存到 MongoDB。
-        *   `delete()`: 重写以删除 MongoDB 中的内容。
-        *   `serve()`: 重写以从 MongoDB 获取内容并在渲染时加载。
-        *   `get_content_from_mongodb()`: 从 MongoDB 获取文章内容。
-        *   `main_image()`: 获取画廊中的第一张图片作为主图（如果存在）。
-        *   `get_prev_post()`, `get_next_post()`: 获取同类别或按时间排序的上一篇/下一篇文章。
-        *   `get_related_posts_by_tags()`: 根据标签获取相关文章。
-        *   `get_view_count()`, `get_reactions()`, `user_has_reacted()`: 获取访问统计和用户反应信息。
+```text
+MySQL / Wagtail
+  Page、BlogPage、title、intro、date、标签、分类、作者、发布状态
+  BlogPublicationState、Wagtail Revision、PageDeletionIntent、Outbox 元数据
 
-*   **`BlogIndexPage` (博客索引页面)**
-    *   **作用：** 作为博客文章的容器页面，通常用于展示博客文章列表。
-    *   **继承：** 继承自 Wagtail 的 `Page` 模型。
-    *   **重要字段：**
-        *   `intro`: 页面介绍。
-    *   **重要方法：**
-        *   `get_context()`: 获取子级 `BlogPage` 列表，并实现分页功能，将其添加到模板上下文中。
+MongoDB
+  content_body_versions           不可变正式正文版本
+  blog_page_revision_bodies       草稿/历史 Revision 正文快照
+  blog_content                    旧版兼容集合，仅供遗留页面读取或清理
 
-**二、媒体和文档模型 (自定义)**
-
-*   **`BlogImage` (自定义图片模型)**
-    *   **作用：** 自定义 Wagtail 的图片模型，添加额外字段。
-    *   **继承：** 继承自 Wagtail 的 `AbstractImage`。
-    *   **重要字段：**
-        *   `caption`: 图片说明。
-    *   **重要属性：**
-        *   `default_alt_text`: 返回图片的 alt 文本，优先使用 `caption`。
-
-*   **`BlogRendition` (博客图片渲染模型)**
-    *   **作用：** 存储 `BlogImage` 的不同渲染版本。
-    *   **继承：** 继承自 Wagtail 的 `AbstractRendition`。
-    *   **关系：** 通过 `ForeignKey` 与 `BlogImage` 关联。
-
-*   **`BlogDocument` (自定义文档模型)**
-    *   **作用：** 自定义 Wagtail 的文档模型，添加额外字段。
-    *   **继承：** 继承自 Wagtail 的 `AbstractDocument`。
-    *   **重要字段：**
-        *   `description`: 文档描述。
-
-**三、关联内容模型**
-
-*   **`BlogPageGalleryImage` (博客页面画廊图片)**
-    *   **作用：** 在 `BlogPage` 中创建图片画廊。
-    *   **继承：** 继承自 `Orderable` 和 Django 的 `models.Model` (通过 `ParentalKey` 的隐式继承)。`Orderable` Mixin 添加了排序功能。
-    *   **关系：**
-        *   通过 `ParentalKey` 与 `BlogPage` 关联，建立一对多关系（一篇 `BlogPage` 可以有多个 `BlogPageGalleryImage`）。
-        *   通过 `ForeignKey` 与 `BlogImage` 关联，建立一对多关系（一张 `BlogImage` 可以被多个 `BlogPageGalleryImage` 引用）。
-
-**四、分类和标签模型**
-
-*   **`BlogCategory` (博客分类)**
-    *   **作用：** 对博客文章进行分类。
-    *   **继承：** 继承自 Django 的 `models.Model`。
-    *   **重要字段：**
-        *   `name`: 分类名称。
-        *   `slug`: 用于 URL 的唯一标识符。
-    *   **注册为 Snippet：** `@register_snippet` 装饰器使其可以在 Wagtail 后台作为 Snippet 进行管理。
-    *   **关系：** 通过 `ParentalManyToManyField` 与 `BlogPage` 关联，建立多对多关系（一篇 `BlogPage` 可以有多个 `BlogCategory`，一个 `BlogCategory` 可以包含多篇 `BlogPage`）。
-
-*   **`BlogPageTag` (博客页面标签)**
-    *   **作用：** 存储 `BlogPage` 和 `Tag` 之间的多对多关系。
-    *   **继承：** 继承自 `TaggedItemBase`。
-    *   **关系：**
-        *   通过 `ParentalKey` 与 `BlogPage` 关联，建立父子关系，表示这个标签关联属于哪篇 `BlogPage`。
-        *   隐式地与 Wagtail 内置的 `Tag` 模型关联（由 `TaggedItemBase` 提供）。
-
-*   **`BlogTagIndexPage` (博客标签索引页面)**
-    *   **作用：** 显示带有特定标签的博客文章列表。
-    *   **继承：** 继承自 Wagtail 的 `Page` 模型。
-    *   **关系：** **逻辑关联** `BlogPage`。在 `get_context` 中通过查询 `BlogPage` 的 `tags` 字段来获取相关文章。
-    *   **重要方法：**
-        *   `get_context()`: 根据 URL 参数过滤 `BlogPage`，并计算标签云。
-
-**五、用户和作者模型**
-
-*   **`Author` (作者模型)**
-    *   **作用：** 管理博客文章的作者信息。
-    *   **继承：** 继承自 Django 的 `models.Model`。
-    *   **重要字段：**
-        *   `name`: 作者名称。
-        *   `author_image`: 作者图片，与 `BlogImage` 模型关联。
-    *   **注册为 Snippet：** `@register_snippet` 装饰器使其可以在 Wagtail 后台作为 Snippet 进行管理。
-    *   **关系：** 通过 `ParentalManyToManyField` 与 `BlogPage` 关联，建立多对多关系（一篇 `BlogPage` 可以有多个 `Author`，一个 `Author` 可以写多篇 `BlogPage`）。
-
-**六、访问统计和用户反应模型**
-
-*   **`PageView` (页面访问记录)**
-    *   **作用：** 记录页面的每一次访问。
-    *   **继承：** 继承自 Django 的 `models.Model`。
-    *   **注册为 Snippet：** `@register_snippet` 装饰器使其可以在 Wagtail 后台作为 Snippet 进行管理（尽管通常不会直接在后台编辑这些记录）。
-    *   **关系：** 通过 `ForeignKey` 与 `wagtailcore.Page` 关联，建立一对多关系（一个 `Page` 可以有很多 `PageView` 记录）。
-    *   **重要字段：** `session_key`, `user`, `ip_address`, `user_agent`, `viewed_at`, `is_unique`。
-
-*   **`PageViewCount` (页面访问统计聚合)**
-    *   **作用：** 按天聚合页面的访问统计（总访问量和唯一访问量）。
-    *   **继承：** 继承自 Django 的 `models.Model`。
-    *   **注册为 Snippet：** `@register_snippet` 装饰器使其可以在 Wagtail 后台作为 Snippet 进行管理（同样，通常不会直接编辑）。
-    *   **关系：** 通过 `ForeignKey` 与 `wagtailcore.Page` 关联，建立一对多关系（一个 `Page` 可以有很多 `PageViewCount` 记录，每天一条）。
-    *   **重要字段：** `date`, `count`, `unique_count`。
-    *   **唯一性约束：** `unique_together = ('page', 'date')` 确保每天每个页面只有一条统计记录。
-
-*   **`ReactionType` (反应类型模型)**
-    *   **作用：** 定义用户可以对页面进行的反应类型（例如“喜欢”、“赞”、“有趣”等）。
-    *   **继承：** 继承自 Django 的 `models.Model`。
-    *   **注册为 Snippet：** `@register_snippet` 装饰器使其可以在 Wagtail 后台作为 Snippet 进行管理。
-    *   **重要字段：** `name`, `icon`, `display_order`。
-
-*   **`Reaction` (用户反应模型)**
-    *   **作用：** 记录用户对特定页面的具体反应。
-    *   **继承：** 继承自 Django 的 `models.Model`。
-    *   **注册为 Snippet：** `@register_snippet` 装饰器使其可以在 Wagtail 后台作为 Snippet 进行管理（同样，通常不会直接编辑）。
-    *   **关系：**
-        *   通过 `ForeignKey` 与 `wagtailcore.Page` 关联，建立一对多关系（一个 `Page` 可以有很多 `Reaction` 记录）。
-        *   通过 `ForeignKey` 与 `ReactionType` 关联，建立一对多关系（一个 `ReactionType` 可以有很多 `Reaction` 记录）。
-        *   通过 `ForeignKey` 与 `settings.AUTH_USER_MODEL` 关联，建立一对多关系（一个用户可以有很多 `Reaction` 记录）。
-    *   **重要字段：** `user`, `session_key`, `ip_address`, `created_at`。
-    *   **唯一性约束：** `unique_together` 确保每个用户（或匿名用户组合）对每个页面只能有一个反应。
-
-**模型关系总结图示 (更全面):**
-
-```
-+-------------------+       1:M       +-------------------------+
-|    BlogIndexPage  |---------------->|       BlogPage          |
-|  (博客索引页面)   |                 |     (博客文章)          |
-+-------------------+                 +-------------------------+
-                                                |
-                                                | 1:M
-                                                |
-                                        +-------------------------+
-                                        | BlogPageGalleryImage    |
-                                        |   (画廊图片)            |
-                                        +-------------------------+
-                                                |
-                                                | M:1
-                                                |
-                                        +-------------------------+
-                                        |       BlogImage         |
-                                        |    (自定义图片)         |
-                                        +-------------------------+
-                                                |
-                                                | 1:M
-                                                |
-                                        +-------------------------+
-                                        |     BlogRendition       |
-                                        |   (图片渲染)            |
-                                        +-------------------------+
-
-
-+-------------------+       M:M       +-------------------------+
-|       BlogPage    |---------------->|     BlogCategory        |
-|     (博客文章)    | (通过 ParentalManyToManyField) |  (博客分类)            |
-+-------------------+                 +-------------------------+
-
-+-------------------+       M:M       +-------------------------+
-|       BlogPage    |---------------->|        Author           |
-|     (博客文章)    | (通过 ParentalManyToManyField) |     (作者)              |
-+-------------------+                 +-------------------------+
-                                                |
-                                                | M:1
-                                                |
-                                        +-------------------------+
-                                        |       BlogImage         |
-                                        |    (自定义图片)         |
-                                        +-------------------------+
-
-
-+-------------------+       M:M       +-------------------------+
-|       BlogPage    |---------------->|         Tag             |
-|     (博客文章)    | (通过 BlogPageTag) | (Wagtail内置标签)       |
-+-------------------+                 +-------------------------+
-        |                                       ^
-        | 1:M (ParentalKey)                     |
-        |                                       | M:1 (隐式)
-+-------------------+                           |
-|    BlogPageTag    |---------------------------+
-| (博客页面标签)    |
-+-------------------+
-
-
-+-----------------------+       逻辑关联       +-------------------+
-| BlogTagIndexPage      |---------------------->|     BlogPage      |
-| (标签索引页面)        | (查询过滤)           |   (博客文章)      |
-+-----------------------+                       +-------------------+
-
-
-+-------------------+       1:M       +-------------------------+
-| wagtailcore.Page  |---------------->|      PageView           |
-|    (任何页面)     |                 |   (页面访问记录)        |
-+-------------------+                 +-------------------------+
-        |                                       ^
-        | 1:M                                   | M:1
-        |                                       |
-+-------------------+                           |
-|  PageViewCount    |---------------------------+
-| (访问统计聚合)    |
-+-------------------+
-
-
-+-------------------+       1:M       +-------------------------+
-|   ReactionType    |---------------->|       Reaction          |
-|   (反应类型)      |                 |     (用户反应)          |
-+-------------------+                 +-------------------------+
-                                                |
-                                                | M:1
-                                                |
-                                        +-------------------------+
-                                        |   wagtailcore.Page      |
-                                        |     (任何页面)          |
-                                        +-------------------------+
-                                                |
-                                                | M:1
-                                                |
-                                        +-------------------------+
-                                        | settings.AUTH_USER_MODEL|
-                                        |      (用户模型)         |
-                                        +-------------------------+
+Elasticsearch v005
+  已发布内容的可重建搜索投影；不是正文权威库
 ```
 
-**总结：**
+MySQL 负责目录、权限、页面树、元数据和状态协调；MongoDB 负责正文版本；Elasticsearch 负责搜索。三者之间通过 MySQL State、Outbox 和 Delivery 传递版本化事件。
 
-您的 `models.py` 定义了一个结构清晰、功能丰富的博客系统。通过不同的模型和它们之间的关联，您实现了：
+## 2. BlogPage
 
-*   **内容管理：** `BlogPage` 和 `BlogIndexPage` 作为核心页面类型。
-*   **媒体管理：** 自定义的 `BlogImage` 和 `BlogDocument`。
-*   **内容组织：** `BlogCategory` (分类) 和 `BlogPageTag` + `Tag` (标签)。
-*   **内容增强：** `BlogPageGalleryImage` (画廊)。
-*   **作者管理：** `Author` Snippet。
-*   **用户交互和统计：** `PageView`, `PageViewCount`, `ReactionType`, `Reaction` (访问统计和用户反应)。
-*   **标签导航：** `BlogTagIndexPage` 作为标签过滤结果的展示页面。
-*   **外部存储集成：** 将 StreamField 内容存储到 MongoDB。
+`BlogPage` 继承 Wagtail `Page`，其 MySQL 字段包括：
 
-这些模型之间的关系通过 Django 的模型字段（`ForeignKey`, `ManyToManyField`, `ParentalKey`, `ParentalManyToManyField`）和 Wagtail 的特性（`Page` 继承，`Orderable` Mixin，Snippet 注册）以及您自定义的逻辑（例如 `BlogTagIndexPage` 的 `get_context` 方法）得以实现。
+- `date`：文章日期。
+- `intro`：文章简介和搜索摘要，保留在 MySQL，前台列表及搜索投影优先使用它。
+- `tags`、`categories`、`authors`：文章组织和筛选关系。
+- `featured_image`、`gallery_images`：媒体关系。
+- `body`：Wagtail `StreamField`，仅作为后台编辑、校验和序列化接口。正式保存时模型会暂时把它写成 `[]` 再调用父类保存，避免正文落入 MySQL；对象内存中的正文随后恢复。
+- `mongo_content_id`：可空的旧 `blog_content` 兼容指针。新页面和新版本不要求该字段；不能把它当作现代正文是否存在的判断条件。
 
-您的代码是一个很好的 Wagtail 博客项目示例，包含了许多高级功能和良好的设计实践。
+正文块仍保持原有 `rich_text`、`markdown_block`、`code_block`、`mermaid_chart`、媒体和表格等 StreamField key，尤其不能改变 `markdown_block` 的存储 key。
+
+## 3. MySQL 状态模型
+
+### BlogPublicationState
+
+每个 BlogPage 一行，以 `page_id` 为主键，保存正文指针而不是正文内容：
+
+- `draft_body_version_id`、`draft_body_sha256`、`draft_body_schema_version`：最新草稿正文版本。
+- `published_body_version_id`、`published_body_sha256`、`published_body_schema_version`：当前公开正文版本。
+- `publication_generation`：公开投影的单调代次，防止旧事件覆盖新事件。
+- `approved_revision_id` 及 approved body 字段：Workflow 审批通过时绑定的 Revision 和正文版本。
+
+State 与页面发布动作在同一 MySQL 事务中更新；Mongo 正文写入成功后才允许切换指针。
+
+### Wagtail Revision
+
+Revision 继续由 Wagtail 管理历史、预览、比较和恢复元数据。其 `content` 保存页面字段及 Mongo 指针（`mongo_body_version_id`、hash、schema version），不保存现代正文副本。
+
+历史预览/比较/恢复时，根据 Revision 指针读取 `content_body_versions`；指针缺失或正文校验失败必须报告明确错误，不能静默显示当前正式正文。早期没有 Mongo 指针的历史 Revision 才能走兼容读取路径。
+
+### 删除编排模型
+
+- `PageDeletionIntent`：页面级删除状态机，记录 manifest、step、租约、重试次数、已删计数和错误码。
+- `MongoCleanupIntent`：单个 Mongo 指针的精确清理意图，支持幂等、重试和死信状态。
+- `LegacyBlogRegistrationAudit`：旧文章登记现代正文版本的幂等审计记录。
+- `BlogPublicationConsistencyCheckpoint`：只读对账任务的游标、租约和统计，不参与发布写入。
+
+## 4. MongoDB 三个集合
+
+### content_body_versions
+
+现代正文的不可变版本库。关键字段为：`aggregate_type`、`aggregate_id`（BlogPage 主键）、`body_version_id`、`body_sha256`、`body_schema_version`、`body`、`created_at`。每次正式正文变化生成新版本，发布只切换 MySQL 的 `published_body_version_id`，不原地覆盖旧版本。
+
+### blog_page_revision_bodies
+
+Wagtail 草稿和历史 Revision 的正文快照库。关键字段为 Mongo 指针 `_id`、`page_id`、`body`、`created_at`。每次保存草稿或创建历史 Revision 可产生一条快照；它与 Wagtail `Revision` 的 `object_id`/指针配对，用于后台预览、比较和恢复。
+
+### blog_content（遗留）
+
+旧版可变正文集合，文档通常含 `_id`、`page_id`、`title`、`intro`、`body`。现代页面不再依赖它；只有没有现代 State/Revision 指针的遗留页面才允许兼容读取。新建、编辑和发布不能因为 `mongo_content_id` 为空而写入该集合。清理时必须按明确 ObjectId/指针逐条删除，不能按 `page_id` 无条件批量删除。
+
+## 5. 保存、发布和读取流程
+
+### 新建或编辑草稿
+
+1. Wagtail 接收表单并校验 StreamField。
+2. 写入 Mongo 不可变正文版本或 Revision 快照。
+3. Revision 内容记录 `mongo_body_version_id`、hash 和 schema version。
+4. MySQL `BlogPage.body` 以空列表持久化，`intro` 等元数据正常保存。
+5. 草稿不会写入公开搜索 Outbox，也不会进入公开 ES 文档。
+
+### 发布
+
+1. 锁定 BlogPage、State 和目标 Revision。
+2. 校验 Revision 指针、Mongo 正文、hash 和 schema version。
+3. 在同一 MySQL 事务中切换 `published_body_version_id` 并递增 `publication_generation`。
+4. Wagtail 完成发布后写入搜索 Outbox；Delivery Worker 将最新版本投影到 ES v005。
+5. 旧事件若 generation 较小，必须被拒绝，不能覆盖新文档。
+
+Workflow 审批和定时发布都必须在批准时、实际发布时再次校验 Revision 与正文版本是否漂移。
+
+### 前台读取
+
+BlogPage 详情页只读取 State 指向的 `published_body_version_id`。Mongo 不可用或正文无效时返回安全的空内容/错误状态，不能回退到草稿或其他正式版本。仅当 State 尚未建立时，才允许读取 `mongo_content_id` 指向的遗留 `blog_content`。
+
+### 取消发布
+
+取消发布在 MySQL 事务中清除公开状态并生成 tombstone Outbox；ES 仅保留不可搜索 tombstone，防止旧 upsert 重新出现。
+
+### 删除
+
+用户删除只创建 `PageDeletionIntent`，页面进入删除编排状态，不立即绕过清单删除 Mongo。Worker 按 manifest 和 `step`：
+
+1. 检查其他页面是否引用正文版本；发现共享引用则进入 `blocked_reference`。
+2. 投递 ES tombstone。
+3. 精确删除该页面在 `content_body_versions`、`blog_page_revision_bodies` 及明确遗留 `blog_content` 指针下的文档。
+4. 全部成功后才允许 Wagtail/MySQL 页面物理删除；部分失败保留已完成步骤并重试，超过阈值进入 `dead`。
+
+这样可以避免“先删 MySQL、Mongo 清理失败”造成孤儿正文，也能保证批量删除和单页删除使用同一条链路。
+
+## 6. 搜索边界
+
+Wagtail `search_fields` 保留 `title`、`intro`、`body_text`、日期、标签和分类声明，供框架兼容和索引构建使用；生产前台搜索实际读取 ES 内容索引。搜索文档由已发布 Mongo 正文和 MySQL 元数据组装，包含 `page_id`、正文版本 hash、`publication_generation` 和 `searchable` 标志，可通过 rebuild 完全重建。
+
+## 7. 数据保护与维护规则
+
+- `intro`、标题、权限和页面树不应迁移到 Mongo 代替 MySQL。
+- `body` 为空是现代存储设计的正常状态，不代表文章无正文。
+- `mongo_content_id` 可空，不得作为现代文章登记或搜索的必填条件。
+- 不得删除仍被 State、Revision、其他页面或清理意图引用的 Mongo 版本。
+- 对账优先只读；修复命令必须显式 `--apply`、幂等并记录 hash。
+- 生产 Mongo/ES 清理、迁移和 alias 切换必须先备份并取得单独授权。
+
+## 8. 与旧文档的差异
+
+旧版“`BlogPage.save()` 直接把正式正文写入 `blog_content`”和“`delete()` 同步删除 Mongo”描述已经废止。当前实现以不可变正文版本、State 指针、Wagtail Revision 快照、Outbox/Delivery 和删除状态机为准；旧集合只保留兼容读取和受控清理职责。

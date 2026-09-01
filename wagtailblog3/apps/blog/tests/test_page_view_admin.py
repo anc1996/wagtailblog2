@@ -11,8 +11,8 @@ from wagtail.models import Page
 from wagtail.models import Locale
 from wagtail.permissions import policy_registry
 
-from .admin import PageViewAdmin, PageViewSnippetViewSet
-from .models import PageView
+from ..admin import PageViewAdmin, PageViewSnippetViewSet
+from ..models import PageView
 
 
 @override_settings(

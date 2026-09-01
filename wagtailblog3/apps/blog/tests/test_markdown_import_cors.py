@@ -110,7 +110,7 @@ class MarkdownImportCorsTests(SimpleTestCase):
         self.assertEqual(response["Access-Control-Allow-Origin"], "http://opinion.people.com.cn")
 
     def test_userscript_uses_fetch_for_bearer_blog_requests(self):
-        script_path = Path(__file__).resolve().parents[2] / "static/vendor/Script/downlaod_markdown.js"
+        script_path = Path(__file__).resolve().parents[3] / "static/vendor/Script/downlaod_markdown.js"
         source = script_path.read_text(encoding="utf-8")
         start = source.index("async function requestBlog")
         end = source.index("\n        function setAbsoluteImageSources", start)
@@ -122,13 +122,13 @@ class MarkdownImportCorsTests(SimpleTestCase):
         self.assertNotIn("gmRequest(", request_blog)
 
     def test_userscript_uses_the_localized_markdown_import_api_path(self):
-        script_path = Path(__file__).resolve().parents[2] / "static/vendor/Script/downlaod_markdown.js"
+        script_path = Path(__file__).resolve().parents[3] / "static/vendor/Script/downlaod_markdown.js"
         source = script_path.read_text(encoding="utf-8")
 
         self.assertIn("new URL(`/zh-hans${path}`, `${origin}/`)", source)
 
     def test_userscript_renders_a_safe_bootstrap_error_notice(self):
-        script_path = Path(__file__).resolve().parents[2] / "static/vendor/Script/downlaod_markdown.js"
+        script_path = Path(__file__).resolve().parents[3] / "static/vendor/Script/downlaod_markdown.js"
         source = script_path.read_text(encoding="utf-8")
 
         self.assertIn("function renderBootstrapError(error)", source)
@@ -137,7 +137,7 @@ class MarkdownImportCorsTests(SimpleTestCase):
         self.assertIn("renderBootstrapError(error);", source)
 
     def test_userscript_creates_the_entry_before_extracting_article_content(self):
-        script_path = Path(__file__).resolve().parents[2] / "static/vendor/Script/downlaod_markdown.js"
+        script_path = Path(__file__).resolve().parents[3] / "static/vendor/Script/downlaod_markdown.js"
         source = script_path.read_text(encoding="utf-8")
         start = source.index("async function runModernApp()")
         root_creation = source.index("const root = createElement", start)
@@ -146,7 +146,7 @@ class MarkdownImportCorsTests(SimpleTestCase):
         self.assertIn("function loadArticleData()", source[root_creation:])
 
     def test_userscript_renders_the_site_field_without_self_insertion(self):
-        script_path = Path(__file__).resolve().parents[2] / "static/vendor/Script/downlaod_markdown.js"
+        script_path = Path(__file__).resolve().parents[3] / "static/vendor/Script/downlaod_markdown.js"
         source = script_path.read_text(encoding="utf-8")
         start = source.index("async function runModernApp()")
         app_source = source[start:]
@@ -156,7 +156,7 @@ class MarkdownImportCorsTests(SimpleTestCase):
         self.assertNotIn("form.insertBefore(form.lastChild, siteInput)", app_source)
 
     def test_userscript_isolates_its_form_and_runtime_version(self):
-        script_path = Path(__file__).resolve().parents[2] / "static/vendor/Script/downlaod_markdown.js"
+        script_path = Path(__file__).resolve().parents[3] / "static/vendor/Script/downlaod_markdown.js"
         source = script_path.read_text(encoding="utf-8")
 
         self.assertIn("// @version      0.3.19", source)
@@ -164,7 +164,7 @@ class MarkdownImportCorsTests(SimpleTestCase):
         self.assertIn("#zuihuitao-blog-import form{display:block!important}", source)
 
     def test_userscript_keeps_tampermonkey_capabilities_without_adguard_probe(self):
-        script_path = Path(__file__).resolve().parents[2] / "static/vendor/Script/downlaod_markdown.js"
+        script_path = Path(__file__).resolve().parents[3] / "static/vendor/Script/downlaod_markdown.js"
         source = script_path.read_text(encoding="utf-8")
 
         self.assertIn("// @grant        GM_getValue", source)
@@ -176,7 +176,7 @@ class MarkdownImportCorsTests(SimpleTestCase):
         self.assertIn("当前 userscript 管理器未提供 GM_xmlhttpRequest", source)
 
     def test_userscript_supports_the_three_new_article_containers(self):
-        script_path = Path(__file__).resolve().parents[2] / "static/vendor/Script/downlaod_markdown.js"
+        script_path = Path(__file__).resolve().parents[3] / "static/vendor/Script/downlaod_markdown.js"
         source = script_path.read_text(encoding="utf-8")
 
         expected_matches = (
@@ -199,7 +199,7 @@ class MarkdownImportCorsTests(SimpleTestCase):
         self.assertNotIn('{ "host": "www.12371.cn", "el": "body"', source)
 
     def test_userscript_supports_people_and_media_article_containers(self):
-        script_path = Path(__file__).resolve().parents[2] / "static/vendor/Script/downlaod_markdown.js"
+        script_path = Path(__file__).resolve().parents[3] / "static/vendor/Script/downlaod_markdown.js"
         source = script_path.read_text(encoding="utf-8")
 
         expected_matches = (
@@ -251,7 +251,7 @@ class MarkdownImportCorsTests(SimpleTestCase):
         self.assertNotIn("Access-Control-Allow-Credentials", response)
 
     def test_userscript_exposes_edit_link_only_for_the_current_successful_page(self):
-        script_path = Path(__file__).resolve().parents[2] / "static/vendor/Script/downlaod_markdown.js"
+        script_path = Path(__file__).resolve().parents[3] / "static/vendor/Script/downlaod_markdown.js"
         source = script_path.read_text(encoding="utf-8")
         start = source.index("async function runModernApp()")
         app_source = source[start:]
@@ -274,7 +274,7 @@ class MarkdownImportCorsTests(SimpleTestCase):
         self.assertIn("['success', 'partial_success'].includes(result.status)", app_source)
 
     def test_userscript_keeps_preflight_when_only_the_destination_changes(self):
-        script_path = Path(__file__).resolve().parents[2] / "static/vendor/Script/downlaod_markdown.js"
+        script_path = Path(__file__).resolve().parents[3] / "static/vendor/Script/downlaod_markdown.js"
         source = script_path.read_text(encoding="utf-8")
         start = source.index("async function runModernApp()")
         app_source = source[start:]
@@ -287,7 +287,7 @@ class MarkdownImportCorsTests(SimpleTestCase):
         self.assertIn("'/blog/api/markdown-import/duplicate-titles/'", app_source)
 
     def test_userscript_requires_preflight_and_confirmation_before_session_writes(self):
-        script_path = Path(__file__).resolve().parents[2] / "static/vendor/Script/downlaod_markdown.js"
+        script_path = Path(__file__).resolve().parents[3] / "static/vendor/Script/downlaod_markdown.js"
         source = script_path.read_text(encoding="utf-8")
 
         self.assertIn("createDraft.disabled = true;", source)

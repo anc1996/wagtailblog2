@@ -1042,3 +1042,9 @@ P0 可与 P1 并行，但 P1 必须吸收 P0 的真实字段证据；P2 与 P3 �
 - Mongo 三个集合按页面查询均为 0：`content_body_versions` 、`blog_page_revision_bodies` 、旧 `blog_content`。
 - Outbox/Delivery 的最终 tombstone 均已 `succeeded`；ES v005 仅保留 `searchable=false` tombstone 文档，前台 `type=all` 查询不再返回四篇标题。
 - 生产应用、maintenance Worker 日志无错误；该批证明单页和 Wagtail 8 批量删除都会经过新删除状态机并物理清理正文。
+#### 实施记录：模型说明同步（2026-09-01）
+
+- 状态：已完成文档同步，未修改运行时代码、数据库或服务。
+- 实际修改：重写 `wagtailblog3/apps/blog/models.md`，以当前 BlogPage、BlogPublicationState、Wagtail Revision、Mongo 三集合、Outbox/Delivery、ES v005 和删除状态机为准，明确 `body` 为空及 `mongo_content_id` 可空的现代语义。
+- 验证：文档内容与 `models.py`、`mongo.py`、搜索服务交叉核对；`git diff --check` 待本批统一执行。
+- 回滚点：恢复本次文档提交即可，不涉及数据回滚。

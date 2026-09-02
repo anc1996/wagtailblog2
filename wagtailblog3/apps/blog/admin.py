@@ -116,6 +116,8 @@ class MarkdownImportTokenSnippetViewSet(SnippetViewSet):
     menu_label = "Markdown 导入 Token"
     add_to_admin_menu = False
     add_view_class = MarkdownImportTokenCreateView
+    # Token 明文只在创建成功时展示一次；禁用 Wagtail 的“复制”动作，避免误导为可复制密钥。
+    copy_view_enabled = False
     ordering = ("-created_at",)
     panels = [FieldPanel("name"), FieldPanel("expires_at")]
     list_display = [

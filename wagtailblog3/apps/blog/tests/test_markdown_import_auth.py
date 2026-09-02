@@ -73,6 +73,7 @@ class MarkdownImportTokenSnippetTests(TestCase):
 
     def test_create_view_is_wired_and_internal_fields_are_hidden(self):
         self.assertIs(MarkdownImportTokenSnippetViewSet.add_view_class, MarkdownImportTokenCreateView)
+        self.assertFalse(MarkdownImportTokenSnippetViewSet.copy_view_enabled)
         self.assertEqual(
             [panel.field_name for panel in MarkdownImportTokenSnippetViewSet.panels],
             ["name", "expires_at"],

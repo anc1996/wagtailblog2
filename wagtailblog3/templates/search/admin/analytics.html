@@ -5,7 +5,6 @@
 
 {% block extra_css %}
     {{ block.super }}
-    {# 确保你已经运行了 collectstatic，或者你的静态文件服务正确配置 #}
     <link rel="stylesheet" href="{% static 'search/css/admin_analytics.css' %}">
 {% endblock %}
 
@@ -15,65 +14,127 @@
     {% trans "搜索分析" as search_analytics_title %}
     {% include "wagtailadmin/shared/header.html" with title=search_analytics_title icon="search" %}
 
-    {# 用于JS获取基础URL #}
-    <div id="search-analytics-url" data-url="{% url 'search_analytics' %}" style="display:none;"></div>
+    <div class="nice-padding search-analytics-container" data-search-analytics data-url="{% url 'search_analytics' %}">
+        <form class="analytics-filter" data-analytics-form>
+            <div class="range-fieldset" role="group" aria-label="{% trans '时间范围' %}">
+                <span class="range-label">{% trans "时间范围" %}</span>
+                <div class="range-controls" role="group" aria-label="{% trans '时间范围' %}">
+                    <button type="button" class="button button-small" data-range="today" aria-pressed="false">{% trans "今天" %}</button>
+                    <button type="button" class="button button-small" data-range="yesterday" aria-pressed="false">{% trans "昨天" %}</button>
+                    <button type="button" class="button button-small" data-range="last7" aria-pressed="false">{% trans "近 7 天" %}</button>
+                    <button type="button" class="button button-small" data-range="last14" aria-pressed="false">{% trans "近 14 天" %}</button>
+                    <button type="button" class="button button-small" data-range="last30" aria-pressed="true">{% trans "近 30 天" %}</button>
+                    <button type="button" class="button button-small" data-range="this_month" aria-pressed="false">{% trans "本月" %}</button>
+                    <button type="button" class="button button-small" data-range="last_month" aria-pressed="false">{% trans "上月" %}</button>
+                    <button type="button" class="button button-small" data-range="custom" aria-pressed="false">{% trans "自定义" %}</button>
+                </div>
+            </div>
+            <div class="custom-date-controls" data-custom-dates hidden>
+                <label for="analytics-from">{% trans "开始日期" %}</label>
+                <input id="analytics-from" name="from" type="date" aria-describedby="analytics-date-error">
+                <label for="analytics-to">{% trans "结束日期" %}</label>
+                <input id="analytics-to" name="to" type="date" aria-describedby="analytics-date-error">
+                <p id="analytics-date-error" class="analytics-field-error" data-date-error role="alert"></p>
+            </div>
+            <div class="analytics-control analytics-control-inline">
+                <label for="analytics-granularity">{% trans "趋势颗粒度" %}</label>
+                <select id="analytics-granularity" name="granularity">
+                    <option value="day">{% trans "日" %}</option>
+                    <option value="week">{% trans "周" %}</option>
+                    <option value="month">{% trans "月" %}</option>
+                </select>
+            </div>
+            <div class="analytics-control analytics-control-inline">
+                <label for="analytics-top-n">{% trans "热词数量" %}</label>
+                <select id="analytics-top-n" name="top_n">
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="4">4</option>
+                <option value="5">5</option>
+                <option value="6">6</option>
+                <option value="7">7</option>
+                <option value="8">8</option>
+                <option value="9">9</option>
+                <option value="10" selected>10</option>
+                </select>
+            </div>
+            <div class="analytics-actions">
+                <button type="submit" class="button button-primary">{% trans "应用" %}</button>
+                <button type="button" class="button button-secondary" data-analysis-reset>{% trans "重置" %}</button>
+            </div>
+        </form>
 
-    <div class="nice-padding search-analytics-container"> {# 添加了 search-analytics-container 类 #}
-        <h2>{% trans "热门搜索词" %}</h2>
-        {% if popular_searches %}
-            <ul class="popular-searches-list"> {# 添加了类名 #}
-                {% for search_item in popular_searches %}
-                    <li>
-                        <a href="{% url 'search:search' %}?query={{ search_item.query|urlencode }}" target="_blank">
-                            {{ search_item.query }}
-                        </a>
-                        ({{ search_item.hits }} {% trans "次" %})
-                    </li>
-                {% endfor %}
-            </ul>
-        {% else %}
-            <p>{% trans "暂无热门搜索词数据。" %}</p>
-        {% endif %}
+        <p class="help-block" data-analytics-scope>{% trans "当前提供按所选颗粒度、全部搜索的聚合数据。" %}</p>
+        <div class="analytics-status" role="status" aria-live="polite" data-status></div>
 
-        <h2>{% trans "搜索趋势 (最近 30 天)" %}</h2>
-        <div id="search-trends-container">
-            {% if search_trends %}
-                <table class="listing full-width search-trends-table table-sortable">
-                    <thead>
-                        <tr>
-                        {#  data-sort-by 用于 JS 知道点击此列时应该按哪个字段排序 (对应后端 analytics.py 中的键)#}
-                        {#  data-current-sort-direction 用于JS 知道当前此列的排序状态 (asc, desc, '')#}
-                        {#  class 根据 current_order_by (来自视图上下文) 设置初始的排序箭头显示#}
-                            <th class="sortable-header {% if current_order_by == 'date' %}sorted-asc{% elif current_order_by == '-date' %}sorted-desc{% endif %}"
-                                data-sort-by="date"
-                                data-current-sort-direction="{% if current_order_by == 'date' %}asc{% elif current_order_by == '-date' %}desc{% endif %}">
-                                {% trans "日期" %}
-                            </th>
-                            <th class="sortable-header {% if current_order_by == 'searches' %}sorted-asc{% elif current_order_by == '-searches' %}sorted-desc{% endif %}"
-                                data-sort-by="searches"
-                                data-current-sort-direction="{% if current_order_by == 'searches' %}asc{% elif current_order_by == '-searches' %}desc{% endif %}">
-                                {% trans "搜索量" %}
-                            </th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for day_stats in search_trends %}
-                            <tr>
-                                <td>{{ day_stats.daily_hits__date|date:"Y-m-d" }}</td>
-                                <td>{{ day_stats.total_searches }} {% trans "次" %}</td>
-                            </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            {% else %}
-                <p>{% trans "暂无搜索趋势数据。" %}</p>
-            {% endif %}
+        <div data-dashboard-region>
+            <div class="analytics-status" role="status" aria-live="polite" data-dashboard-status></div>
+            <section class="analytics-section" aria-labelledby="summary-title">
+                <h2 id="summary-title">{% trans "概览" %}</h2>
+                <dl class="analytics-summary" data-summary></dl>
+            </section>
+
+            <div class="analytics-visual-grid">
+                <section class="analytics-section" aria-labelledby="trend-title">
+                    <h2 id="trend-title">{% trans "搜索趋势" %}</h2>
+                    <div class="analytics-chart" data-trend-chart role="img" tabindex="0" aria-label="{% trans '按日搜索趋势柱状图，详细数值见图例。' %}"></div>
+                </section>
+
+                <section class="analytics-section" aria-labelledby="top-queries-title">
+                    <h2 id="top-queries-title">{% trans "热词搜索次数" %}</h2>
+                    <div class="top-query-layout">
+                        <div class="analytics-donut" data-top-queries-chart role="img" aria-label="{% trans '热门搜索词分布环形图，详细数据见图例。' %}">
+                            <div class="analytics-donut-hole"><strong data-donut-total>0</strong><span>{% trans "总次数" %}</span></div>
+                        </div>
+                        <div class="analytics-query-legend" data-top-queries-legend role="list" aria-label="{% trans '热门搜索词图例' %}"></div>
+                    </div>
+                    <p class="help-block">{% trans "点击热词可筛选下方聚合搜索记录；其他为其余热词汇总。" %}</p>
+                </section>
+            </div>
         </div>
+
+        <section class="analytics-section" aria-labelledby="records-title" data-records-region>
+            <div class="analytics-status" role="status" aria-live="polite" data-records-status></div>
+            <h2 id="records-title" tabindex="-1" data-records-title>{% trans "聚合搜索记录" %}</h2>
+            <form class="records-filter" data-records-form>
+                <div class="analytics-control">
+                    <label for="analytics-record-query">{% trans "查询词" %}</label>
+                    <input id="analytics-record-query" name="q" maxlength="100" autocomplete="off">
+                </div>
+                <div class="analytics-control analytics-control-inline">
+                    <label for="analytics-page-size">{% trans "每页" %}</label>
+                    <select id="analytics-page-size" name="page_size">
+                        <option value="20" selected>20</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                    </select>
+                </div>
+                <fieldset class="records-columns">
+                    <legend>{% trans "列设置" %}</legend>
+                    <label><input type="checkbox" name="column" value="date" checked> {% trans "日期" %}</label>
+                    <label><input type="checkbox" name="column" value="query" checked> {% trans "查询词" %}</label>
+                    <label><input type="checkbox" name="column" value="hits" checked> {% trans "次数" %}</label>
+                </fieldset>
+                <div class="analytics-actions">
+                    <button type="submit" class="button button-primary">{% trans "应用" %}</button>
+                    <button type="button" class="button button-secondary" data-records-reset>{% trans "重置" %}</button>
+                </div>
+            </form>
+            <div class="table-scroll">
+                <table class="listing full-width" data-records-table>
+                    <caption class="visually-hidden">{% trans "聚合搜索记录" %}</caption>
+                    <thead><tr><th data-column="date">{% trans "日期" %}</th><th data-column="query">{% trans "查询词" %}</th><th data-column="hits">{% trans "次数" %}</th></tr></thead>
+                    <tbody data-records-body></tbody>
+                </table>
+            </div>
+            <nav class="analytics-pagination" data-pagination aria-label="{% trans '聚合搜索记录分页' %}"></nav>
+        </section>
+
     </div>
 {% endblock %}
 
 {% block extra_js %}
     {{ block.super }}
-    {# 确保你已经运行了 collectstatic #}
-    <script src="{% static 'search/js/admin_analytics.js' %}"></script>
+    <script src="{% static 'search/js/admin_analytics.js' %}" defer></script>
 {% endblock %}

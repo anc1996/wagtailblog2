@@ -200,16 +200,6 @@ def search(request: Any) -> Any:
 		logger.error(f"获取热门搜索词失败: {e}", exc_info=True)
 		context["popular_search_terms"] = []
 
-	if context["search_query"]:
-		try:
-			SearchAnalytics.log_search(
-				context["search_query"],
-				results_count=context["search_results"].paginator.count,
-				search_type=context["search_type"],
-			)
-		except Exception as e:
-			logger.error(f"记录搜索分析错误: {e}", exc_info=True)
-
 	return TemplateResponse(request, "search/search.html", context)
 
 

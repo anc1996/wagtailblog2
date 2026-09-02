@@ -1,61 +1,480 @@
-/* search/static/search/css/admin_analytics.css */
-
-.search-analytics-container .table-sortable th {
-    cursor: pointer;
-    position: relative;
-    white-space: nowrap; /* 防止表头文字换行 */
+/* 搜索分析沿用 Wagtail 管理后台 token，避免引入独立视觉体系。 */
+.search-analytics-container {
+    width: min(100%, 1440px);
+    max-width: 1440px;
+    margin-inline: auto;
 }
 
-.search-analytics-container .table-sortable th::after {
-    content: "\2195"; /* Up-down arrow Unicode */
-    font-size: 0.8em;
-    margin-left: 6px;
+.analytics-filter,
+.custom-date-controls,
+.range-controls,
+.analytics-pagination {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.analytics-filter {
+    display: grid;
+    grid-template-columns: minmax(240px, 1fr) repeat(3, minmax(130px, 180px)) auto;
+    align-items: end;
+    padding-block: 8px 16px;
+    border-bottom: 1px solid var(--w-color-border-furniture);
+    gap: 16px;
+}
+
+.analytics-filter fieldset {
+    border: 0;
+    margin: 0;
+    padding: 0;
+    grid-column: 1 / -1;
+}
+
+/* 时间范围改用语义化 div，保留与 fieldset 相同的网格占位。 */
+.analytics-filter .range-fieldset {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+    margin: 0;
+    grid-column: 1 / -1;
+}
+
+.range-label {
+    display: block;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.analytics-filter legend {
+    margin-bottom: 4px;
+    font-weight: 600;
+}
+
+.range-picker { position: relative; display: inline-block; max-width: 100%; }
+.range-trigger { min-height: 44px; max-width: 100%; overflow-wrap: anywhere; }
+.range-menu { position: absolute; z-index: 20; top: calc(100% + 6px); left: 0; width: min(520px, calc(100vw - 32px)); padding: 12px; border: 1px solid var(--w-color-border-furniture); background: var(--w-color-surface-page, #fff); box-shadow: 0 4px 14px rgb(0 0 0 / 18%); }
+.range-menu .range-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
+.range-menu .custom-date-controls { margin-top: 12px; }
+.range-menu-actions { display: flex; justify-content: flex-end; grid-column: 1 / -1; margin-top: 4px; }
+
+.analytics-filter input,
+.analytics-filter select,
+.range-controls .button,
+.analytics-pagination .button {
+    min-height: 44px;
+}
+
+.analytics-control {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.analytics-control-inline {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+}
+
+.analytics-control-inline label {
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
+.analytics-control-inline select {
+    min-width: 76px;
+    width: 100%;
+}
+
+.custom-date-controls {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: auto minmax(180px, 1fr) auto minmax(180px, 1fr);
+    align-items: center;
+    gap: 8px;
+}
+
+.custom-date-controls input {
+    width: 100%;
+}
+
+.analytics-field-error {
+    grid-column: 1 / -1;
+}
+
+.analytics-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.records-filter {
+    display: grid;
+    grid-template-columns: minmax(240px, 1fr) auto minmax(260px, 1fr) auto;
+    align-items: end;
+    gap: 12px;
+    padding: 12px;
+    border: 1px solid var(--w-color-border-furniture);
+    background: var(--w-color-surface-field, #f7f7f7);
+}
+
+/* 原生 input 会被 Wagtail 的基础重置样式压缩为无边框文本，查询框需要明确的可视边界。 */
+.records-filter input[name="q"] {
+    width: 100%;
+    min-height: 44px;
+    padding: 0 16px;
+    border: 1px solid var(--w-color-border-furniture);
+    border-radius: 3px;
+    background: var(--w-color-surface-page, #fff);
+    color: var(--w-color-text-label, #333);
+    font: inherit;
+}
+
+.records-filter input[name="q"]:focus {
+    outline: 3px solid var(--w-color-focus, #007d7e);
+    outline-offset: 1px;
+}
+
+.records-columns {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 44px;
+    margin: 0;
+    padding: 8px 12px;
+    border: 1px solid var(--w-color-border-furniture);
+}
+
+.records-columns legend {
+    margin-inline-end: 4px;
+    font-weight: 600;
+}
+
+.analytics-section {
+    margin-top: 28px;
+}
+
+.analytics-visual-grid {
+    min-width: 0;
+}
+
+.analytics-visual-grid > .analytics-section {
+    min-width: 0;
+}
+
+.analytics-section h2 {
+    margin-bottom: 12px;
+}
+
+.analytics-status {
+    min-height: 24px;
+    margin-top: 8px;
     color: var(--w-color-text-meta);
-    position: absolute; /* 绝对定位，方便控制 */
-    right: 8px;      /* 靠右显示 */
-    top: 50%;
-    transform: translateY(-50%); /* 垂直居中 */
 }
 
-.search-analytics-container .table-sortable th.sorted-asc::after {
-    content: "\2191"; /* Up arrow Unicode */
-    color: var(--w-color-text-label);
+.analytics-status.is-error {
+    color: var(--w-color-critical-200, #b00020);
 }
 
-.search-analytics-container .table-sortable th.sorted-desc::after {
-    content: "\2193"; /* Down arrow Unicode */
-    color: var(--w-color-text-label);
+.analytics-field-error {
+    width: 100%;
+    margin: 0;
+    color: var(--w-color-critical-200, #b00020);
 }
 
-/* 给表格一些基本的Wagtail风格的边框和内边距，如果listing类没有完全覆盖 */
-.search-analytics-container .search-trends-table {
-    margin-top: 1em;
-    border-collapse: collapse; /* 确保边框合并 */
+.analytics-summary {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+    margin: 0;
 }
 
-.search-analytics-container .search-trends-table td,
-.search-analytics-container .search-trends-table th {
-    padding: 0.6em 0.8em; /* 调整内边距以匹配Wagtail风格 */
-    border: 1px solid var(--w-color-border-furniture); /* Wagtail边框颜色 */
-    text-align: left;
+.analytics-summary > div {
+    border: 1px solid var(--w-color-border-furniture);
+    padding: 12px;
 }
 
-.search-analytics-container .search-trends-table th {
-    background-color: var(--w-color-surface-header); /* Wagtail表头背景色 */
-    font-weight: bold;
+.analytics-summary dt {
+    color: var(--w-color-text-meta);
+    font-size: 14px;
 }
 
-/* 热门搜索词列表样式调整 */
-.popular-searches-list {
-    list-style-type: disc; /* 使用项目符号 */
-    padding-left: 20px; /* 增加内边距 */
+.analytics-summary dd {
+    margin: 6px 0 0;
+    font-size: 24px;
+    font-weight: 650;
 }
-.popular-searches-list li {
-    margin-bottom: 0.5em;
+
+.analytics-chart {
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    gap: 6px;
+    min-height: 200px;
+    overflow-x: auto;
+    padding: 12px 4px 4px;
+    border-bottom: 1px solid var(--w-color-border-furniture);
 }
-.popular-searches-list a {
-    text-decoration: none;
+
+.analytics-bar {
+    display: flex;
+    flex: 0 0 34px;
+    height: 176px;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
 }
-.popular-searches-list a:hover {
-    text-decoration: underline;
+
+.analytics-bar-value,
+.analytics-bar-label {
+    color: var(--w-color-text-meta);
+    font-size: 12px;
+}
+
+.analytics-bar-fill {
+    width: 18px;
+    min-height: 1px;
+    margin: 4px 0;
+    background: var(--w-color-primary);
+}
+
+.top-query-layout {
+    display: grid;
+    grid-template-columns: minmax(220px, 320px) minmax(0, 1fr);
+    align-items: center;
+    gap: 28px;
+}
+
+.analytics-donut {
+    display: grid;
+    width: min(100%, 300px);
+    aspect-ratio: 1;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--analytics-donut, var(--w-color-surface-field));
+}
+
+.analytics-donut-hole {
+    display: grid;
+    width: 56%;
+    aspect-ratio: 1;
+    place-items: center;
+    align-content: center;
+    border-radius: 50%;
+    background: var(--w-color-surface-page, #fff);
+    text-align: center;
+}
+
+.analytics-donut-hole strong { font-size: 24px; }
+.analytics-donut-hole span { color: var(--w-color-text-meta); font-size: 12px; }
+
+.analytics-query-legend { display: grid; gap: 8px; min-width: 0; }
+.analytics-query-legend-item { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
+.analytics-query-swatch { width: 12px; height: 12px; flex: 0 0 12px; margin-top: 5px; border-radius: 2px; }
+.analytics-query-legend-content { display: flex; min-width: 0; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+.analytics-query-link, .analytics-query-other { padding: 0; border: 0; background: transparent; color: inherit; font-weight: 600; overflow-wrap: anywhere; text-align: left; }
+.analytics-query-link { color: var(--w-color-primary); cursor: pointer; text-decoration: underline; }
+.analytics-query-link:focus-visible {
+    outline: 3px solid var(--w-color-focus, #007d7e);
+    outline-offset: 2px;
+}
+.analytics-query-meta { color: var(--w-color-text-meta); white-space: nowrap; }
+
+.range-controls .button:focus-visible,
+.analytics-pagination .button:focus-visible,
+.analytics-filter .button:focus-visible {
+    outline: 3px solid var(--w-color-focus, #007d7e);
+    outline-offset: 2px;
+}
+
+.table-scroll {
+    margin-top: 12px;
+    overflow-x: auto;
+}
+
+.analytics-pagination {
+    margin-top: 12px;
+}
+
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+[aria-busy="true"] .analytics-summary,
+[aria-busy="true"] .analytics-chart {
+    opacity: .55;
+}
+
+@media (min-width: 701px) and (max-width: 1199px) {
+    .analytics-filter {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .custom-date-controls,
+    .analytics-actions {
+        grid-column: 1 / -1;
+    }
+
+    .records-filter {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .records-columns,
+    .records-filter .analytics-actions {
+        grid-column: 1 / -1;
+    }
+}
+
+@media (min-width: 1200px) {
+    .analytics-filter {
+        grid-template-columns: minmax(0, 1fr) max-content max-content max-content;
+        align-items: end;
+        justify-content: start;
+    }
+
+    .analytics-filter .range-fieldset {
+        display: flex;
+        grid-column: auto;
+        min-width: max-content;
+        width: max-content;
+        max-width: 100%;
+        align-items: center;
+        flex-direction: row;
+        flex-wrap: nowrap;
+        gap: 10px;
+    }
+
+    .analytics-filter .range-fieldset .range-label {
+        margin: 0;
+        white-space: nowrap;
+        font-weight: 600;
+    }
+
+    .analytics-filter .range-picker {
+        width: auto;
+        flex: 0 0 auto;
+    }
+
+    .analytics-filter .range-trigger {
+        width: auto;
+        min-width: 0;
+        white-space: nowrap;
+        text-align: left;
+    }
+
+    .analytics-filter .analytics-control-inline {
+        min-width: 0;
+        justify-content: flex-start;
+    }
+
+    .analytics-filter .analytics-control-inline select {
+        width: auto;
+        min-width: 84px;
+    }
+
+    .analytics-filter .analytics-actions {
+        align-self: end;
+        white-space: nowrap;
+    }
+
+    .analytics-visual-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+        align-items: start;
+        gap: 32px;
+    }
+
+    .analytics-visual-grid > .analytics-section {
+        margin-top: 28px;
+    }
+
+    .analytics-visual-grid .analytics-chart {
+        min-width: 0;
+    }
+
+    .analytics-visual-grid .top-query-layout {
+        grid-template-columns: minmax(180px, 260px) minmax(0, 1fr);
+        gap: 20px;
+    }
+
+    .analytics-visual-grid .analytics-donut {
+        width: min(100%, 260px);
+    }
+}
+
+@media (max-width: 700px) {
+    .analytics-filter {
+        grid-template-columns: 1fr;
+        align-items: stretch;
+    }
+
+    .analytics-filter fieldset,
+    .analytics-filter .range-fieldset,
+    .analytics-control,
+    .analytics-actions,
+    .custom-date-controls {
+        width: 100%;
+    }
+
+    .analytics-filter .range-picker {
+        display: block;
+        width: 100%;
+    }
+
+    .analytics-filter .range-trigger {
+        width: 100%;
+    }
+
+    .custom-date-controls {
+        grid-template-columns: 1fr;
+    }
+
+    .custom-date-controls label,
+    .custom-date-controls input,
+    .analytics-field-error {
+        grid-column: 1;
+    }
+
+    .analytics-actions .button {
+        flex: 1;
+    }
+
+    .records-filter {
+        grid-template-columns: 1fr;
+    }
+
+    .records-columns {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .analytics-summary {
+        grid-template-columns: 1fr;
+    }
+
+    .analytics-chart {
+        justify-content: flex-start;
+    }
+
+    .top-query-layout {
+        grid-template-columns: 1fr;
+        gap: 16px;
+    }
+
+    .analytics-donut {
+        width: min(100%, 240px);
+        margin-inline: auto;
+    }
 }

@@ -7,6 +7,7 @@ from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import connection, connections
 from django.test import SimpleTestCase, TestCase, override_settings
+from django.utils import timezone
 
 from search.models import (
     ContentSearchTarget,
@@ -45,8 +46,8 @@ class ContentSearchQueryTests(SimpleTestCase):
             result = perform_search("Django", "blog")
 
         self.assertIs(result, independent_results)
-        build_results.assert_called_once_with("Django", start_date=None, end_date=None, order_by=None)
-        get_query.return_value.add_hit.assert_called_once_with()
+        build_results.assert_called_once_with("django", start_date=None, end_date=None, order_by=None)
+        get_query.return_value.add_hit.assert_called_once_with(date=timezone.localdate())
         build_base_qs.assert_not_called()
 
     def test_all_search_always_routes_to_the_federated_builder(self):
@@ -58,7 +59,7 @@ class ContentSearchQueryTests(SimpleTestCase):
             result = perform_search("Django", "all")
 
         self.assertIs(result, federated_results)
-        builder.assert_called_once_with("Django", start_date=None, end_date=None, order_by=None)
+        builder.assert_called_once_with("django", start_date=None, end_date=None, order_by=None)
 
     @override_settings(
         CONTENT_SEARCH_INDEX_PREFIX="wagtailblog-test-content",

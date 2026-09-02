@@ -483,6 +483,8 @@ Elasticsearch unified typed projection
 - 不在未备份、未对账、未授权时回收 Mongo 正文或历史快照。
 - 不在当前阶段引入 Mongo 分片、MySQL 分区或千万级 Article 运行代码。
 
+搜索热词与分析后台的独立方案、数据分层、趋势图和后续实施批次已迁移至 [30-搜索热词与搜索分析方案.md](30-搜索热词与搜索分析方案.md)。本文继续保留正文存储、Revision、Mongo 生命周期、删除链路及既有搜索发布链路的历史实施记录；后续搜索分析变更统一登记在 30 号说明书。
+
 ## 10. 主要代码与运维边界
 
 | 范围 | 主要位置 | 职责 |
@@ -1064,3 +1066,27 @@ P0 可与 P1 并行，但 P1 必须吸收 P0 的真实字段证据；P2 与 P3 �
 - 实际修改：将根测试包中的首页、基础设置、博客统计/Feed/质量、日志测试分别移入 `home/tests/`、`base/tests/`、`blog/tests/`、`observability/tests/`；将 `comments/tests.py` 和 `content_ai/tests.py` 转为同应用测试包；删除仅用于旧根包的空 `__init__.py`；修正路径断言、`content_ai` 绝对导入和首页资源版本断言。
 - 验证：应用标签测试 56 项通过；日志配置/过滤/辅助测试 22 项通过；`manage.py check`、目标 `compileall`、`git diff --check` 通过。全量自动发现 726 项仍有 3 个既有断言失败、2 个既有包重复导入错误（`wagtailblog3.apps.blog.tests.*` 模型未注册及草稿 SimpleTestCase 数据库访问），不属于目录迁移引入的运行时回归，后续应单独治理测试入口和遗留用例。
 - 回滚点与残余风险：未提交。回滚为恢复被移动文件和旧包初始化文件；当前测试命令应优先使用 `home.tests`、`base.tests`、`blog.tests`、`observability.tests`、`comments.tests`、`content_ai.tests` 等应用标签，避免项目根目录自动发现重复导入。
+
+#### 实施记录：热门搜索统计口径修复（2026-09-01）
+- 背景证据：Wagtail `QueryDailyHits` 每个查询每天一行，真实搜索次数存放在 `hits` 字段。旧实现使用 `Count(daily_hits)`，统计的是活跃天数/聚合行数；例如测试库中 `django` 关联 9 行但累计 `hits` 为 281，导致热门词排序与实际搜索量不一致。`type=all` 联邦搜索此前未调用 `Query.add_hit()`，因此该入口的近期搜索不会进入热词统计。
+- 实际修改：`wagtailblog3/apps/search/analytics.py` 的热门词和趋势改用 `Sum(daily_hits__hits)`，日期边界改用 Django 时区本地日期；`wagtailblog3/apps/search/services/suggestions.py` 与 `apps/search/core.py` 的旧/新建议通道同步按真实 `hits` 求和；`perform_search(search_type='all')` 在联邦搜索成功后记录一次 Query hit，失败路径不虚增统计。未改变“热门搜索”的产品语义，也未将其改成“最近搜索”。
+- 测试：新增 `wagtailblog3/apps/search/tests/test_search_analytics.py`，覆盖跨天累计、每日趋势、建议排序和 `all` 埋点；`python manage.py test search.tests.test_search_analytics --keepdb` 4 项通过；既有 `search.tests.test_search_wp5` 11 项通过。测试库首次运行遇到历史测试数据库已存在，改用 `--keepdb` 后正常完成，属于环境残留而非代码失败。
+- 验证与影响：`manage.py check` 通过（仅保留既有 W036 条件唯一约束警告）；本批只修改搜索统计 Python 代码和测试，不写入生产 MySQL/MongoDB/Elasticsearch，不切换 alias，不重启服务。需在后续发布门禁中执行完整搜索回归并观察热词数据。
+- 模型/推理强度实际使用：统计口径核对使用常规 Django/Wagtail 分析强度；实现采用局部 Terra 级修改思路，未触及跨服务数据迁移或生产索引切换，因此未升级 Sol。
+- 回滚点与残余风险：可回退本批三个运行时代码文件和新增测试；历史 `QueryDailyHits` 数据无需迁移，修复上线后按查询实时聚合即可。当前页面 AJAX 搜索不会动态刷新热门词区域，用户看到的热门词仍是页面加载时快照；如产品需要“最近搜索”，应另行设计独立的用户/会话近期词通道，不能复用热门统计。
+
+#### 实施记录：搜索分析分页边界与浏览器验收（2026-09-01）
+- 状态：已完成，仍未提交或发布生产。
+- 实际修改：后台今日搜索词分页改用 Django `Paginator.get_page()`；越界页码回退到最后一页，空结果稳定返回第 1 页，避免 `EmptyPage` 导致错误或误显示空数据。
+- 测试：新增越界页码、页大小边界、空结果、非员工访问和查询词 URL 转义测试；`search.tests.test_search_analytics` 10 项通过，联同既有搜索测试共 24 项通过；`manage.py check`、`compileall`、`git diff --check` 均通过。保留既有 Wagtail/MySQL 条件唯一约束警告（W036）。
+- browser-skill：测试环境 `/admin/search-analytics/` 真实筛选“测试”后返回“测试网页”“测试”两项；网络请求为 HTTP 200，状态提示“已更新”；控制台仅有外部 CDN 跟踪防护警告，无本次 JS 异常。session `crtq` 已按规范关闭，未生成 Playwright 产物。
+- 数据与服务影响：仅读取测试库 `QueryDailyHits` 并通过 AJAX 返回聚合结果，未写入 MySQL、MongoDB、Elasticsearch、alias 或生产服务。
+- 后续门禁：提交前需在 WSL2 再执行完整受影响测试并检查 staged diff；生产发布仍需用户单独授权、备份和服务验收。
+
+#### 方案与实施记录：搜索分析后台增强（2026-09-01）
+- 现状与边界：现有 `QueryDailyHits` 只保存“查询词-日期”的聚合次数，不保存用户、会话、IP 或每次请求明细。因此后台“今日搜索记录”定义为当天查询词聚合列表，不伪装成用户行为明细；热门词继续表示时间窗口内累计次数，不能与最近搜索混用。
+- 目标：在 `/admin/search-analytics/` 增加今日查询词列表，支持按词筛选、每页 20/50/100、上一页/下一页和页码跳转；通过同一 staff 保护的 AJAX URL 返回 JSON。趋势区域增加轻量柱状图，保留下方精确表格作为无障碍和审计数据源，不引入新的前端图表依赖。
+- 实际修改：`SearchAnalytics.get_today_searches()` 按 `timezone.localdate()`、`hits__gt=0` 查询并按次数降序；`search_analytics_view` 增加 `view=today` JSON 分支、查询词长度与页大小边界；新增 `_today_searches.html` 分页片段；`admin_analytics.js` 增加筛选/翻页/跳页 AJAX 和安全文本转义，CSS 增加响应式筛选栏、分页与趋势柱状图样式。所有新注释使用中文，未改变搜索写入、Mongo、ES 或发布链路。
+- 测试与验证：新增今日列表过滤/日期边界测试；`python manage.py test search.tests.test_search_analytics search.tests.test_search_wp5 --keepdb` 16 项通过；`python manage.py check`、`compileall`、`git diff --check` 通过。测试栈 `0.0.0.0:8080`、隔离 maintenance worker、Beat、Filebeat 均已运行。
+- 企业化后续建议（未在本批实现）：若要分析用户/会话漏斗，应新增脱敏事件表或日志数据仓库，定义保留期、采样、权限和隐私策略；报表可增加无结果率、点击率、热门词趋势、搜索类型分布和按日/周/月对比。高数据量场景应将聚合结果异步写入专用分析表，避免后台实时扫描明细表。
+- 模型/推理强度实际使用：采用 Terra 级 Django/Wagtail 实现与 UI 规则核对；未涉及生产数据迁移、索引切换或隐私字段新增，未升级 Sol。回滚仅需恢复本批搜索后台代码、模板、静态资源与测试文件。

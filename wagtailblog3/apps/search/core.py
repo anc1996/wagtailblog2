@@ -11,8 +11,10 @@ from datetime import datetime
 from typing import Any, Iterable, Mapping, Sequence
 
 from django.conf import settings
-from django.db.models import Count
+from django.db.models import IntegerField, Sum
+from django.db.models.functions import Coalesce
 from django.utils.html import strip_tags
+from django.utils import timezone
 from django.utils.text import Truncator
 from wagtail.models import Page
 from wagtail.contrib.search_promotions.models import Query
@@ -20,6 +22,7 @@ from wagtail.search.backends import get_search_backend
 from wagtail.search.index import SearchField
 
 from blog.models import BlogPage
+from .analytics import normalise_search_query
 from .services.content_query import (
 	ContentSearchQueryUnavailable,
 	build_content_search_results,
@@ -283,7 +286,20 @@ def _parse_date(date_val: Any) -> Any:
 
 
 def _clean_query(query_string: str) -> str:
-	return re.sub(r'["“”]', '', query_string).strip()
+	"""兼容旧调用名，但必须使用 Wagtail 的查询词规范化规则。"""
+
+	return normalise_search_query(query_string)
+
+
+def _record_search_hit(query_string: str) -> None:
+	"""在一次成功的检索路径结束后仅记录一次 Wagtail 命中。"""
+
+	try:
+		# 统计报表按站点本地日聚合；显式传入本地日期，避免 UTC 与本地时区跨日时桶错位。
+		Query.get(query_string).add_hit(date=timezone.localdate())
+	except Exception as error:
+		# 统计失败不应使公开搜索不可用；P1 将以 Redis 缓冲替代该同步写入。
+		logger.warning("记录搜索词命中次数失败: %s", error)
 
 
 # =============================================================================
@@ -330,10 +346,6 @@ def _build_search_results_for_queryset(
 			operator='or',
 			order_by_relevance=order_by not in ('date', '-date'),
 		)
-		try:
-			Query.get(clean_query).add_hit()
-		except Exception as error:
-			logger.warning(f"记录搜索词命中次数失败: {error}")
 		if not getattr(settings, "SEARCH_HIGHLIGHTS_ENABLED", True):
 			return compiled_results
 		query_compiler = getattr(compiled_results, "query_compiler", None)
@@ -402,26 +414,25 @@ def perform_search(
 		except ContentSearchQueryUnavailable as error:
 			logger.error("content_search_query_unavailable code=%s", error.code)
 			raise SearchUnavailableError("内容搜索服务暂时不可用") from error
-		try:
-			Query.get(query_string).add_hit()
-		except Exception as error:
-			logger.warning(f"记录搜索词命中次失败: {error}")
+		_record_search_hit(clean_query)
 		return content_results
 
 	if search_type == "all":
 		try:
-			return build_federated_search_results(
+			results = build_federated_search_results(
 				clean_query,
 				start_date=parsed_start,
 				end_date=parsed_end,
 				order_by=order_by,
 			)
+			_record_search_hit(clean_query)
+			return results
 		except ContentSearchQueryUnavailable as error:
 			logger.error("federated_search_unavailable code=%s", error.code)
 			raise SearchUnavailableError("全站搜索服务暂时不可用") from error
 
 	qs = _build_base_qs(search_type, parsed_start, parsed_end, order_by)
-	return _build_search_results_for_queryset(
+	results = _build_search_results_for_queryset(
 		qs,
 		clean_query,
 		search_type=search_type,
@@ -429,6 +440,8 @@ def perform_search(
 		end_date=parsed_end,
 		order_by=order_by,
 	)
+	_record_search_hit(clean_query)
+	return results
 
 
 # =============================================================================
@@ -475,6 +488,7 @@ def format_search_results_for_api(search_results: Iterable[Any]) -> list[dict[st
 # 搜索联想建议
 # =============================================================================
 def get_search_suggestions(query_string: str, limit: int = 5) -> list[dict[str, Any]]:
+	query_string = normalise_search_query(query_string)
 	if not query_string or len(query_string) < 2:
 		return []
 	if getattr(settings, "SEARCH_SUGGESTIONS_V2_ENABLED", False):
@@ -485,7 +499,9 @@ def get_search_suggestions(query_string: str, limit: int = 5) -> list[dict[str, 
 		suggestions = Query.objects.filter(
 			query_string__icontains=query_string
 		).annotate(
-			total_hits_count=Count('daily_hits')
+			total_hits_count=Coalesce(
+				Sum('daily_hits__hits'), 0, output_field=IntegerField()
+			)
 		).order_by('-total_hits_count')[:limit]
 
 		return [

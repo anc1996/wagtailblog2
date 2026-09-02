@@ -6,10 +6,12 @@ import re
 from typing import Any
 
 from django.conf import settings
-from django.db.models import Count
+from django.db.models import IntegerField, Sum
+from django.db.models.functions import Coalesce
 from wagtail.contrib.search_promotions.models import Query
 
 from blog.models import BlogPage
+from search.analytics import normalise_search_query
 from search.services.content_query import content_search_read_alias, get_content_search_serving_target
 from search.services.content_index import validate_content_index_name
 from search.services.elasticsearch import _read_error, _response_body, get_content_search_client
@@ -20,7 +22,7 @@ _CONTROL_OR_MARKUP = re.compile(r"[\x00-\x1f\x7f<>]")
 
 def _safe_suggestion_text(value: object) -> str:
     """限制建议文本长度并拒绝控制字符/HTML 标记。"""
-    value = str(value or "").strip()
+    value = normalise_search_query(value)
     if len(value) < 2 or len(value) > 100 or _CONTROL_OR_MARKUP.search(value):
         return ""
     return value
@@ -32,14 +34,23 @@ def get_popular_query_suggestions(
     """从 Wagtail 统计表读取热门词；查询异常降级为空列表。"""
     """热门搜索词仍来自统计表，但只在新建议 flag 开启时公开。"""
 
+    query_string = normalise_search_query(query_string)
     if not query_string or len(query_string) < 2:
         return []
     try:
+        safe_limit = min(max(int(limit), 1), 10)
+    except (TypeError, ValueError):
+        safe_limit = 5
+    try:
         suggestions = (
             Query.objects.filter(query_string__icontains=query_string)
-            .annotate(total_hits_count=Count("daily_hits"))
+            .annotate(
+                total_hits_count=Coalesce(
+                    Sum("daily_hits__hits"), 0, output_field=IntegerField()
+                )
+            )
             .filter(total_hits_count__gt=0)
-            .order_by("-total_hits_count", "query_string")[:limit]
+            .order_by("-total_hits_count", "query_string")[:safe_limit]
         )
         return [
             {"query": safe_query, "hits": item.total_hits_count, "source": "popular"}

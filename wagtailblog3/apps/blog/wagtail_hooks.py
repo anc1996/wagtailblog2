@@ -21,6 +21,7 @@ from wagtail import hooks
 from wagtail.models import Page, Site
 from wagtail.admin.views.reports import ReportView
 from wagtail.admin.menu import MenuItem
+from wagtail.admin.widgets.button import Button
 from wagtail.admin.ui.tables import Column, Table
 from wagtail.admin.auth import require_admin_access
 from wagtail.admin.rich_text.editors.draftail import features as draftail_features
@@ -33,7 +34,7 @@ from .admin import (
 	TagsSnippetViewSet,
 )
 from .models import PageViewCount
-from .models import BlogPage
+from .models import BlogPage, MarkdownImportToken
 from .services.page_deletion import request_page_deletion
 from .services.content_analytics import ContentAnalyticsFilters, ContentAnalyticsQueryService
 from .admin_image_upload import upload_vditor_image
@@ -184,7 +185,7 @@ def register_page_views_report_url():
 			if not request.user.has_perm('blog.view_pageviewcount'):
 				raise PermissionDenied
 			return super().dispatch(request, *args, **kwargs)
-		
+
 		def get_queryset(self):
 			# 只查询存在聚合记录的页面，并在数据库层汇总总访问量和唯一访问量。
 			queryset = Page.objects.filter(
@@ -193,45 +194,45 @@ def register_page_views_report_url():
 				total_views=Sum('view_counts__view_count_v2'),
 				total_unique_views=Sum('view_counts__unique_visitor_count_v2')
 			)
-			
+
 			# 标题筛选保持在数据库层执行，避免报告页加载全部页面后再过滤。
 			search_query = self.request.GET.get('q', '')
 			if search_query:
 				# 标题搜索
 				queryset = queryset.filter(title__icontains=search_query)
-			
+
 			# 只接受数字范围，忽略非法输入，避免把无效参数传给 ORM。
 			min_views = self.request.GET.get('min_views', '')
 			max_views = self.request.GET.get('max_views', '')
-			
+
 			if min_views and min_views.isdigit():
 				queryset = queryset.filter(total_views__gte=int(min_views))
-			
+
 			if max_views and max_views.isdigit():
 				queryset = queryset.filter(total_views__lte=int(max_views))
-			
+
 			# 日期过滤使用页面首次发布时间，与报告中的时间维度保持一致。
 			start_date = self.request.GET.get('start_date', '')
 			end_date = self.request.GET.get('end_date', '')
-			
+
 			if start_date:
 				queryset = queryset.filter(first_published_at__gte=start_date)
-			
+
 			if end_date:
 				queryset = queryset.filter(first_published_at__lte=end_date)
-			
+
 			# 排序字段采用白名单，防止用户直接控制 ORM order_by 表达式。
 			sort_by = self.request.GET.get('sort', '-total_views')
 			valid_sort_fields = ['total_views', '-total_views', 'total_unique_views',
 			                     '-total_unique_views', 'first_published_at', '-first_published_at', 'title', '-title']
-			
+
 			if sort_by in valid_sort_fields:
 				queryset = queryset.order_by(sort_by)
 			else:
 				queryset = queryset.order_by('-total_views')
-			
+
 			return queryset
-		
+
 		def get_table(self, parent_context=None):
 			# 报告模板自行读取分页对象，这里提供符合 Wagtail 报告接口的空表格结构。
 			headers = [
@@ -240,14 +241,14 @@ def register_page_views_report_url():
 				Column('total_unique_views', label="唯一访问量"),
 			]
 			return Table(headers, [], caption=self.title)
-		
+
 		def get_context_data(self, **kwargs):
 			context = super().get_context_data(**kwargs)
-			
+
 			# 保留 Wagtail 已构造的分页对象，并把筛选条件传给模板。
 			paginator = context['paginator']
 			page_obj = context['page_obj']
-			
+
 			# 添加搜索信息
 			context['search_query'] = self.request.GET.get('q', '')
 			context['min_views'] = self.request.GET.get('min_views', '')
@@ -255,15 +256,15 @@ def register_page_views_report_url():
 			context['start_date'] = self.request.GET.get('start_date', '')
 			context['end_date'] = self.request.GET.get('end_date', '')
 			context['sort'] = self.request.GET.get('sort', '-total_views')
-			
+
 			# 移除旧页码后重新编码其余参数，翻页时不会丢失当前筛选条件。
 			query_params = self.request.GET.copy()
 			if 'page' in query_params:
 				del query_params['page']
 			context['query_string'] = query_params.urlencode()
-			
+
 			return context
-	
+
 	@require_admin_access
 	def page_view_counts_for_page(request, page_id):
 		"""查看某个页面的所有访问统计记录"""
@@ -271,7 +272,7 @@ def register_page_views_report_url():
 			raise PermissionDenied
 		page = get_object_or_404(Page, id=page_id)
 		counts = PageViewCount.objects.filter(page=page).order_by('-date')
-		
+
 		return render(request, 'wagtailadmin/reports/page_view_counts_detail.html', {
 			'page': page,
 			'counts': counts,
@@ -394,7 +395,7 @@ def register_underline_feature(features):
 	feature_name = 'underline'
 	type_ = 'UNDERLINE'
 	tag = 'u'  # HTML 下划线标签
-	
+
 	# 1. 配置工具栏按钮
 	control = {
 		'type': type_,
@@ -402,18 +403,18 @@ def register_underline_feature(features):
 		'description': '下划线',
 		# 不额外设置 style，Draftail 已经提供 UNDERLINE 的默认样式。
 	}
-	
+
 	# 第二步：注册 Draftail 工具栏插件。
 	features.register_editor_plugin(
 		'draftail', feature_name, draftail_features.InlineStyleFeature(control)
 	)
-	
+
 	# 第三步：声明 Draft.js 数据与 HTML 之间的转换规则。
 	db_conversion = {
 		'from_database_format': {tag: InlineStyleElementHandler(type_)},
 		'to_database_format': {'style_map': {type_: tag}},
 	}
-	
+
 	# 第四步：把转换规则登记到 contentstate 转换器。
 	features.register_converter_rule('contentstate', feature_name, db_conversion)
 
@@ -424,3 +425,56 @@ def register_underline_feature(features):
 register_snippet(TagsSnippetViewSet)
 register_snippet(PageViewSnippetViewSet)
 register_snippet(MarkdownImportTokenSnippetViewSet)
+
+
+@hooks.register("register_snippet_listing_buttons")
+def register_markdown_import_token_listing_buttons(snippet, user, next_url=None):
+	"""为 Markdown 导入 Token 片段列表注入免跳转的‘复制 Token’与‘重新生成 Token’操作按钮。"""
+	if not isinstance(snippet, MarkdownImportToken):
+		return []
+
+	viewset = MarkdownImportTokenSnippetViewSet()
+	can_view = viewset.permission_policy.user_has_permission_for_instance(user, "view", snippet)
+	can_change = viewset.permission_policy.user_has_permission_for_instance(user, "change", snippet)
+
+	buttons = []
+	if can_view:
+		copy_url = reverse("wagtailsnippets_blog_markdownimporttoken:copy_token", args=[snippet.pk])
+		buttons.append(
+			Button(
+				label="复制 Token",
+				icon_name="copy",
+				priority=15,
+				attrs={
+					"type": "button",
+					"data-action": "copy-markdown-import-token",
+					"data-copy-url": copy_url,
+					"data-token-name": snippet.name,
+				},
+			)
+		)
+
+	if can_change:
+		rotate_url = reverse("wagtailsnippets_blog_markdownimporttoken:rotate_token", args=[snippet.pk])
+		buttons.append(
+			Button(
+				label="重新生成 Token",
+				icon_name="resubmit",
+				priority=25,
+				attrs={
+					"type": "button",
+					"data-action": "rotate-markdown-import-token",
+					"data-rotate-url": rotate_url,
+					"data-token-name": snippet.name,
+				},
+			)
+		)
+
+	return buttons
+
+
+@hooks.register("insert_global_admin_js")
+def insert_markdown_import_token_admin_js():
+	"""在 Wagtail 管理后台引入 Markdown 导入 Token 的异步复制与重新生成交互脚本。"""
+	js_url = static("blog/js/markdown_import_token_admin.js")
+	return format_html('<script src="{}"></script>', js_url)

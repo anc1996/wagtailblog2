@@ -1,4 +1,7 @@
 from django.contrib import admin
+from django.http import JsonResponse
+from django.shortcuts import get_object_or_404
+from django.urls import path
 from django.db.models import Count
 from taggit.models import Tag
 from wagtail.permission_policies import ModelPermissionPolicy
@@ -103,9 +106,9 @@ class MarkdownImportTokenCreateView(CreateView):
     def save_action(self):
         response = super().save_action()
         if not self.expects_json_response:
-            messages.warning(
+            messages.success(
                 self.request,
-                f"Markdown 导入 Token 仅显示本次，请立即复制：{self.plaintext_token}",
+                f"Markdown 导入 Token 创建成功：{self.plaintext_token}（已安全加密存储，后续可在列表操作菜单中随时点击【复制 Token】）",
             )
         return response
 
@@ -116,7 +119,7 @@ class MarkdownImportTokenSnippetViewSet(SnippetViewSet):
     menu_label = "Markdown 导入 Token"
     add_to_admin_menu = False
     add_view_class = MarkdownImportTokenCreateView
-    # Token 明文只在创建成功时展示一次；禁用 Wagtail 的“复制”动作，避免误导为可复制密钥。
+    # 禁用 Wagtail 原生复制对象跳转动作，避免误导为复制 Token 密钥
     copy_view_enabled = False
     ordering = ("-created_at",)
     panels = [FieldPanel("name"), FieldPanel("expires_at")]
@@ -130,6 +133,76 @@ class MarkdownImportTokenSnippetViewSet(SnippetViewSet):
     ]
     search_fields = ("name", "token_prefix")
     list_filter = ("revoked_at", "expires_at")
+
+    def get_urlpatterns(self):
+        """扩展 SnippetViewSet 路由，增加异步复制与重新生成 Token 端点。"""
+        urlpatterns = super().get_urlpatterns()
+        conv = self.pk_path_converter
+        return urlpatterns + [
+            path(f"copy-token/<{conv}:pk>/", self.copy_token_view, name="copy_token"),
+            path(f"rotate-token/<{conv}:pk>/", self.rotate_token_view, name="rotate_token"),
+        ]
+
+    def copy_token_view(self, request, pk):
+        """异步解密并返回 Token 明文供前端直接写入剪贴板（免页面跳转）。
+
+        权限要求：对当前 Token 实例具有查看权限。
+        请求方式：仅支持 POST 请求（结合 CSRF 防护）。
+        """
+        if request.method != "POST":
+            return JsonResponse({"success": False, "message": "仅支持 POST 请求"}, status=405)
+
+        if not request.user.is_authenticated or not request.user.is_active:
+            return JsonResponse({"success": False, "message": "未登录或登录已失效"}, status=401)
+
+        instance = get_object_or_404(self.model, pk=pk)
+        if not self.permission_policy.user_has_permission_for_instance(request.user, "view", instance):
+            return JsonResponse({"success": False, "message": "无权限查看或复制该 Token"}, status=403)
+
+        plaintext = instance.get_plaintext()
+        if not plaintext:
+            return JsonResponse(
+                {
+                    "success": False,
+                    "can_rotate": True,
+                    "message": "该 Token 创建于历史旧版本，未保存加密密文，无法直接复制。请点击【重新生成 Token】刷新并复制。",
+                },
+                status=400,
+            )
+
+        return JsonResponse(
+            {
+                "success": True,
+                "token": plaintext,
+                "message": "Token 复制成功",
+            }
+        )
+
+    def rotate_token_view(self, request, pk):
+        """重新生成并更新 Token 密钥（旧密钥失效），返回新明文供前端直接复制。
+
+        权限要求：对当前 Token 实例具有变更权限。
+        请求方式：仅支持 POST 请求（结合 CSRF 防护）。
+        """
+        if request.method != "POST":
+            return JsonResponse({"success": False, "message": "仅支持 POST 请求"}, status=405)
+
+        if not request.user.is_authenticated or not request.user.is_active:
+            return JsonResponse({"success": False, "message": "未登录或登录已失效"}, status=401)
+
+        instance = get_object_or_404(self.model, pk=pk)
+        if not self.permission_policy.user_has_permission_for_instance(request.user, "change", instance):
+            return JsonResponse({"success": False, "message": "无权限修改或重新生成该 Token"}, status=403)
+
+        new_token = instance.rotate_token()
+        return JsonResponse(
+            {
+                "success": True,
+                "token": new_token,
+                "token_prefix": instance.token_prefix,
+                "message": f"Token 已成功重新生成（新前缀：{instance.token_prefix}），并已复制到剪贴板！",
+            }
+        )
 
 
 class ReadOnlyPageViewPermissionPolicy(ModelPermissionPolicy):

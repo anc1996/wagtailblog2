@@ -2194,6 +2194,14 @@ class MarkdownImportToken(models.Model):
 	)
 	token_prefix = models.CharField(max_length=24, editable=False)
 	token_hash = models.CharField(max_length=64, unique=True, editable=False)
+	token_encrypted = models.CharField(
+		max_length=255,
+		blank=True,
+		null=True,
+		editable=False,
+		verbose_name="AES-GCM加密密文",
+		help_text="使用 AES-256-GCM 算法认证加密的明文密钥，支持管理员在后台免跳转复制。",
+	)
 	scopes = models.JSONField(default=list)
 	expires_at = models.DateTimeField(
 		null=True,
@@ -2210,10 +2218,31 @@ class MarkdownImportToken(models.Model):
 		ordering = ('-created_at',)
 
 	def issue_plaintext(self) -> str:
-		"""生成一次性明文 Token，并仅将前缀和 SHA-256 摘要写入模型。"""
+		"""生成一次性明文 Token，计算前缀、SHA-256 摘要及 AES-256-GCM 认证密文。"""
+		from .services.markdown_import_crypto import encrypt_token
+
 		value = 'mdimp_' + secrets.token_urlsafe(32)
 		self.token_prefix = value[:16]
 		self.token_hash = hashlib.sha256(value.encode('utf-8')).hexdigest()
+		self.token_encrypted = encrypt_token(value)
+		return value
+
+	def get_plaintext(self) -> str | None:
+		"""解密并返回原始明文 Token；若为历史旧版本未加密记录或解密异常则返回 None。"""
+		from .services.markdown_import_crypto import decrypt_token
+
+		if not self.token_encrypted:
+			return None
+		try:
+			return decrypt_token(self.token_encrypted)
+		except Exception as exc:
+			logger.error("解密 MarkdownImportToken(pk=%s) 失败: %s", self.pk, exc)
+			return None
+
+	def rotate_token(self) -> str:
+		"""重新生成并更新 Token 密钥（旧密钥失效，升级为加密可复制状态）。"""
+		value = self.issue_plaintext()
+		self.save(update_fields=['token_prefix', 'token_hash', 'token_encrypted'])
 		return value
 
 	def is_valid(self) -> bool:

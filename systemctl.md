@@ -68,7 +68,8 @@ tail -f output/test-beat.log
 
 生产应用服务：
 
-- wagtailblog3.service：uWSGI/Django，读取 .env.production。
+- wagtailblog3.service：uWSGI/Django，读取 .env.production；生成 socket /home/source/Django/wagtail/wagtailblog3/wagtailblog3.sock 并监听 HTTP 调试端口 6051。
+- Nginx 反向代理：监听端口 6050，通过 unix socket 转发至 uWSGI，静态资源 /static/ 映射至 staticfiles_collected/。
 - wagtailblog3-celery-maintenance.service：只消费 maintenance 队列，处理搜索 Delivery、Mongo 清理、页面删除和补偿任务。
 - wagtailblog3-celery-beat.service：调度补偿和周期任务，schedule 位于 logs/celery/celerybeat-schedule。
 - wagtailblog3-filebeat.service：采集项目日志到 Elasticsearch。
@@ -108,7 +109,7 @@ systemctl start wagtailblog3-filebeat.service
 ```bash
 systemctl is-active wagtailblog3.service wagtailblog3-celery-maintenance.service wagtailblog3-celery-beat.service wagtailblog3-filebeat.service
 systemctl is-enabled wagtailblog3.service wagtailblog3-celery-maintenance.service wagtailblog3-celery-beat.service wagtailblog3-filebeat.service
-ss -ltnp | grep -E ':80|:443'
+ss -ltnp | grep -E ':6050|:6051'
 curl --fail --silent --head https://<生产域名>/
 source /root/anaconda3/bin/activate wagtailblog
 export WAGTAILBLOG_ENV=production

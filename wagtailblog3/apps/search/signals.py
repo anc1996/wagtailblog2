@@ -7,7 +7,7 @@ from django.conf import settings
 from django.db.models.signals import post_save, pre_delete
 from django.dispatch import receiver
 from wagtail.models import PageViewRestriction
-from wagtail.signals import page_published, page_unpublished
+from wagtail.signals import page_published, page_unpublished, post_page_move
 
 from blog.models import BlogPage
 from blog.services.publication import BlogPublicationService
@@ -102,3 +102,18 @@ def request_scope_recalculation_on_restriction_change(
 
     if settings.CONTENT_SEARCH_PRODUCER_ENABLED:
         ContentSearchOutboxService.request_scope_recalculation(instance.page_id)
+
+
+@receiver(
+    post_page_move,
+    dispatch_uid="search.request_scope_recalculation_on_page_move",
+)
+def request_scope_recalculation_on_page_move(
+    sender: Any,
+    instance: Any,
+    **kwargs: Any,
+) -> None:
+    """页面移动后创建重算任务，覆盖跨越权限父节点的场景。"""
+
+    if settings.CONTENT_SEARCH_PRODUCER_ENABLED and getattr(instance, "pk", None) is not None:
+        ContentSearchOutboxService.request_scope_recalculation(instance.pk)

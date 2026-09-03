@@ -397,3 +397,24 @@ class SearchAnalyticsTests(TestCase):
             len([row for row in payload["top_queries"] if not row["is_other"]]), 10
         )
         self.assertTrue(payload["top_queries"][-1]["is_other"])
+
+    def test_search_analytics_registered_in_reports_menu_and_hides_search_terms(self):
+        """测试搜索分析已归入报告菜单，且原生的 search-terms 菜单项已被安全过滤隐藏。"""
+        from wagtail.admin.menu import reports_menu, admin_menu
+
+        request = RequestFactory().get("/admin/")
+        request.user = type(
+            "Staff",
+            (),
+            {"is_authenticated": True, "is_active": True, "is_staff": True, "is_superuser": True, "has_perm": lambda self, perm: True},
+        )()
+
+        report_items = reports_menu.menu_items_for_request(request)
+        report_names = [item.name for item in report_items]
+
+        self.assertIn("search-analytics", report_names)
+        self.assertNotIn("search-terms", report_names)
+
+        admin_items = admin_menu.menu_items_for_request(request)
+        admin_names = [item.name for item in admin_items]
+        self.assertNotIn("search-analytics", admin_names)

@@ -16,11 +16,24 @@ from wagtail.admin.menu import MenuItem
 from .analytics import AnalyticsValidationError, SearchAnalytics
 
 
-@hooks.register("register_admin_menu_item")
+@hooks.register("register_reports_menu_item")
 def register_search_analytics_menu() -> MenuItem:
-    """注册仅 staff 可访问的搜索统计入口。"""
+    """注册报告子菜单中的搜索分析入口，仅 staff 可访问。"""
 
-    return MenuItem("搜索分析", reverse("search_analytics"), icon_name="search", order=800)
+    return MenuItem(
+        "搜索分析",
+        reverse("search_analytics"),
+        name="search-analytics",
+        icon_name="search",
+        order=800,
+    )
+
+
+@hooks.register("construct_reports_menu")
+def filter_search_terms_from_reports_menu(request: HttpRequest, menu_items: list[MenuItem]) -> None:
+    """从报告菜单中移除被定制搜索分析替代的原生 search-terms 菜单项。"""
+
+    menu_items[:] = [item for item in menu_items if getattr(item, "name", None) != "search-terms"]
 
 
 def _parse_positive_int(value: str | None, default: int) -> int:

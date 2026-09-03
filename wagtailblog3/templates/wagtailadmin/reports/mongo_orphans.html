@@ -1,0 +1,323 @@
+{% extends "wagtailadmin/base.html" %}
+{% load static %}
+
+{% block titletag %}Mongo 孤儿正文数据治理{% endblock %}
+
+{% block extra_css %}
+  {{ block.super }}
+  <link rel="stylesheet" href="{% static 'blog/css/mongo-orphans.css' %}">
+{% endblock %}
+
+{% block extra_js %}
+  {{ block.super }}
+  <script src="{% static 'blog/js/mongo-orphans.js' %}"></script>
+{% endblock %}
+
+{% block content %}
+{% csrf_token %}
+<div class="nice-padding">
+  <header class="w-header">
+    <div class="row">
+      <div class="left">
+        <h1 class="icon icon-doc-full">Mongo 孤儿正文数据治理</h1>
+        <p class="help">扫描 MongoDB 中未被 MySQL 活跃页面或删除编排引用的正文残留，支持“先看后删”与批量受控清理。</p>
+      </div>
+    </div>
+  </header>
+
+  <div class="mongo-orphans-wrap">
+    <!-- 指标统计卡片 -->
+    <div class="orphan-metrics-grid">
+      <div class="orphan-metric-card">
+        <span class="metric-label">扫描候选正文总数</span>
+        <span class="metric-value">{{ total_candidates }}</span>
+      </div>
+      <div class="orphan-metric-card is-danger">
+        <span class="metric-label">完全孤儿 (可清理)</span>
+        <span class="metric-value">{{ category_counts.orphan_candidate|default:0 }}</span>
+      </div>
+      <div class="orphan-metric-card is-warning">
+        <span class="metric-label">历史快照残留 (缺页面)</span>
+        <span class="metric-value">{{ category_counts.referenced_missing_page|default:0 }}</span>
+      </div>
+      <div class="orphan-metric-card">
+        <span class="metric-label">未知受阻 (不可清理)</span>
+        <span class="metric-value">{{ category_counts.blocked_unknown|default:0 }}</span>
+      </div>
+      <div class="orphan-metric-card">
+        <span class="metric-label">Mongo 库文档基线</span>
+        <span class="metric-value" style="font-size: 1.1rem; line-height: 1.8;">
+          版本: {{ collections_summary.content_body_versions|default:0 }} |
+          修订: {{ collections_summary.blog_page_revision_bodies|default:0 }} |
+          遗留: {{ collections_summary.blog_content|default:0 }}
+        </span>
+      </div>
+    </div>
+
+    <!-- 筛选过滤栏 -->
+    <form method="get" class="orphan-filter-bar">
+      <div class="orphan-filter-item">
+        <label for="id_collection">目标集合</label>
+        <select name="collection" id="id_collection">
+          <option value="">全部集合</option>
+          {% for coll in target_collections %}
+            <option value="{{ coll }}" {% if selected_collection == coll %}selected{% endif %}>{{ coll }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="orphan-filter-item">
+        <label for="id_category">判定分类</label>
+        <select name="category" id="id_category">
+          <option value="">全部分类</option>
+          <option value="orphan_candidate" {% if selected_category == "orphan_candidate" %}selected{% endif %}>完全孤儿 (可安全清理)</option>
+          <option value="referenced_missing_page" {% if selected_category == "referenced_missing_page" %}selected{% endif %}>历史快照残留 (缺主页面)</option>
+          <option value="blocked_unknown" {% if selected_category == "blocked_unknown" %}selected{% endif %}>未知受阻 (暂不支持清理)</option>
+        </select>
+      </div>
+
+      <div class="orphan-filter-item">
+        <label for="id_page_id">页面编号 (Page ID)</label>
+        <input type="number" name="page_id" id="id_page_id" placeholder="按页面 ID 定向" value="{{ selected_page_id }}">
+      </div>
+
+      <div class="orphan-filter-actions">
+        <button type="submit" class="button button-small">筛选</button>
+        <a href="{% url 'mongo_orphans_report' %}" class="button button-small button-secondary">重置</a>
+      </div>
+    </form>
+
+    <!-- 批量操作工具条 -->
+    <div id="batch-toolbar" class="orphan-batch-toolbar" style="display: none;">
+      <div style="font-size: 0.9rem; color: #991b1b; font-weight: 600;">
+        已选中 <span id="batch-selected-count">0</span> 个可清理孤儿条目
+      </div>
+      <div>
+        <button type="button" id="btn-batch-delete-trigger" class="button button-small button-danger">批量安全清理选中文档</button>
+      </div>
+    </div>
+
+    <!-- 孤儿数据列表 -->
+    <div class="table-wrapper">
+      <table class="listing">
+        <thead>
+          <tr>
+            <th style="width: 36px; text-align: center;">
+              <input type="checkbox" id="check-all-orphans" aria-label="全选当前页可清理孤儿条目" title="全选当前页可清理孤儿">
+            </th>
+            <th style="width: 40px;">#</th>
+            <th>集合</th>
+            <th>Mongo ID / 唯一指针</th>
+            <th>关联 Page ID</th>
+            <th>判定分类</th>
+            <th>文档创建时间</th>
+            <th style="text-align: right;">安全操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in page_obj %}
+            <tr data-row-id="{{ item.mongo_id }}">
+              <td style="text-align: center;">
+                {% if item.can_delete %}
+                  <input type="checkbox" class="orphan-item-check"
+                         data-collection="{{ item.collection }}"
+                         data-mongo-id="{{ item.mongo_id }}"
+                         data-page-id="{{ item.page_id|default:'' }}"
+                         aria-label="勾选条目 {{ item.mongo_id }}">
+                {% else %}
+                  <span style="color: #cbd5e1; font-size: 0.8rem;" title="受保护不可批量清理">-</span>
+                {% endif %}
+              </td>
+              <td>{{ forloop.counter }}</td>
+              <td><code>{{ item.collection }}</code></td>
+              <td>
+                <span title="{{ item.mongo_id }}"><code>{{ item.mongo_id|slice:":16" }}...</code></span>
+                {% if item.body_version_id %}
+                  <br><small style="color: #64748b;">Ver: {{ item.body_version_id|slice:":12" }}...</small>
+                {% endif %}
+              </td>
+              <td>
+                {% if item.page_id %}
+                  <span class="badge badge-secondary">ID: {{ item.page_id }}</span>
+                {% else %}
+                  <span style="color: #94a3b8;">无</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if item.category == "orphan_candidate" %}
+                  <span class="orphan-badge badge-orphan-candidate">{{ item.category_label }}</span>
+                {% elif item.category == "referenced_missing_page" %}
+                  <span class="orphan-badge badge-referenced-missing">{{ item.category_label }}</span>
+                {% elif item.category == "referenced_page" %}
+                  <span class="orphan-badge badge-referenced-page">{{ item.category_label }}</span>
+                {% else %}
+                  <span class="orphan-badge badge-blocked-unknown">{{ item.category_label }}</span>
+                {% endif %}
+              </td>
+              <td><small>{{ item.created_at|default:"-"|slice:":19" }}</small></td>
+              <td style="text-align: right;">
+                <div class="orphan-actions-cell" style="justify-content: flex-end;">
+                  <button type="button" class="button button-small button-secondary"
+                          data-action="preview-orphan"
+                          data-collection="{{ item.collection }}"
+                          data-mongo-id="{{ item.mongo_id }}"
+                          data-page-id="{{ item.page_id|default:'' }}">
+                    查看正文
+                  </button>
+                  {% if item.can_delete and item.category == "orphan_candidate" %}
+                    <button type="button" class="button button-small button-danger"
+                            data-action="delete-orphan"
+                            data-collection="{{ item.collection }}"
+                            data-mongo-id="{{ item.mongo_id }}"
+                            data-page-id="{{ item.page_id|default:'' }}">
+                      安全清理
+                    </button>
+                  {% endif %}
+                </div>
+              </td>
+            </tr>
+          {% empty %}
+            <tr>
+              <td colspan="8" style="text-align: center; padding: 30px; color: #64748b;">
+                当前未发现符合条件的 Mongo 孤儿数据。
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 分页器 -->
+    {% if page_obj.paginator.num_pages > 1 %}
+      <nav class="pagination" aria-label="分页导航">
+        <p>第 {{ page_obj.number }} / {{ page_obj.paginator.num_pages }} 页 (共 {{ page_obj.paginator.count }} 条候选)</p>
+        <ul style="display: flex; gap: 8px; list-style: none; padding: 0;">
+          {% if page_obj.has_previous %}
+            <li>
+              <a href="?page={{ page_obj.previous_page_number }}{% if selected_collection %}&collection={{ selected_collection }}{% endif %}{% if selected_category %}&category={{ selected_category }}{% endif %}{% if selected_page_id %}&page_id={{ selected_page_id }}{% endif %}" class="button button-small button-secondary">上一页</a>
+            </li>
+          {% endif %}
+          {% if page_obj.has_next %}
+            <li>
+              <a href="?page={{ page_obj.next_page_number }}{% if selected_collection %}&collection={{ selected_collection }}{% endif %}{% if selected_category %}&category={{ selected_category }}{% endif %}{% if selected_page_id %}&page_id={{ selected_page_id }}{% endif %}" class="button button-small button-secondary">下一页</a>
+            </li>
+          {% endif %}
+        </ul>
+      </nav>
+    {% endif %}
+  </div>
+</div>
+
+<!-- 正文反解析预览模态框（核心亮点：先看） -->
+<div id="preview-modal" class="orphan-modal-backdrop" aria-hidden="true">
+  <div class="orphan-modal-box">
+    <div class="orphan-modal-header">
+      <h3>孤儿正文底层内容深度审计</h3>
+      <button type="button" class="orphan-modal-close" data-modal-close aria-label="关闭">&times;</button>
+    </div>
+
+    <div class="orphan-modal-body">
+      <!-- 加载中提示 -->
+      <div id="preview-loading" class="preview-loading-spinner">
+        <div class="spinner-icon"></div>
+        <span>正在从 MongoDB 反解析底层正文结构与 Markdown 内容...</span>
+      </div>
+
+      <!-- 内容渲染区 -->
+      <div id="preview-content" style="display: none; flex-direction: column; gap: 14px;">
+        <!-- 判定依据卡片 -->
+        <div id="preview-reason-box" class="orphan-alert-reason"></div>
+
+        <!-- 关键元数据 -->
+        <div class="preview-meta-grid">
+          <div class="preview-meta-item"><strong>目标集合:</strong> <code id="preview-collection"></code></div>
+          <div class="preview-meta-item"><strong>Mongo ID:</strong> <code id="preview-mongo-id"></code></div>
+          <div class="preview-meta-item"><strong>关联 Page ID:</strong> <span id="preview-page-id"></span></div>
+          <div class="preview-meta-item"><strong>创建时间:</strong> <span id="preview-created-at"></span></div>
+          <div class="preview-meta-item"><strong>安全判定:</strong> <span id="preview-category-label"></span></div>
+          <div class="preview-meta-item"><strong>正文字数:</strong> <span id="preview-char-count"></span></div>
+          <div class="preview-meta-item"><strong>块结构数:</strong> <span id="preview-block-count"></span></div>
+          <div class="preview-meta-item"><strong>块类型包含:</strong> <span id="preview-block-types"></span></div>
+        </div>
+
+        <!-- 标题线索 -->
+        <div style="padding: 8px 12px; background: #e0f2fe; border-radius: 4px; font-size: 0.9rem; color: #0369a1;">
+          <strong>文章标题线索:</strong> <span id="preview-title-hint"></span>
+        </div>
+
+        <!-- Markdown 正文视窗 -->
+        <div class="markdown-preview-card">
+          <div class="markdown-preview-header">
+            <span>正文反解析文本预览</span>
+            <small style="color: #64748b;">(包含 Markdown 格式文本及富文本内容)</small>
+          </div>
+          <pre id="preview-markdown-content" class="markdown-preview-content"></pre>
+        </div>
+
+        <!-- 原始块结构细节（折叠） -->
+        <details class="raw-json-details">
+          <summary>展开查看底层原始 StreamField / JSON 数据片段</summary>
+          <pre id="preview-raw-snippet"></pre>
+        </details>
+      </div>
+    </div>
+
+    <div class="orphan-modal-footer">
+      <button type="button" class="button button-secondary" data-modal-close>关闭预览</button>
+      <button type="button" id="btn-preview-delete" class="button button-danger" style="display: none;">以此为据安全清理</button>
+    </div>
+  </div>
+</div>
+
+<!-- 单条强阻断二次确认弹窗（后删） -->
+<div id="confirm-modal" class="orphan-modal-backdrop" aria-hidden="true">
+  <div class="orphan-modal-box orphan-confirm-box">
+    <div class="orphan-modal-header">
+      <h3 style="color: #dc2626;">警告：确认物理删除正文孤儿</h3>
+      <button type="button" class="orphan-modal-close" data-modal-close aria-label="关闭">&times;</button>
+    </div>
+    <div class="orphan-modal-body" style="text-align: center;">
+      <div class="confirm-warning-icon">⚠️</div>
+      <p style="font-size: 1rem; font-weight: 600; margin-bottom: 8px;">您即将永久物理删除该 Mongo 正文文档！</p>
+      <p style="font-size: 0.85rem; color: #64748b; line-height: 1.5;">
+        集合: <code id="confirm-coll"></code><br>
+        Mongo ID: <code id="confirm-id"></code><br>
+        关联 Page ID: <span id="confirm-page"></span>
+      </p>
+      <div style="margin-top: 12px; padding: 10px; background: #fef2f2; border: 1px solid #fecaca; border-radius: 6px; font-size: 0.82rem; color: #991b1b; text-align: left;">
+        <strong>🛡️ 强阻断安全防线：</strong>
+        后台将在执行删除前瞬间发起 Fencing Token 二次校验。一旦发现该 ID 被任何现有活跃页面引用，系统将强制熔断拒绝清理。
+      </div>
+    </div>
+    <div class="orphan-modal-footer">
+      <button type="button" class="button button-secondary" data-modal-close>取消</button>
+      <button type="button" id="btn-final-delete" class="button button-danger">确认物理删除</button>
+    </div>
+  </div>
+</div>
+
+<!-- 批量清理二次确认弹窗 -->
+<div id="batch-confirm-modal" class="orphan-modal-backdrop" aria-hidden="true">
+  <div class="orphan-modal-box orphan-confirm-box">
+    <div class="orphan-modal-header">
+      <h3 style="color: #dc2626;">警告：确认批量安全清理</h3>
+      <button type="button" class="orphan-modal-close" data-modal-close aria-label="关闭">&times;</button>
+    </div>
+    <div class="orphan-modal-body" style="text-align: center;">
+      <div class="confirm-warning-icon">⚠️</div>
+      <p style="font-size: 1rem; font-weight: 600; margin-bottom: 8px;">您即将批量物理删除选中的 <span id="batch-modal-count" style="color: #dc2626; font-size: 1.2rem;">0</span> 个正文文档！</p>
+      <div style="margin-top: 12px; padding: 10px; background: #fef2f2; border: 1px solid #fecaca; border-radius: 6px; font-size: 0.82rem; color: #991b1b; text-align: left;">
+        <strong>🛡️ 强阻断并发防护：</strong>
+        系统将对每一个文档逐一触发 Fencing Token 二次校验。一旦发现任何文档被活跃页面引用，该条目将自动熔断跳过，绝对杜绝误删！
+      </div>
+    </div>
+    <div class="orphan-modal-footer">
+      <button type="button" class="button button-secondary" data-modal-close>取消</button>
+      <button type="button" id="btn-final-batch-delete" class="button button-danger">确认批量物理删除</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast 提示条 -->
+<div id="orphan-toast" class="orphan-toast"></div>
+{% endblock %}

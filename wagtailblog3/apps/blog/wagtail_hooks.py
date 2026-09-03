@@ -385,6 +385,37 @@ def register_content_analytics_menu_item():
 	)
 
 
+# Mongo 孤儿正文治理后台入口
+class MongoOrphansMenuItem(MenuItem):
+	"""仅对超级管理员开放 Mongo 孤儿正文治理报表。"""
+
+	def is_shown(self, request):
+		return bool(request.user and request.user.is_authenticated and request.user.is_active and request.user.is_superuser)
+
+
+@hooks.register("register_reports_menu_item")
+def register_mongo_orphans_menu_item():
+	return MongoOrphansMenuItem(
+		label="Mongo 孤儿治理",
+		url="/admin/reports/mongo-orphans/",
+		icon_name="doc-full",
+		order=702,
+	)
+
+
+@hooks.register("register_admin_urls")
+def register_mongo_orphans_admin_urls():
+	from .views_mongo_orphans import (
+		mongo_orphans_report_view,
+		mongo_orphan_preview_api,
+		mongo_orphan_cleanup_api,
+	)
+	return [
+		path("reports/mongo-orphans/", mongo_orphans_report_view, name="mongo_orphans_report"),
+		path("reports/mongo-orphans/preview/", mongo_orphan_preview_api, name="mongo_orphan_preview_api"),
+		path("reports/mongo-orphans/cleanup/", mongo_orphan_cleanup_api, name="mongo_orphan_cleanup_api"),
+	]
+
 # 注册“下划线”富文本功能。
 @hooks.register('register_rich_text_features')
 def register_underline_feature(features):

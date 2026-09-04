@@ -384,7 +384,7 @@ class LogClearConfirmView(LogAdminView):
                 messages.success(
                     request,
                     f"日志清理完成，处理 {audit.files_before} 个文件，释放 "
-                    f"{audit.bytes_freed} 字节。",
+                    f"{audit.bytes_freed} 字节。当前主文件已原地截断（运行中的服务实时产生新日志属正常业务），历史轮转与孤儿临时文件已彻底清理。",
                 )
         else:
             failed = audit.details.get("failed_files", [])

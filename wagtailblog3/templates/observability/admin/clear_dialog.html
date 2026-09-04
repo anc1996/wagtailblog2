@@ -22,7 +22,7 @@
         <thead><tr><th>轮转编号</th><th>文件数量</th><th>占用空间</th></tr></thead>
         <tbody data-preview-rotations></tbody>
       </table>
-      <p class="log-danger-text"><strong>危险操作：</strong>当前文件原地截断，允许的轮转文件永久删除；不会删除锁文件或数据库审计记录。</p>
+      <p class="log-danger-text"><strong>操作说明：</strong>当前主文件原地截断（活跃进程实时产生新日志属正常业务）；允许的轮转文件与孤儿临时文件永久删除；锁文件与调度数据库受保护绝不被删除。</p>
       <div class="field">
         <label for="log-dialog-confirmation">加强确认文本</label>
         <input id="log-dialog-confirmation" name="confirmation" required autocomplete="off">

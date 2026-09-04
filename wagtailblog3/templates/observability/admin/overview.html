@@ -42,6 +42,30 @@
     <div><dt>日志总占用</dt><dd>{{ overview.total_bytes|filesizeformat }}</dd></div>
   </dl>
 
+  {% if overview.orphan_summary.count > 0 %}
+    <div class="log-clear-warning" style="margin: 1.25rem 0; padding: 1rem 1.25rem; background: #fffbe6; border: 1px solid #ffe58f; border-left: 4px solid #faad14; border-radius: 4px;">
+      <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem;">
+        <div>
+          <h3 style="margin: 0; font-size: 1rem; color: #d46b08; font-weight: 600;">
+            ⚠️ 检测到 {{ overview.orphan_summary.count }} 个孤儿轮转临时文件（共占用 {{ overview.orphan_summary.total_bytes|filesizeformat }}）
+          </h3>
+          <p style="margin: 0.35rem 0 0; font-size: 0.875rem; color: #595959;">
+            这些文件为历史异常退出或轮转竞态残留的 <code>*.log.rotate.*</code> 临时文件。常规轮转不含此类文件，建议进行安全清理以释放空间。
+          </p>
+        </div>
+        {% if can_manage_logs and request.user.is_superuser %}
+          <a class="button button-small no js-log-clear" data-target-type="all" data-target="" data-kind="" data-scope="rotated" href="{% url 'observability:clear' %}?target_type=all&kind=&scope=rotated" style="white-space: nowrap;">
+            一键清理全部轮转与孤儿文件
+          </a>
+        {% elif can_manage_logs %}
+          <a class="button button-small button-secondary js-log-clear" data-target-type="business" data-target="" data-kind="" data-scope="rotated" href="{% url 'observability:clear' %}?target_type=business&kind=&scope=rotated" style="white-space: nowrap;">
+            一键清理业务轮转与孤儿文件
+          </a>
+        {% endif %}
+      </div>
+    </div>
+  {% endif %}
+
   <p class="help-block">统计更新时间：{{ overview.refreshed_at|date:"Y-m-d H:i:s" }}。手动刷新会立即重新读取文件；自动刷新按设置工作。</p>
 
   <div class="listing log-listing">
@@ -50,10 +74,27 @@
       <tbody>
         {% for module in overview.modules %}
           <tr>
-            <td><strong>{{ module.key }}</strong></td>
+            <td>
+              <strong>{{ module.key }}</strong>
+              {% if module.celery_protected and module.celery_protected.files %}
+                <span title="Celery 调度状态持久化数据库，受安全策略严格保护，不纳入日志清理" style="margin-left: 0.4rem; font-size: 0.75rem; background-color: #e6f7ff; color: #096dd9; border: 1px solid #91d5ff; border-radius: 3px; padding: 1px 5px; vertical-align: middle;">
+                  调度库保护 ({{ module.celery_protected.total_bytes|filesizeformat }})
+                </span>
+              {% endif %}
+              {% if module.orphan_count > 0 %}
+                <span title="存在 {{ module.orphan_count }} 个孤儿轮转临时文件" style="margin-left: 0.4rem; font-size: 0.75rem; background-color: #fff7e6; color: #d46b08; border: 1px solid #ffd591; border-radius: 3px; padding: 1px 5px; vertical-align: middle;">
+                  孤儿 {{ module.orphan_bytes|filesizeformat }}
+                </span>
+              {% endif %}
+            </td>
             <td>{{ module.activity_bytes|filesizeformat }}</td>
             <td>{{ module.error_bytes|filesizeformat }}</td>
-            <td>{{ module.rotation_count }}</td>
+            <td>
+              {{ module.rotation_count }}
+              {% if module.orphan_count > 0 %}
+                <span style="font-size: 0.75rem; color: #fa8c16;" title="含 {{ module.orphan_count }} 个孤儿临时文件">(含孤儿 {{ module.orphan_count }})</span>
+              {% endif %}
+            </td>
             <td>{{ module.last_modified|date:"Y-m-d H:i:s"|default:"尚未生成" }}</td>
             <td>{{ module.recent_error_count }}</td>
             <td class="log-row-actions">
@@ -71,6 +112,76 @@
                   </div>
                 </details>
               {% endif %}
+            </td>
+          </tr>
+          <tr class="log-file-drawer-row">
+            <td colspan="7" style="padding: 0.4rem 0.8rem 0.6rem; background-color: #fafafa; border-bottom: 1px solid #e8e8e8;">
+              <details class="log-file-drawer">
+                <summary style="cursor: pointer; font-size: 0.82rem; color: #1890ff; user-select: none;">
+                  📂 展开「{{ module.key }}」文件清单（{{ module.files|length }} 个注册项{% if module.orphan_count %}，{{ module.orphan_count }} 个孤儿文件{% endif %}）
+                </summary>
+                <div style="margin-top: 0.5rem; padding: 0.5rem 0.75rem; background-color: #ffffff; border: 1px solid #f0f0f0; border-radius: 4px;">
+                  <table class="listing" style="margin-bottom: 0; font-size: 0.82rem;">
+                    <thead>
+                      <tr style="background-color: #f5f5f5;">
+                        <th style="padding: 4px 8px;">文件名称</th>
+                        <th style="padding: 4px 8px;">类别</th>
+                        <th style="padding: 4px 8px;">当前主文件</th>
+                        <th style="padding: 4px 8px;">标准轮转</th>
+                        <th style="padding: 4px 8px;">孤儿轮转</th>
+                        {% if can_manage_logs %}<th style="padding: 4px 8px;">定向操作</th>{% endif %}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {% for file in module.files %}
+                        <tr>
+                          <td style="padding: 4px 8px;"><strong>{{ file.label }}</strong> (<code>{{ file.key }}</code>)</td>
+                          <td style="padding: 4px 8px;">
+                            {% if file.kind == 'error' %}
+                              <span style="color: #cf1322;">错误日志</span>
+                            {% else %}
+                              <span style="color: #389e0d;">活动日志</span>
+                            {% endif %}
+                          </td>
+                          <td style="padding: 4px 8px;">{{ file.current_bytes|filesizeformat }}</td>
+                          <td style="padding: 4px 8px;">{{ file.rotations_count }} 个 ({{ file.rotations_bytes|filesizeformat }})</td>
+                          <td style="padding: 4px 8px;">
+                            {% if file.orphan_count %}
+                              <span style="color: #d46b08; font-weight: 500;">{{ file.orphan_count }} 个 ({{ file.orphan_bytes|filesizeformat }})</span>
+                            {% else %}
+                              <span style="color: #bfbfbf;">无</span>
+                            {% endif %}
+                          </td>
+                          {% if can_manage_logs %}
+                            <td style="padding: 4px 8px;">
+                              <a class="button button-small button-secondary js-log-clear" data-target-type="file" data-target="{{ file.key }}" data-kind="{{ file.kind }}" data-scope="all" href="{% url 'observability:clear' %}?target_type=file&target={{ file.key }}&kind={{ file.kind }}&scope=all" style="padding: 1px 6px; font-size: 0.78rem;">清理此文件</a>
+                            </td>
+                          {% endif %}
+                        </tr>
+                        {% if file.orphans %}
+                          <tr>
+                            <td colspan="{% if can_manage_logs %}6{% else %}5{% endif %}" style="padding: 4px 12px; background-color: #fffbe6; font-size: 0.78rem;">
+                              <strong style="color: #d46b08;">孤儿文件残留：</strong>
+                              {% for orphan in file.orphans %}
+                                <code style="margin-right: 8px;">{{ orphan.name }} ({{ orphan.size|filesizeformat }})</code>
+                              {% endfor %}
+                            </td>
+                          </tr>
+                        {% endif %}
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                  {% if module.celery_protected and module.celery_protected.files %}
+                    <div style="margin-top: 0.5rem; padding: 0.4rem 0.6rem; background-color: #e6f7ff; border-left: 3px solid #1890ff; font-size: 0.78rem; color: #262626;">
+                      ℹ️ <strong>受保护调度数据库：</strong>
+                      {% for pfile in module.celery_protected.files %}
+                        <code style="margin-right: 8px;">{{ pfile.name }} ({{ pfile.size|filesizeformat }})</code>
+                      {% endfor %}
+                      <span style="color: #8c8c8c;">（Celery Beat 调度持久化文件，绝不纳入日志清理）</span>
+                    </div>
+                  {% endif %}
+                </div>
+              </details>
             </td>
           </tr>
         {% endfor %}

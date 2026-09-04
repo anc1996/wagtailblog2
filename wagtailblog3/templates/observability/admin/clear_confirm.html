@@ -40,6 +40,18 @@
         <div><dt>轮转文件</dt><dd>{{ preview.rotated.file_count }} 个 / {{ preview.rotated.total_bytes|filesizeformat }}</dd></div>
         <div><dt>预计清理</dt><dd>{{ preview.total.file_count }} 个 / {{ preview.total.total_bytes|filesizeformat }}</dd></div>
       </dl>
+      {% if preview.orphan and preview.orphan.file_count %}
+        <div class="log-orphan-preview-box" style="margin: 1rem 0; padding: 0.75rem 1rem; background-color: #fffbe6; border: 1px solid #ffe58f; border-left: 3px solid #faad14; border-radius: 4px;">
+          <h4 style="margin: 0 0 0.5rem 0; color: #d46b08; font-size: 0.95rem;">
+            ⚠️ 包含 {{ preview.orphan.file_count }} 个孤儿轮转临时文件（共占用 {{ preview.orphan.total_bytes|filesizeformat }}）
+          </h4>
+          <ul style="margin: 0; padding-left: 1.25rem; font-size: 0.85rem; color: #595959;">
+            {% for item in preview.orphan.files %}
+              <li><code>{{ item.file }}</code> ({{ item.size|filesizeformat }}){% if not item.is_safe %} <span style="color: #cf1322;">[近期修改跳过: {{ item.skip_reason }}]</span>{% endif %}</li>
+            {% endfor %}
+          </ul>
+        </div>
+      {% endif %}
       <table class="listing log-rotation-preview">
         <thead><tr><th>轮转编号</th><th>文件数量</th><th>占用空间</th></tr></thead>
         <tbody>
@@ -48,7 +60,7 @@
           {% endfor %}
         </tbody>
       </table>
-      <p class="log-danger-text"><strong>危险操作：</strong>当前文件将原地截断，允许的轮转文件将永久删除；锁文件和数据库审计记录不会被删除。</p>
+      <p class="log-danger-text"><strong>操作说明：</strong>当前主文件将安全原地截断至 0 字节（运行中的服务可能立即写入少量新日志属正常业务）；允许的轮转文件与孤儿临时文件将永久删除；锁文件与调度数据库（如 celerybeat-schedule 等）受系统严格保护，绝不被删除。</p>
 
       <form method="post" class="log-clear-form">
         {% csrf_token %}

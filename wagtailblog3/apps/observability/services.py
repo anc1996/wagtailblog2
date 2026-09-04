@@ -16,15 +16,52 @@ from .elasticsearch_logs import (
     get_log_summary,
     is_enabled,
 )
+from pathlib import Path
+from django.conf import settings
 from .reader import read_logs, resolve_registered_path
 from .registry import LOG_DOMAIN_KEYS, LOG_FILE_BY_KEY, LogFileSpec, iter_log_files
-from .cleanup import CleanupResult, execute_cleanup, preview_cleanup
+from .cleanup import (
+    CleanupResult,
+    execute_cleanup,
+    preview_cleanup,
+    discover_orphan_rotations,
+    SAFE_ORPHAN_AGE_SECONDS,
+)
 
 
 OVERVIEW_CACHE_KEY = "observability:overview:v1"
 
 
 ClearResult = CleanupResult
+
+
+def _detect_celery_protected_files() -> dict:
+    """检测 Celery 目录下受系统保护的调度数据库文件。
+
+    这些文件包括 ``celerybeat-schedule`` 主库及其 WAL/SHM 事务文件，
+    属于 Celery Beat 调度器的持久化状态数据库，受系统严格保护，绝不属于日志文件，
+    也不得被任何日志清理逻辑触碰。
+    """
+    root = Path(settings.LOG_DIR).resolve()
+    celery_dir = root / "celery"
+    if not celery_dir.exists() or not celery_dir.is_dir():
+        return {"total_bytes": 0, "files": []}
+
+    protected_files = []
+    total_bytes = 0
+    try:
+        for entry in sorted(celery_dir.iterdir()):
+            if entry.name.startswith("celerybeat-schedule") and entry.is_file():
+                st = entry.stat()
+                total_bytes += st.st_size
+                protected_files.append({
+                    "name": entry.name,
+                    "relative_path": f"celery/{entry.name}",
+                    "size": st.st_size,
+                })
+    except OSError:
+        pass
+    return {"total_bytes": total_bytes, "files": protected_files}
 
 
 def _file_versions(spec: LogFileSpec):
@@ -60,6 +97,10 @@ def get_overview(*, refresh: bool = False) -> dict:
     modules = []
     total_bytes = 0
     active_domains = 0
+    all_orphan_files = []
+    orphan_total_bytes = 0
+    celery_protected = _detect_celery_protected_files()
+
     since = timezone.localtime(timezone.now() - timedelta(hours=1)).replace(tzinfo=None)
     search_summary = None
     if is_enabled():
@@ -73,11 +114,25 @@ def get_overview(*, refresh: bool = False) -> dict:
         activity_bytes = 0
         error_bytes = 0
         rotations = 0
+        domain_orphan_count = 0
+        domain_orphan_bytes = 0
         last_modified = None
+        module_file_details = []
+
         for spec in iter_log_files(domain):
-            for rotation, path in _file_versions(spec):
+            spec_versions = list(_file_versions(spec))
+            spec_current_bytes = 0
+            spec_rotations_count = 0
+            spec_rotations_bytes = 0
+            for rotation, path in spec_versions:
                 stat = path.stat()
                 total_bytes += stat.st_size
+                if rotation == 0:
+                    spec_current_bytes += stat.st_size
+                else:
+                    spec_rotations_count += 1
+                    spec_rotations_bytes += stat.st_size
+
                 if spec.kind == "error":
                     error_bytes += stat.st_size
                 else:
@@ -85,6 +140,43 @@ def get_overview(*, refresh: bool = False) -> dict:
                 rotations += int(rotation > 0)
                 modified = timezone.datetime.fromtimestamp(stat.st_mtime, tz=timezone.get_current_timezone())
                 last_modified = max(filter(None, (last_modified, modified)), default=modified)
+
+            # 发现与当前注册项关联的孤儿轮转临时文件与隔离残留
+            orphans = discover_orphan_rotations(spec, min_age_seconds=0)
+            spec_orphan_list = []
+            for item in orphans:
+                total_bytes += item["size"]
+                domain_orphan_count += 1
+                domain_orphan_bytes += item["size"]
+                orphan_total_bytes += item["size"]
+                if spec.kind == "error":
+                    error_bytes += item["size"]
+                else:
+                    activity_bytes += item["size"]
+                orphan_info = {
+                    "source_key": spec.key,
+                    "file": item["relative_path"],
+                    "name": item["name"],
+                    "size": item["size"],
+                    "mtime": item["mtime"],
+                    "is_safe": item["is_safe"],
+                    "skip_reason": item["skip_reason"],
+                }
+                all_orphan_files.append(orphan_info)
+                spec_orphan_list.append(orphan_info)
+
+            module_file_details.append({
+                "key": spec.key,
+                "label": spec.label,
+                "kind": spec.kind,
+                "current_bytes": spec_current_bytes,
+                "rotations_count": spec_rotations_count,
+                "rotations_bytes": spec_rotations_bytes,
+                "orphans": spec_orphan_list,
+                "orphan_count": len(spec_orphan_list),
+                "orphan_bytes": sum(o["size"] for o in spec_orphan_list),
+            })
+
         if activity_bytes or error_bytes:
             active_domains += 1
         if search_summary is not None:
@@ -98,24 +190,22 @@ def get_overview(*, refresh: bool = False) -> dict:
                     page_size=200,
                 ).records
             )
-        modules.append(
-            {
-                "key": domain,
-                "files": [
-                    {
-                        "key": spec.key,
-                        "label": spec.label,
-                        "kind": spec.kind,
-                    }
-                    for spec in iter_log_files(domain)
-                ],
-                "activity_bytes": activity_bytes,
-                "error_bytes": error_bytes,
-                "rotation_count": rotations,
-                "last_modified": last_modified,
-                "recent_error_count": recent_error_count,
-            }
-        )
+
+        module_data = {
+            "key": domain,
+            "files": module_file_details,
+            "activity_bytes": activity_bytes,
+            "error_bytes": error_bytes,
+            "rotation_count": rotations + domain_orphan_count,
+            "standard_rotation_count": rotations,
+            "orphan_count": domain_orphan_count,
+            "orphan_bytes": domain_orphan_bytes,
+            "last_modified": last_modified,
+            "recent_error_count": recent_error_count,
+        }
+        if domain == "celery":
+            module_data["celery_protected"] = celery_protected
+        modules.append(module_data)
 
     if search_summary is not None:
         error_count = search_summary["error_count"]
@@ -131,6 +221,12 @@ def get_overview(*, refresh: bool = False) -> dict:
         "active_domains": active_domains,
         "domain_count": len(LOG_DOMAIN_KEYS),
         "total_bytes": total_bytes,
+        "orphan_summary": {
+            "count": len(all_orphan_files),
+            "total_bytes": orphan_total_bytes,
+            "files": all_orphan_files,
+        },
+        "celery_protected": celery_protected,
         "modules": modules,
         "refreshed_at": timezone.now(),
     }
@@ -281,12 +377,14 @@ def clear_and_audit(
             "matched_file_count": len(result.file_results),
             "current_file_count": sum(1 for item in result.file_results if item["rotation"] == 0 and item["pre_exists"]),
             "rotated_file_count": sum(1 for item in result.file_results if item["rotation"] > 0 and item["pre_exists"]),
+            "orphan_file_count": sum(1 for item in result.file_results if item["rotation"] == -1 and item["pre_exists"]),
             "total_bytes": result.bytes_before,
         },
         "actual": {
             "matched_file_count": len(result.file_results),
             "succeeded_file_count": audit.succeeded_files,
             "failed_file_count": audit.failed_files,
+            "orphan_file_count": sum(1 for item in result.file_results if item.get("action") == "unlink_orphan" and item["succeeded"]),
             "bytes_freed": audit.bytes_freed,
         },
     }

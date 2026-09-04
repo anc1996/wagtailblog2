@@ -172,6 +172,9 @@ def get_logging_config(
         "runtime_runserver_file": _catalog_handler(
             root, "runtime_runserver", level="INFO"
         ),
+        "runtime_uwsgi_file": _catalog_handler(
+            root, "runtime_uwsgi", level="INFO"
+        ),
     }
     loggers: dict[str, dict] = {
         "django": {

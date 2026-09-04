@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import os
 from pathlib import Path, PurePosixPath
 import stat
+import time
 import uuid
 
 from django.conf import settings
@@ -15,6 +16,7 @@ from .registry import LOG_FILE_SPECS, LogFileSpec
 
 VALID_SCOPES = {"current", "rotated", "all"}
 MAX_ROTATION = max(spec.backup_count for spec in LOG_FILE_SPECS)
+SAFE_ORPHAN_AGE_SECONDS = 60
 
 
 class UnsafeLogTarget(ValueError):
@@ -57,11 +59,11 @@ class CleanupResult:
 
     @property
     def changed_files(self) -> list[str]:
-        """返回实际被截断或删除的文件名，不包含本来不存在的候选项。"""
+        """返回实际被截断或删除的文件名，包含标准轮转与已清理孤儿文件。"""
         return [
             result["file"]
             for result in self.file_results
-            if result["outcome"] in {"truncated", "unlinked"}
+            if result["outcome"] in {"truncated", "unlinked", "unlinked_orphan"}
         ]
 
     @property
@@ -115,7 +117,6 @@ def _registered_candidate(spec: LogFileSpec, rotation: int) -> Path:
 
     该函数刻意不接受客户端路径，避免清理功能变成任意文件删除入口。
     """
-    # 清理目标只能来自注册表，随后逐级检查父目录，阻断路径穿越和符号链接跳转。
     if rotation < 0 or rotation > spec.backup_count:
         raise UnsafeLogTarget("轮转编号超出 catalog 允许范围")
     relative = PurePosixPath(_relative_name(spec, rotation))
@@ -140,6 +141,97 @@ def _registered_candidate(spec: LogFileSpec, rotation: int) -> Path:
         if not stat.S_ISDIR(current_stat.st_mode):
             raise UnsafeLogTarget("日志路径父级不是目录")
     return candidate
+
+
+def _parent_directory_for_spec(spec: LogFileSpec) -> Path:
+    """返回日志注册项对应的受控父目录，并校验父目录未越界且非符号链接。"""
+    relative = PurePosixPath(spec.relative_path)
+    if relative.is_absolute() or ".." in relative.parts:
+        raise UnsafeLogTarget("catalog 日志路径无效")
+    root = Path(settings.LOG_DIR).resolve()
+    candidate_parent = root.joinpath(*relative.parts[:-1])
+    resolved_parent = candidate_parent.resolve(strict=False)
+    if resolved_parent != root and root not in resolved_parent.parents:
+        raise UnsafeLogTarget("日志路径越过允许目录")
+    if not candidate_parent.exists():
+        return candidate_parent
+    parent_stat = _safe_lstat(candidate_parent)
+    if parent_stat is not None and stat.S_ISLNK(parent_stat.st_mode):
+        raise UnsafeLogTarget("日志路径包含符号链接目录")
+    return candidate_parent
+
+
+def discover_orphan_rotations(
+    spec: LogFileSpec,
+    *,
+    min_age_seconds: int = SAFE_ORPHAN_AGE_SECONDS,
+) -> list[dict]:
+    """发现并校验与指定日志关联的孤儿轮转临时文件及异常隔离残留。
+
+    参数：
+        spec: 来自注册表的合法日志规格。
+        min_age_seconds: 最小静默时间（秒），默认 60 秒。未满足该时间的文件视为可能处于并发轮转竞态中，跳过清理。
+    返回：
+        列表，包含孤儿文件详细信息的字典：
+        {
+            "path": Path,
+            "relative_path": str,
+            "name": str,
+            "size": int,
+            "mtime": float,
+            "is_safe": bool,
+            "skip_reason": str,
+        }
+    """
+    parent = _parent_directory_for_spec(spec)
+    if not parent.exists() or not parent.is_dir():
+        return []
+
+    stem = PurePosixPath(spec.relative_path).name
+    rotate_prefix = f"{stem}.rotate."
+    cleanup_prefix = f".{stem}."
+    cleanup_suffix = ".cleanup-"
+    now = time.time()
+    orphans = []
+
+    try:
+        entries = list(parent.iterdir())
+    except OSError:
+        return []
+
+    for entry in entries:
+        name = entry.name
+        # 严格匹配关联当前 spec 的孤儿轮转文件与隔离残留
+        is_rotate_orphan = name.startswith(rotate_prefix) and len(name) > len(rotate_prefix)
+        is_cleanup_orphan = name.startswith(cleanup_prefix) and cleanup_suffix in name
+        if not (is_rotate_orphan or is_cleanup_orphan):
+            continue
+
+        file_stat = _safe_lstat(entry)
+        if file_stat is None:
+            continue
+
+        # 必须是普通文件，严禁处理符号链接、目录或设备文件
+        if stat.S_ISLNK(file_stat.st_mode) or not stat.S_ISREG(file_stat.st_mode):
+            continue
+
+        rel_parts = list(PurePosixPath(spec.relative_path).parts[:-1]) + [name]
+        relative_path = "/".join(rel_parts)
+        age = now - file_stat.st_mtime
+        is_safe = age >= min_age_seconds
+        skip_reason = "" if is_safe else f"文件产生仅 {age:.1f} 秒，低于 {min_age_seconds} 秒保护窗口"
+
+        orphans.append({
+            "path": entry,
+            "relative_path": relative_path,
+            "name": name,
+            "size": file_stat.st_size,
+            "mtime": file_stat.st_mtime,
+            "is_safe": is_safe,
+            "skip_reason": skip_reason,
+        })
+
+    return orphans
 
 
 def _safe_lstat(path: Path):
@@ -184,7 +276,7 @@ def _base_result(spec: LogFileSpec, rotation: int, action: str) -> dict:
     return {
         "source_key": spec.key,
         "source_path": spec.relative_path,
-        "file": _relative_name(spec, rotation),
+        "file": _relative_name(spec, rotation) if rotation >= 0 else spec.relative_path,
         "rotation": rotation,
         "action": action,
         "pre_exists": False,
@@ -300,20 +392,19 @@ def _truncate_current(spec: LogFileSpec) -> dict:
     return result
 
 
-def _unlink_rotation(spec: LogFileSpec, rotation: int) -> dict:
-    """隔离并删除一个轮转历史文件。
-
-    参数：``spec`` 为注册日志项，``rotation`` 为大于 0 的允许轮转编号。
-    返回：逐文件执行结果；不存在的历史文件是成功空操作。
-    异常：安全或文件系统错误记录在返回结果中。
-
-    先原子改名到随机隔离名，再删除隔离文件，避免并发轮转在路径复用时误删
-    新产生的同名文件。
-    """
-    result = _base_result(spec, rotation, "unlink")
+def _unlink_candidate(
+    spec: LogFileSpec,
+    path: Path,
+    relative_name: str,
+    rotation: int,
+    action: str = "unlink",
+    outcome_name: str = "unlinked",
+) -> dict:
+    """安全隔离并删除一个指定的轮转或孤儿历史文件。"""
+    result = _base_result(spec, rotation, action)
+    result["file"] = relative_name
     quarantine = None
     try:
-        path = _registered_candidate(spec, rotation)
         before = _safe_lstat(path)
         if before is None:
             return result
@@ -331,7 +422,7 @@ def _unlink_rotation(spec: LogFileSpec, rotation: int) -> dict:
             return result
         _assert_regular(immediate)
         if _identity(immediate) != _identity(before):
-            raise UnsafeLogTarget("轮转日志在删除前已被替换，已拒绝删除")
+            raise UnsafeLogTarget("目标日志在删除前已被替换，已拒绝删除")
 
         # 原子改名是文件所有权边界：成功后，清理过程只持有隔离文件，
         # 即使日志路径被新的写入进程替换，也不会误删新文件。
@@ -339,13 +430,13 @@ def _unlink_rotation(spec: LogFileSpec, rotation: int) -> dict:
         os.rename(path, quarantine)
         isolated = _safe_lstat(quarantine)
         if isolated is None:
-            raise UnsafeLogTarget("轮转日志隔离后消失")
+            raise UnsafeLogTarget("目标日志隔离后消失")
         _assert_regular(isolated)
         if _identity(isolated) != _identity(before):
             restored = _restore_quarantined(path, quarantine)
             quarantine = None if restored else quarantine
             suffix = "并已恢复原路径" if restored else f"；隔离副本保留为 {quarantine.name}"
-            raise UnsafeLogTarget(f"轮转日志在隔离前已被替换，已拒绝删除{suffix}")
+            raise UnsafeLogTarget(f"目标日志在隔离前已被替换，已拒绝删除{suffix}")
 
         os.unlink(quarantine)
         quarantine = None
@@ -357,9 +448,9 @@ def _unlink_rotation(spec: LogFileSpec, rotation: int) -> dict:
                 post_inode=after.st_ino,
                 post_size=after.st_size,
             )
-            raise UnsafeLogTarget("轮转日志删除后路径仍然存在")
+            raise UnsafeLogTarget("目标日志删除后路径仍然存在")
         result["bytes_freed"] = before.st_size
-        result["outcome"] = "unlinked"
+        result["outcome"] = outcome_name
     except (OSError, UnsafeLogTarget, ValueError) as exc:
         _mark_failure(result, exc)
         try:
@@ -378,6 +469,31 @@ def _unlink_rotation(spec: LogFileSpec, rotation: int) -> dict:
     return result
 
 
+def _unlink_rotation(spec: LogFileSpec, rotation: int) -> dict:
+    """隔离并删除一个标准轮转历史文件（.1 至 .N）。"""
+    path = _registered_candidate(spec, rotation)
+    return _unlink_candidate(
+        spec,
+        path,
+        _relative_name(spec, rotation),
+        rotation,
+        action="unlink",
+        outcome_name="unlinked",
+    )
+
+
+def _unlink_orphan_file(spec: LogFileSpec, path: Path, relative_name: str) -> dict:
+    """隔离并删除一个孤儿轮转临时文件。"""
+    return _unlink_candidate(
+        spec,
+        path,
+        relative_name,
+        rotation=-1,
+        action="unlink_orphan",
+        outcome_name="unlinked_orphan",
+    )
+
+
 def preview_cleanup(
     specs: tuple[LogFileSpec, ...],
     *,
@@ -389,10 +505,8 @@ def preview_cleanup(
     """只读取文件元数据并生成清理预览。
 
     参数：``specs`` 为受控注册项，目标字段用于回显，``scope`` 决定预计范围。
-    返回：当前文件、轮转文件、各轮转编号及合计的数量和字节数。
+    返回：当前文件、轮转文件、孤儿文件、各轮转编号及合计的数量和字节数。
     异常：注册路径不安全或范围非法时抛出相应异常。
-
-    预览与实际执行使用同一轮转上限，避免确认页显示的删除面和实际删除面不一致。
     """
     _validate_scope(scope)
     if not specs:
@@ -400,6 +514,7 @@ def preview_cleanup(
 
     current = {"file_count": 0, "total_bytes": 0}
     rotated = {"file_count": 0, "total_bytes": 0}
+    orphan = {"file_count": 0, "total_bytes": 0, "files": []}
     rotation_totals = {
         rotation: {"rotation": rotation, "file_count": 0, "total_bytes": 0}
         for rotation in range(1, MAX_ROTATION + 1)
@@ -420,6 +535,24 @@ def preview_cleanup(
                 rotation_totals[rotation]["file_count"] += 1
                 rotation_totals[rotation]["total_bytes"] += file_stat.st_size
 
+        if scope in {"rotated", "all"}:
+            discovered = discover_orphan_rotations(spec, min_age_seconds=0)
+            for item in discovered:
+                orphan["file_count"] += 1
+                orphan["total_bytes"] += item["size"]
+                orphan["files"].append({
+                    "source_key": spec.key,
+                    "file": item["relative_path"],
+                    "size": item["size"],
+                    "mtime": item["mtime"],
+                    "is_safe": item["is_safe"],
+                    "skip_reason": item["skip_reason"],
+                })
+
+    if scope in {"rotated", "all"}:
+        rotated["file_count"] += orphan["file_count"]
+        rotated["total_bytes"] += orphan["total_bytes"]
+
     selected = []
     if scope in {"current", "all"}:
         selected.append(current)
@@ -436,6 +569,7 @@ def preview_cleanup(
         "scope": scope,
         "current": current,
         "rotated": rotated,
+        "orphan": orphan,
         "rotations": list(rotation_totals.values()),
         "total": total,
     }
@@ -452,7 +586,6 @@ def execute_cleanup(specs: tuple[LogFileSpec, ...], scope: str) -> CleanupResult
     _validate_scope(scope)
     if not specs:
         raise ValueError("没有匹配的注册日志")
-    # 当前文件采用截断以保持写入句柄有效，历史轮转文件采用隔离后删除。
     results = []
     for spec in specs:
         for rotation in _selected_rotations(spec, scope):
@@ -461,6 +594,34 @@ def execute_cleanup(specs: tuple[LogFileSpec, ...], scope: str) -> CleanupResult
                 if rotation == 0
                 else _unlink_rotation(spec, rotation)
             )
+        if scope in {"rotated", "all"}:
+            orphans = discover_orphan_rotations(spec, min_age_seconds=SAFE_ORPHAN_AGE_SECONDS)
+            for item in orphans:
+                if item["is_safe"]:
+                    results.append(
+                        _unlink_orphan_file(spec, item["path"], item["relative_path"])
+                    )
+                else:
+                    results.append({
+                        "source_key": spec.key,
+                        "source_path": spec.relative_path,
+                        "file": item["relative_path"],
+                        "rotation": -1,
+                        "action": "skip_orphan",
+                        "pre_exists": True,
+                        "pre_device": None,
+                        "pre_inode": None,
+                        "bytes_before": item["size"],
+                        "bytes_freed": 0,
+                        "post_exists": True,
+                        "post_device": None,
+                        "post_inode": None,
+                        "post_size": item["size"],
+                        "inode_preserved": None,
+                        "succeeded": True,
+                        "outcome": "skipped_recent",
+                        "error": item["skip_reason"],
+                    })
     return CleanupResult(
         target=",".join(spec.key for spec in specs),
         scope=scope,

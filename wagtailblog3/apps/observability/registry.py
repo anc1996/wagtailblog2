@@ -101,6 +101,7 @@ _CATALOG_SPECS: tuple[LogFileSpec, ...] = tuple(
     LogFileSpec("email_debug", "email_debug_file", "email", "activity", "email/email_debug.log", "邮件调试日志", 3, SMALL_MAX_BYTES),
     LogFileSpec("email_error", "email_error_file", "email", "error", "email/email_error.log", "邮件错误日志"),
     LogFileSpec("runtime_runserver", "runtime_runserver_file", "runtime", "activity", "runtime/runserver.log", "Django 开发服务器请求日志"),
+    LogFileSpec("runtime_uwsgi", "runtime_uwsgi_file", "runtime", "activity", "runtime/uwsgi.log", "uWSGI 生产应用服务日志"),
 )
 
 

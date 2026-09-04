@@ -1,0 +1,37 @@
+# 项目级 Codex 配置 (Repository-scoped)
+
+[model_providers.custom]
+name = "gemini cpa"
+wire_api = "responses"
+requires_openai_auth = false
+base_url = "https://jp.studytop.top/v1"
+env_key = "GEMINI_API_KEY"
+
+[model_providers.sol]
+name = "sol cpa"
+wire_api = "responses"
+requires_openai_auth = false
+base_url = "https://jp.studytop.top/v1"
+env_key = "SOL_API_KEY"
+
+[model_providers.grok]
+name = "grok cpa"
+wire_api = "responses"
+requires_openai_auth = false
+base_url = "https://jp.studytop.top/v1"
+env_key = "GROK_API_KEY"
+
+[agents.sol]
+description = "Sol 架构与技术方案设计核心"
+config_file = ".codex/agents/sol.toml"
+nickname_candidates = ["SolArchitect", "SolPlanner"]
+
+[agents.gemini]
+description = "负责代码落地、功能重构与定向测试执行的 Gemini 开发主力"
+config_file = ".codex/agents/gemini.toml"
+nickname_candidates = ["GeminiCoder", "GeminiTester"]
+
+[agents.grok]
+description = "负责全流程对照方案审核与对抗式安全审查的 Grok 审查官"
+config_file = ".codex/agents/grok.toml"
+nickname_candidates = ["GrokAuditor", "GrokReviewer"]

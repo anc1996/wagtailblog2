@@ -1,54 +1,415 @@
 {% extends "observability/admin/base.html" %}
 
 {% block log_content %}
-  <form method="get" class="log-filter-form">
-    <div class="field"><label for="audit-user">操作人</label><input id="audit-user" name="user" value="{{ audit_filters.user }}"></div>
-    <div class="field"><label for="audit-ip">客户端 IP</label><input id="audit-ip" name="ip" value="{{ audit_filters.ip }}"></div>
-    <div class="field"><label for="audit-start">开始日期</label><input id="audit-start" type="date" name="start" value="{{ audit_filters.start }}"></div>
-    <div class="field"><label for="audit-end">结束日期</label><input id="audit-end" type="date" name="end" value="{{ audit_filters.end }}"></div>
-    <div class="field"><label for="audit-target-type">目标类型</label><select id="audit-target-type" name="target_type"><option value="">全部</option><option value="file"{% if audit_filters.target_type == "file" %} selected{% endif %}>单个文件</option><option value="domain"{% if audit_filters.target_type == "domain" %} selected{% endif %}>单个模块</option><option value="business"{% if audit_filters.target_type == "business" %} selected{% endif %}>业务日志</option><option value="all"{% if audit_filters.target_type == "all" %} selected{% endif %}>运行日志</option><option value="legacy"{% if audit_filters.target_type == "legacy" %} selected{% endif %}>旧记录</option></select></div>
-    <div class="field"><label for="audit-module">日志模块</label><input id="audit-module" name="module" value="{{ audit_filters.module }}" placeholder="例如 blog"></div>
-    <div class="field"><label for="audit-file">单文件目标</label><input id="audit-file" name="file" value="{{ audit_filters.file }}" placeholder="例如 blog_error"></div>
-    <div class="field"><label for="audit-kind">日志类型</label><select id="audit-kind" name="kind"><option value="">全部</option><option value="activity"{% if audit_filters.kind == "activity" %} selected{% endif %}>活动</option><option value="error"{% if audit_filters.kind == "error" %} selected{% endif %}>错误</option></select></div>
-    <div class="field"><label for="audit-scope">清理范围</label><select id="audit-scope" name="scope"><option value="">全部</option><option value="current"{% if audit_filters.scope == "current" %} selected{% endif %}>当前</option><option value="rotated"{% if audit_filters.scope == "rotated" %} selected{% endif %}>轮转</option><option value="all"{% if audit_filters.scope == "all" %} selected{% endif %}>全部范围</option></select></div>
-    <div class="field"><label for="audit-state">状态</label><select id="audit-state" name="state"><option value="">全部</option><option value="completed"{% if audit_filters.state == "completed" %} selected{% endif %}>成功</option><option value="partial"{% if audit_filters.state == "partial" %} selected{% endif %}>部分失败</option><option value="failed"{% if audit_filters.state == "failed" %} selected{% endif %}>失败</option></select></div>
-    <div class="field"><label for="audit-index-state">ES 同步</label><select id="audit-index-state" name="index_sync_state"><option value="">全部</option><option value="not_required"{% if audit_filters.index_sync_state == "not_required" %} selected{% endif %}>未启用</option><option value="pending"{% if audit_filters.index_sync_state == "pending" %} selected{% endif %}>等待中</option><option value="running"{% if audit_filters.index_sync_state == "running" %} selected{% endif %}>同步中</option><option value="completed"{% if audit_filters.index_sync_state == "completed" %} selected{% endif %}>已完成</option><option value="dead_letter"{% if audit_filters.index_sync_state == "dead_letter" %} selected{% endif %}>需人工处理</option></select></div>
-    <div class="field"><label for="audit-target">目标</label><input id="audit-target" name="target" value="{{ audit_filters.target }}"></div>
-    <div class="field"><label for="audit-q">目标或文件关键字</label><input id="audit-q" name="q" value="{{ audit_filters.q }}"></div>
-    <div class="log-filter-actions"><button type="submit" class="button">筛选</button><a class="button button-secondary" href="{% url 'observability:audits' %}">重置</a></div>
-  </form>
+  {# 1. 生命周期与超期归档治理看板 #}
+  <div class="log-retention-banner">
+    <div class="log-retention-metrics">
+      <div class="log-retention-metric">
+        <span class="label">历史审计总数</span>
+        <span class="value">{{ retention_summary.total_count }} <small>条</small></span>
+      </div>
+      <div class="log-retention-metric">
+        <span class="label">最早记录时间</span>
+        <span class="value date-val">{{ retention_summary.oldest_date|date:"Y-m-d H:i"|default:"暂无记录" }}</span>
+      </div>
+      <div class="log-retention-metric">
+        <span class="label">满 180 天待归档</span>
+        <span class="value {% if retention_summary.eligible_count > 0 %}text-warn{% else %}text-ok{% endif %}">
+          {{ retention_summary.eligible_count }} <small>条</small>
+        </span>
+      </div>
+      <div class="log-retention-metric">
+        <span class="label">异常未决保护</span>
+        <span class="value text-muted" title="未决或未完成同步的记录受终态安全门禁保护，不会被自动清理">
+          {{ retention_summary.unresolved_count }} <small>条</small>
+        </span>
+      </div>
+    </div>
 
+    <div class="log-retention-action-box">
+      {% if can_manage_logs %}
+        {% if retention_summary.eligible_count > 0 %}
+          <form method="post" class="log-purge-form" onsubmit="return confirm('确认要立即执行 180 天超期审计记录归档清理吗？\n满足终态安全门禁的记录将在导出 gzip 备份至冷存储后物理清理。');">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="purge_expired">
+            <input type="hidden" name="days" value="180">
+            <button type="submit" class="button button-small button-danger">
+              🧹 立即归档清理 ({{ retention_summary.eligible_count }} 条)
+            </button>
+          </form>
+        {% else %}
+          <span class="log-tag-badge tag-success">✅ 当前无超期归档记录（保留策略：180 天）</span>
+        {% endif %}
+      {% endif %}
+    </div>
+  </div>
+
+  {# 2. 筛选器区域：快捷时间切片 + 主搜索行 + 高级筛选折叠抽屉 #}
+  <div class="log-filter-container">
+    {# 快捷时间切片胶囊 #}
+    <div class="log-time-pills" role="navigation" aria-label="快捷时间筛选">
+      <span class="log-pills-title">时间范围：</span>
+      <a href="?{% if base_filter_query %}{{ base_filter_query }}{% endif %}"
+         class="log-pill {% if not audit_filters.range and not audit_filters.start and not audit_filters.end %}active{% endif %}">
+        全部
+      </a>
+      <a href="?range=today{% if base_filter_query %}&amp;{{ base_filter_query }}{% endif %}"
+         class="log-pill {% if audit_filters.range == 'today' %}active{% endif %}">
+        今天
+      </a>
+      <a href="?range=7d{% if base_filter_query %}&amp;{{ base_filter_query }}{% endif %}"
+         class="log-pill {% if audit_filters.range == '7d' %}active{% endif %}">
+        近 7 天
+      </a>
+      <a href="?range=30d{% if base_filter_query %}&amp;{{ base_filter_query }}{% endif %}"
+         class="log-pill {% if audit_filters.range == '30d' %}active{% endif %}">
+        近 30 天
+      </a>
+      <a href="?range=180d{% if base_filter_query %}&amp;{{ base_filter_query }}{% endif %}"
+         class="log-pill {% if audit_filters.range == '180d' %}active{% endif %}">
+        近 180 天 (6个月)
+      </a>
+    </div>
+
+    <form method="get" class="log-search-form" id="audit-filter-form">
+      {% if audit_filters.range %}
+        <input type="hidden" name="range" value="{{ audit_filters.range }}">
+      {% endif %}
+      <div class="log-search-main-row">
+        <div class="field search-field">
+          <input type="text" name="q" value="{{ audit_filters.q }}" placeholder="搜索目标、文件名或执行明细关键字..." aria-label="关键词搜索">
+        </div>
+        <div class="field select-field">
+          <select name="target_type" aria-label="目标类型">
+            <option value="">全部目标类型</option>
+            <option value="domain"{% if audit_filters.target_type == "domain" %} selected{% endif %}>业务领域 (domain)</option>
+            <option value="file"{% if audit_filters.target_type == "file" %} selected{% endif %}>单文件 (file)</option>
+            <option value="business"{% if audit_filters.target_type == "business" %} selected{% endif %}>全部业务 (business)</option>
+            <option value="all"{% if audit_filters.target_type == "all" %} selected{% endif %}>全域系统 (all)</option>
+            <option value="legacy"{% if audit_filters.target_type == "legacy" %} selected{% endif %}>历史归档 (legacy)</option>
+          </select>
+        </div>
+        <div class="field select-field">
+          <select name="state" aria-label="执行状态">
+            <option value="">全部状态</option>
+            <option value="completed"{% if audit_filters.state == "completed" %} selected{% endif %}>执行成功 (completed)</option>
+            <option value="partial"{% if audit_filters.state == "partial" %} selected{% endif %}>部分失败 (partial)</option>
+            <option value="failed"{% if audit_filters.state == "failed" %} selected{% endif %}>完全失败 (failed)</option>
+          </select>
+        </div>
+        <div class="form-action-buttons">
+          <button type="submit" class="button button-small">筛选</button>
+          <a class="button button-small button-secondary" href="{% url 'observability:audits' %}">重置</a>
+          <button type="button" class="button button-small button-secondary js-toggle-advanced" aria-expanded="false" id="toggle-advanced-btn">
+            高级筛选 ▾
+          </button>
+        </div>
+      </div>
+
+      {# 高级筛选折叠区域 #}
+      <div class="log-search-advanced-panel" id="advanced-filter-panel" hidden>
+        <div class="advanced-grid">
+          <div class="field">
+            <label for="audit-user">操作人</label>
+            <input id="audit-user" name="user" value="{{ audit_filters.user }}" placeholder="用户名或邮箱">
+          </div>
+          <div class="field">
+            <label for="audit-ip">客户端 IP</label>
+            <input id="audit-ip" name="ip" value="{{ audit_filters.ip }}" placeholder="如 192.168.20.1">
+          </div>
+          <div class="field">
+            <label for="audit-target">清理目标代码</label>
+            <input id="audit-target" name="target" value="{{ audit_filters.target }}" placeholder="如 celery:* 或 all:*:*">
+          </div>
+          <div class="field">
+            <label for="audit-module">日志领域模块</label>
+            <input id="audit-module" name="module" value="{{ audit_filters.module }}" placeholder="例如 blog">
+          </div>
+          <div class="field">
+            <label for="audit-kind">日志类型</label>
+            <select id="audit-kind" name="kind">
+              <option value="">全部类型</option>
+              <option value="activity"{% if audit_filters.kind == "activity" %} selected{% endif %}>常规活动 (activity)</option>
+              <option value="error"{% if audit_filters.kind == "error" %} selected{% endif %}>错误异常 (error)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="audit-scope">清理范围</label>
+            <select id="audit-scope" name="scope">
+              <option value="">全部范围</option>
+              <option value="current"{% if audit_filters.scope == "current" %} selected{% endif %}>仅当前日志 (current)</option>
+              <option value="rotated"{% if audit_filters.scope == "rotated" %} selected{% endif %}>仅轮转归档 (rotated)</option>
+              <option value="all"{% if audit_filters.scope == "all" %} selected{% endif %}>当前+轮转 (all)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="audit-index-state">ES 同步状态</label>
+            <select id="audit-index-state" name="index_sync_state">
+              <option value="">全部同步状态</option>
+              <option value="completed"{% if audit_filters.index_sync_state == "completed" %} selected{% endif %}>已完成同步</option>
+              <option value="not_required"{% if audit_filters.index_sync_state == "not_required" %} selected{% endif %}>无需同步</option>
+              <option value="pending"{% if audit_filters.index_sync_state == "pending" %} selected{% endif %}>等待同步</option>
+              <option value="running"{% if audit_filters.index_sync_state == "running" %} selected{% endif %}>正在同步</option>
+              <option value="dead_letter"{% if audit_filters.index_sync_state == "dead_letter" %} selected{% endif %}>进入死信队列</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="audit-start">起始日期</label>
+            <input id="audit-start" type="date" name="start" value="{{ audit_filters.start }}">
+          </div>
+          <div class="field">
+            <label for="audit-end">结束日期</label>
+            <input id="audit-end" type="date" name="end" value="{{ audit_filters.end }}">
+          </div>
+        </div>
+      </div>
+    </form>
+  </div>
+
+  {# 3. 精简 7 语义列表格 #}
   <div class="listing log-listing">
-    <table class="listing">
-      <thead><tr><th>操作时间</th><th>完成时间</th><th>操作人/IP</th><th>目标类型</th><th>目标</th><th>日志类型</th><th>范围</th><th>文件总数</th><th>成功</th><th>失败</th><th>清理前</th><th>释放</th><th>文件状态</th><th>ES 同步</th></tr></thead>
+    <table class="listing log-audit-table">
+      <thead>
+        <tr>
+          <th style="width: 14%;">操作时间 / 耗时</th>
+          <th style="width: 14%;">操作人 / 来源</th>
+          <th style="width: 20%;">清理目标</th>
+          <th style="width: 14%;">清理范围</th>
+          <th style="width: 14%;">处理成效</th>
+          <th style="width: 14%;">状态 / ES 同步</th>
+          <th style="width: 10%; text-align: center;">审计报告</th>
+        </tr>
+      </thead>
       <tbody>
         {% for audit in audit_page %}
           <tr>
-            <td>{{ audit.created_at|date:"Y-m-d H:i:s" }}</td>
-            <td>{{ audit.completed_at|date:"Y-m-d H:i:s"|default:"处理中/未知" }}</td>
-            <td>{{ audit.user|default:"已删除用户" }}<small>{{ audit.ip_address|default:"-" }}</small></td>
-            <td>{{ audit.target_type }}</td>
-            <td><code>{{ audit.target }}</code></td>
-            <td>{{ audit.kind|default:"全部" }}</td>
-            <td>{{ audit.scope }}</td>
-            <td>{{ audit.files_before }}</td>
-            <td>{{ audit.succeeded_files }}</td>
-            <td>{{ audit.failed_files }}</td>
-            <td>{{ audit.bytes_before|filesizeformat }}</td>
-            <td>{{ audit.bytes_freed|filesizeformat }}</td>
+            {# 1. 时间/耗时 #}
             <td>
-              <span class="{% if audit.state == 'completed' %}log-success{% else %}log-failed{% endif %}">{{ audit.state }}</span>
-              <details class="log-audit-details"><summary>查看逐文件明细</summary><pre>{{ audit.details|pprint }}</pre></details>
+              <div class="log-cell-time">{{ audit.created_at|date:"Y-m-d H:i:s" }}</div>
+              <div class="log-cell-subtle">耗时 {{ audit.duration_display }}</div>
             </td>
-            <td><span class="{% if audit.index_sync_state == 'completed' or audit.index_sync_state == 'not_required' %}log-success{% else %}log-failed{% endif %}">{{ audit.index_sync_state }}</span><small>删除 {{ audit.index_sync_deleted }} 条；尝试 {{ audit.index_sync_attempts }} 次</small></td>
+            {# 2. 操作人/IP #}
+            <td>
+              <div class="log-cell-user">{{ audit.user|default:"已删除用户" }}</div>
+              <div class="log-cell-subtle">{{ audit.ip_address|default:"-" }}</div>
+            </td>
+            {# 3. 清理目标 #}
+            <td>
+              <span class="log-tag-badge tag-{{ audit.target_type }}">{{ audit.target_type_display }}</span>
+              <code class="log-target-code">{{ audit.target }}</code>
+            </td>
+            {# 4. 清理范围 #}
+            <td>
+              <div class="log-cell-kind">{{ audit.kind_display }}</div>
+              <span class="log-scope-badge">{{ audit.scope_display }}</span>
+            </td>
+            {# 5. 处理成效 #}
+            <td>
+              <div class="log-cell-freed {% if audit.bytes_freed > 0 %}text-freed-bold{% endif %}">
+                {{ audit.bytes_freed|filesizeformat }}
+              </div>
+              <div class="log-cell-counts">
+                <span class="success-files">成功 {{ audit.succeeded_files }}</span>
+                {% if audit.failed_files > 0 %}
+                  <span class="failed-files-alert">⚠️ 失败 {{ audit.failed_files }}</span>
+                {% endif %}
+              </div>
+            </td>
+            {# 6. 状态/ES 同步 #}
+            <td>
+              <div>
+                {% if audit.state == 'completed' %}
+                  <span class="status-dot dot-success"></span>已完成
+                {% elif audit.state == 'partial' %}
+                  <span class="status-dot dot-warn"></span>部分失败
+                {% else %}
+                  <span class="status-dot dot-error"></span>完全失败
+                {% endif %}
+              </div>
+              <div class="log-es-summary es-state-{{ audit.index_sync_state }}">
+                {% if audit.index_sync_state == 'completed' %}
+                  ES 删 {{ audit.index_sync_deleted }} 条 ({{ audit.index_sync_attempts }}次)
+                {% elif audit.index_sync_state == 'not_required' %}
+                  ES 无需同步
+                {% elif audit.index_sync_state == 'pending' or audit.index_sync_state == 'running' %}
+                  ES 同步中...
+                {% else %}
+                  ES 异常 ({{ audit.index_sync_state }})
+                {% endif %}
+              </div>
+            </td>
+            {# 7. 独立操作列 #}
+            <td style="text-align: center;">
+              <button type="button"
+                      class="button button-small button-secondary js-open-audit-detail"
+                      data-audit-id="{{ audit.id }}"
+                      data-detail-url="{% url 'observability:audit_detail' audit.id %}">
+                📋 报告
+              </button>
+            </td>
           </tr>
-        {% empty %}<tr><td colspan="14">当前筛选条件下没有清理记录。</td></tr>{% endfor %}
+        {% empty %}
+          <tr>
+            <td colspan="7" class="log-empty-state">当前筛选条件下暂无日志清理审计记录。</td>
+          </tr>
+        {% endfor %}
       </tbody>
     </table>
   </div>
-  {% if audit_page.has_previous or audit_page.has_next %}<nav class="pagination" aria-label="清理记录分页">
-    {% if audit_page.has_previous %}<a class="button button-secondary" href="?{% if audit_query %}{{ audit_query }}&amp;{% endif %}page={{ audit_page.previous_page_number }}">上一页</a>{% endif %}
-    <span>第 {{ audit_page.number }} / {{ audit_page.paginator.num_pages }} 页</span>
-    {% if audit_page.has_next %}<a class="button button-secondary" href="?{% if audit_query %}{{ audit_query }}&amp;{% endif %}page={{ audit_page.next_page_number }}">下一页</a>{% endif %}
-  </nav>{% endif %}
+
+  {# 分页控制 #}
+  {% if audit_page.has_previous or audit_page.has_next %}
+    <nav class="pagination" aria-label="清理记录分页">
+      {% if audit_page.has_previous %}
+        <a class="button button-secondary" href="?{% if audit_query %}{{ audit_query }}&amp;{% endif %}page={{ audit_page.previous_page_number }}">上一页</a>
+      {% endif %}
+      <span>第 {{ audit_page.number }} / {{ audit_page.paginator.num_pages }} 页</span>
+      {% if audit_page.has_next %}
+        <a class="button button-secondary" href="?{% if audit_query %}{{ audit_query }}&amp;{% endif %}page={{ audit_page.next_page_number }}">下一页</a>
+      {% endif %}
+    </nav>
+  {% endif %}
+
+  {# 4. 结构化审计明细模态弹窗 (Audit Detail Modal) #}
+  <div id="audit-detail-modal" class="log-modal-container" role="dialog" aria-modal="true" aria-labelledby="audit-modal-title" hidden>
+    <div class="log-modal-backdrop js-close-audit-modal"></div>
+    <div class="log-modal-content">
+      <div class="log-modal-header">
+        <div>
+          <h2 id="audit-modal-title" class="log-modal-title">审计详情报告</h2>
+          <div class="log-modal-subtitle" id="audit-modal-subtitle">正在读取数据...</div>
+        </div>
+        <button type="button" class="log-modal-close js-close-audit-modal" aria-label="关闭弹窗">✖</button>
+      </div>
+
+      {# 模态弹窗内 KPI 卡片 #}
+      <div class="log-modal-kpi-grid" id="modal-kpi-grid">
+        <div class="kpi-card">
+          <span class="kpi-label">释放总容量</span>
+          <span class="kpi-value text-freed-bold" id="kpi-freed">0 B</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-label">文件处理总数</span>
+          <span class="kpi-value" id="kpi-files">0</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-label">实际变动文件</span>
+          <span class="kpi-value text-ok" id="kpi-changed">0</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-label">处理失败数</span>
+          <span class="kpi-value" id="kpi-failed">0</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-label">耗时</span>
+          <span class="kpi-value" id="kpi-duration">-</span>
+        </div>
+      </div>
+
+      {# 模态弹窗 Tab 标签页 #}
+      <div class="log-modal-tabs" role="tablist">
+        <button type="button" class="log-modal-tab active" role="tab" data-tab="tab-changed" aria-selected="true">
+          📁 实际变动文件 (<span id="tab-changed-count">0</span>)
+        </button>
+        <button type="button" class="log-modal-tab" role="tab" data-tab="tab-all" aria-selected="false">
+          📑 全量匹配清单 (<span id="tab-all-count">0</span>)
+        </button>
+        <button type="button" class="log-modal-tab" role="tab" data-tab="tab-sync" aria-selected="false">
+          ⚡ ES 同步与元数据
+        </button>
+        <button type="button" class="log-modal-tab" role="tab" data-tab="tab-raw" aria-selected="false">
+          🔍 原始 JSON 取证
+        </button>
+      </div>
+
+      {# Tab 1: 实际变动文件 #}
+      <div class="log-tab-panel active" id="tab-changed" role="tabpanel">
+        <div class="table-responsive">
+          <table class="listing log-modal-table">
+            <thead>
+              <tr>
+                <th>文件物理相对路径</th>
+                <th style="width: 15%;">处理动作</th>
+                <th style="width: 15%;">清理前大小</th>
+                <th style="width: 15%;">释放空间</th>
+                <th style="width: 15%;">结果状态</th>
+              </tr>
+            </thead>
+            <tbody id="changed-files-tbody">
+              <tr><td colspan="5" class="empty-hint">暂无变动数据</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {# Tab 2: 全量匹配清单 #}
+      <div class="log-tab-panel" id="tab-all" role="tabpanel" hidden>
+        <div class="log-tab-filter">
+          <input type="text" id="all-files-filter" placeholder="在全量清单中快速过滤路径或状态..." aria-label="清单过滤">
+        </div>
+        <div class="table-responsive log-scroll-table">
+          <table class="listing log-modal-table" id="all-files-table">
+            <thead>
+              <tr>
+                <th>文件物理相对路径</th>
+                <th style="width: 12%;">动作</th>
+                <th style="width: 20%;">执行结果说明</th>
+                <th style="width: 14%;">清理前</th>
+                <th style="width: 14%;">释放</th>
+                <th style="width: 10%;">状态</th>
+              </tr>
+            </thead>
+            <tbody id="all-files-tbody">
+              <tr><td colspan="6" class="empty-hint">暂无数据</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {# Tab 3: ES 同步与元数据 #}
+      <div class="log-tab-panel" id="tab-sync" role="tabpanel" hidden>
+        <div class="sync-info-grid">
+          <div class="sync-row">
+            <span class="sync-label">ES 同步状态：</span>
+            <span class="sync-val" id="sync-state">-</span>
+          </div>
+          <div class="sync-row">
+            <span class="sync-label">删除文档总数：</span>
+            <span class="sync-val" id="sync-deleted">0 条</span>
+          </div>
+          <div class="sync-row">
+            <span class="sync-label">尝试重试次数：</span>
+            <span class="sync-val" id="sync-attempts">0 次</span>
+          </div>
+          <div class="sync-row">
+            <span class="sync-label">最后同步完成时间：</span>
+            <span class="sync-val" id="sync-completed-at">-</span>
+          </div>
+          <div class="sync-row full-width">
+            <span class="sync-label">最后错误信息：</span>
+            <span class="sync-val text-error" id="sync-error">无</span>
+          </div>
+          <div class="sync-row full-width">
+            <span class="sync-label">请求 User-Agent：</span>
+            <span class="sync-val" id="meta-user-agent">-</span>
+          </div>
+        </div>
+      </div>
+
+      {# Tab 4: 原始 JSON 取证 #}
+      <div class="log-tab-panel" id="tab-raw" role="tabpanel" hidden>
+        <div class="raw-actions">
+          <button type="button" class="button button-small button-secondary" id="copy-audit-json-btn">
+            📋 复制完整 JSON
+          </button>
+          <span class="copy-feedback" id="copy-feedback" hidden>已复制到剪贴板！</span>
+        </div>
+        <pre class="log-raw-code" id="raw-json-display">{}</pre>
+      </div>
+
+      <div class="log-modal-footer">
+        <button type="button" class="button button-secondary js-close-audit-modal">关闭</button>
+      </div>
+    </div>
+  </div>
 {% endblock %}

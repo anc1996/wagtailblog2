@@ -129,7 +129,7 @@ class LogAdminViewTests(TestCase):
 
     def test_audit_page_exposes_file_level_details_for_success(self):
         self._grant("view_logs")
-        LogClearAudit.objects.create(
+        audit = LogClearAudit.objects.create(
             user=self.user,
             target="file:blog_error:error",
             scope="current",
@@ -142,8 +142,10 @@ class LogAdminViewTests(TestCase):
         )
         response = self.client.get(reverse("observability:audits"))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "查看逐文件明细")
-        self.assertContains(response, "blog/blog_error.log")
+        self.assertContains(response, "📋 报告")
+        detail_response = self.client.get(reverse("observability:audit_detail", args=[audit.id]))
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertContains(detail_response, "blog/blog_error.log")
 
     def test_log_content_is_html_escaped(self):
         self._grant("view_logs")

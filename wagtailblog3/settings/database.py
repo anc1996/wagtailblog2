@@ -407,6 +407,11 @@ def get_celery_config(time_zone, redis_host, redis_port, redis_password):
 				# 任务选项：指定使用 maintenance 队列
 				# 维护任务在低优先级队列执行，不影响核心业务
 			},
+			'cleanup-expired-log-audits': {
+				'task': 'observability.tasks.cleanup_expired_log_audits',
+				'schedule': 60 * 60 * 24,
+				'options': {'queue': maintenance_queue},
+			},
 			'dispatch-pending-log-index-sync': {
 				'task': 'observability.tasks.dispatch_pending_log_index_sync_jobs',
 				'schedule': 30,

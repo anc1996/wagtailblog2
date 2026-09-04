@@ -346,3 +346,32 @@ def dispatch_pending_log_index_sync_jobs(limit: int = 100) -> int:
     for job_id in job_ids:
         sync_log_index.apply_async(args=(job_id,), queue="maintenance")
     return len(job_ids)
+
+
+
+@shared_task(name="observability.tasks.cleanup_expired_log_audits")
+def cleanup_expired_log_audits(retention_days: int = 180, batch_size: int = 500) -> dict:
+    """定时任务：自动清理超期（默认180天/6个月）的日志清理审计记录与Outbox数据。
+
+    遵循严格的终态安全门禁，并在删除前将审计数据导出压缩备份至冷存储。
+
+    参数:
+        retention_days: 保留天数，默认 180 天。
+        batch_size: 每批次删除记录数，默认 500。
+    返回:
+        执行统计结果字典。
+    """
+    from .services import purge_expired_audits
+
+    logger.info(
+        "Celery 周期任务启动：开始执行超期日志审计生命周期清理 (retention_days=%d)...",
+        retention_days,
+    )
+    result = purge_expired_audits(days=retention_days, batch_size=batch_size, dry_run=False, backup=True)
+    logger.info(
+        "Celery 周期任务完成：超期日志审计清理结果: 匹配 %d 条，已删除 %d 条，共 %d 批次",
+        result.get("matched_count", 0),
+        result.get("deleted_count", 0),
+        result.get("batches", 0),
+    )
+    return result

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, time, timedelta
+from django.utils import timezone
 
 from django.contrib import messages
 from django.core.paginator import Paginator
@@ -26,7 +27,14 @@ from .models import LogClearAudit
 from .permissions import MANAGE_PERMISSION, VIEW_PERMISSION, require_log_permission
 from .pagination import read_log_page
 from .registry import LOG_DOMAIN_KEYS, LOG_FILE_BY_KEY
-from .services import clear_and_audit, describe_clear, get_overview, select_clear_specs
+from .services import (
+    clear_and_audit,
+    describe_clear,
+    get_audit_retention_summary,
+    get_overview,
+    purge_expired_audits,
+    select_clear_specs,
+)
 
 
 CLEAR_PREVIEW_SALT = "observability.clear-preview.v1"
@@ -175,15 +183,136 @@ class LogRecordsView(LogAdminView):
         return context
 
 
+class LogAuditDetailView(LogAdminView):
+    """日志清理审计记录的异步详情视图，返回结构化 JSON。"""
+
+    def get(self, request, audit_id: int, *args, **kwargs):
+        require_log_permission(request, VIEW_PERMISSION)
+        try:
+            audit = LogClearAudit.objects.select_related("user").get(pk=audit_id)
+        except LogClearAudit.DoesNotExist:
+            return JsonResponse({"error": "审计记录不存在"}, status=404)
+
+        details = audit.details if isinstance(audit.details, dict) else {}
+        changed_files = details.get("changed_files") or []
+        file_results = details.get("file_results") or []
+        actual = details.get("actual") or {}
+        preview = details.get("preview") or {}
+        req_meta = details.get("request") or {}
+
+        # 构造易读的变动与全量文件清单
+        clean_file_results = []
+        for item in file_results:
+            clean_file_results.append({
+                "file": item.get("file", ""),
+                "action": item.get("action", ""),
+                "outcome": item.get("outcome", ""),
+                "bytes_before": item.get("bytes_before", 0),
+                "bytes_freed": item.get("bytes_freed", 0),
+                "succeeded": item.get("succeeded", True),
+                "error": item.get("error", ""),
+                "inode_preserved": item.get("inode_preserved"),
+                "pre_inode": item.get("pre_inode"),
+                "post_inode": item.get("post_inode"),
+            })
+
+        # 构造已脱敏的请求元信息（排除敏感凭据）
+        sanitized_req = {
+            "method": req_meta.get("method", ""),
+            "request_id": req_meta.get("request_id", ""),
+            "user_agent": req_meta.get("user_agent", ""),
+            "validation": req_meta.get("validation", ""),
+        }
+
+        data = {
+            "id": audit.id,
+            "created_at": audit.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+            "completed_at": audit.completed_at.strftime("%Y-%m-%d %H:%M:%S") if audit.completed_at else "-",
+            "duration_display": audit.duration_display,
+            "user": audit.user.username if audit.user else "已删除用户",
+            "ip_address": audit.ip_address or "-",
+            "target_type": audit.target_type,
+            "target_type_display": audit.target_type_display,
+            "target": audit.target,
+            "kind": audit.kind,
+            "kind_display": audit.kind_display,
+            "scope": audit.scope,
+            "scope_display": audit.scope_display,
+            "bytes_before": audit.bytes_before,
+            "bytes_freed": audit.bytes_freed,
+            "files_before": audit.files_before,
+            "succeeded_files": audit.succeeded_files,
+            "failed_files": audit.failed_files,
+            "state": audit.state,
+            "index_sync": {
+                "state": audit.index_sync_state,
+                "deleted": audit.index_sync_deleted,
+                "attempts": audit.index_sync_attempts,
+                "task_id": audit.index_sync_task_id,
+                "last_error": audit.index_sync_last_error,
+                "completed_at": audit.index_sync_completed_at.strftime("%Y-%m-%d %H:%M:%S") if audit.index_sync_completed_at else "-",
+            },
+            "changed_files": changed_files,
+            "file_results": clean_file_results,
+            "preview": preview,
+            "request_meta": sanitized_req,
+            "raw_details": details,
+        }
+        return JsonResponse(data)
+
+
 class LogAuditView(LogAdminView):
     template_name = "observability/admin/audits.html"
     page_title = "清理记录"
+
+    def post(self, request, *args, **kwargs):
+        """处理管理员主动触发超期审计记录归档清理。"""
+        action = request.POST.get("action", "").strip()
+        if action == "purge_expired":
+            require_log_permission(request, MANAGE_PERMISSION)
+            days = 180
+            try:
+                days = int(request.POST.get("days", 180))
+            except (ValueError, TypeError):
+                days = 180
+            result = purge_expired_audits(days=days, dry_run=False, backup=True)
+            deleted = result.get("deleted_count", 0)
+            if deleted > 0:
+                messages.success(
+                    request,
+                    f"已成功归档清理 {deleted} 条超过 {days} 天的终态审计记录。"
+                    f"冷备备份路径：{result.get('backup_path', '无')}",
+                )
+            else:
+                messages.info(
+                    request,
+                    f"未检索到满足终态安全门禁（且超过 {days} 天）的待归档审计记录。",
+                )
+            return HttpResponseRedirect(reverse("observability:audits"))
+        return super().get(request, *args, **kwargs)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         query = self.request.GET.copy()
         audits = LogClearAudit.objects.select_related("user")
+
+        range_preset = query.get("range", "").strip()
+        today = timezone.localdate()
+        if range_preset == "today":
+            query["start"] = today.isoformat()
+            query["end"] = today.isoformat()
+        elif range_preset == "7d":
+            query["start"] = (today - timedelta(days=7)).isoformat()
+            query["end"] = today.isoformat()
+        elif range_preset == "30d":
+            query["start"] = (today - timedelta(days=30)).isoformat()
+            query["end"] = today.isoformat()
+        elif range_preset == "180d":
+            query["start"] = (today - timedelta(days=180)).isoformat()
+            query["end"] = today.isoformat()
+
         filters = {
+            "range": range_preset,
             "user": query.get("user", "").strip(),
             "ip": query.get("ip", "").strip(),
             "target": query.get("target", "").strip(),
@@ -226,17 +355,32 @@ class LogAuditView(LogAdminView):
         for name, lookup in (("start", "created_at__gte"), ("end", "created_at__lte")):
             if filters[name]:
                 try:
-                    value = datetime.fromisoformat(filters[name])
+                    d = datetime.fromisoformat(filters[name])
                     if name == "end":
-                        value = value.replace(hour=23, minute=59, second=59)
-                    audits = audits.filter(**{lookup: value})
-                except ValueError:
+                        d = datetime.combine(d.date(), time.max)
+                    else:
+                        d = datetime.combine(d.date(), time.min)
+                    if timezone.is_naive(d):
+                        d = timezone.make_aware(d, timezone.get_current_timezone())
+                    audits = audits.filter(**{lookup: d})
+                except (ValueError, TypeError):
                     filters[name] = ""
+
         paginator = Paginator(audits, 50)
         context["audit_page"] = paginator.get_page(self.request.GET.get("page"))
+
+        # 构建不含分页与快捷时间的基准筛选参数，用于模板内切换切片
+        base_filter_query = self.request.GET.copy()
+        for k in ("page", "range", "start", "end"):
+            base_filter_query.pop(k, None)
+        context["base_filter_query"] = base_filter_query.urlencode()
+
         query.pop("page", None)
         context["audit_filters"] = filters
         context["audit_query"] = query.urlencode()
+
+        # 注入 180 天存储生命周期看板状态
+        context["retention_summary"] = get_audit_retention_summary(days=180)
         return context
 
 

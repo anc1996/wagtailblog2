@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 from datetime import timedelta
+import gzip
+import json
+import logging
 from time import monotonic
 from uuid import UUID
 
 from django.core.cache import cache
 from django.db import IntegrityError, transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from .elasticsearch_logs import (
@@ -18,6 +22,7 @@ from .elasticsearch_logs import (
 )
 from pathlib import Path
 from django.conf import settings
+from .models import LogClearAudit
 from .reader import read_logs, resolve_registered_path
 from .registry import LOG_DOMAIN_KEYS, LOG_FILE_BY_KEY, LogFileSpec, iter_log_files
 from .cleanup import (
@@ -455,3 +460,151 @@ def _write_wagtail_audit(audit, user, request_metadata):
         details["wagtail_audit_error"] = f"{type(exc).__name__}: {exc}"
         audit.details = details
         audit.save(update_fields=("details",))
+
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_RETENTION_DAYS: int = 180
+DEFAULT_PURGE_BATCH_SIZE: int = 500
+
+
+def get_audit_retention_summary(days: int = DEFAULT_RETENTION_DAYS) -> dict:
+    """获取日志清理审计台账的生命周期保留状态摘要。
+
+    用于在后台管理界面展示审计总数、最早记录时间、超期可清理记录数及未决保护记录数。
+
+    参数:
+        days: 审计记录保留天数，默认 180 天。
+    返回:
+        包含 retention_days, total_count, oldest_date, cutoff_date,
+        eligible_count, unresolved_count 的字典。
+    """
+    cutoff = timezone.now() - timedelta(days=days)
+    total_count = LogClearAudit.objects.count()
+    oldest_audit = LogClearAudit.objects.order_by("created_at").first()
+    oldest_date = oldest_audit.created_at if oldest_audit else None
+
+    # 终态安全门禁：只有文件清理已完成/失败，且 ES 同步任务也已完成或无需同步的，才允许删除
+    terminal_q = Q(created_at__lt=cutoff) & Q(state__in=["completed", "failed"]) & Q(
+        index_sync_state__in=["completed", "not_required"]
+    )
+    eligible_count = LogClearAudit.objects.filter(terminal_q).count()
+
+    # 未决状态（可能仍处于重试或人工排障中，受安全保护豁免删除）
+    unresolved_q = Q(created_at__lt=cutoff) & ~terminal_q
+    unresolved_count = LogClearAudit.objects.filter(unresolved_q).count()
+
+    return {
+        "retention_days": days,
+        "total_count": total_count,
+        "oldest_date": oldest_date,
+        "cutoff_date": cutoff,
+        "eligible_count": eligible_count,
+        "unresolved_count": unresolved_count,
+    }
+
+
+def purge_expired_audits(
+    days: int = DEFAULT_RETENTION_DAYS,
+    batch_size: int = DEFAULT_PURGE_BATCH_SIZE,
+    dry_run: bool = False,
+    backup: bool = True,
+) -> dict:
+    """清理超期（超过指定保留天数）的日志清理审计记录与关联任务。
+
+    执行严格的终态安全门禁与分批不锁表删除策略；清理前将待删除记录压缩归档至冷存储。
+
+    参数:
+        days: 保留天数，默认 180 天。
+        batch_size: 每次事务删除批次大小，防止长事务锁表。
+        dry_run: 是否仅演练而不实际删除。
+        backup: 删除前是否先备份至 JSON 压缩归档文件。
+    返回:
+        包含 matched_count, deleted_count, batches, backup_path 等信息的字典。
+    """
+    cutoff = timezone.now() - timedelta(days=days)
+    terminal_q = Q(created_at__lt=cutoff) & Q(state__in=["completed", "failed"]) & Q(
+        index_sync_state__in=["completed", "not_required"]
+    )
+
+    matching_qs = LogClearAudit.objects.filter(terminal_q).order_by("created_at")
+    matched_count = matching_qs.count()
+
+    if matched_count == 0 or dry_run:
+        return {
+            "matched_count": matched_count,
+            "deleted_count": 0,
+            "batches": 0,
+            "dry_run": dry_run,
+            "backup_path": "",
+        }
+
+    backup_path_str = ""
+    if backup:
+        archive_dir = Path(settings.BASE_DIR) / "backups" / "observability"
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        timestamp_str = timezone.now().strftime("%Y%m%d_%H%M%S")
+        backup_file = archive_dir / f"audit_archive_{timestamp_str}.json.gz"
+
+        archive_records = []
+        for audit in matching_qs:
+            archive_records.append({
+                "id": audit.id,
+                "idempotency_key": str(audit.idempotency_key),
+                "created_at": audit.created_at.isoformat() if audit.created_at else None,
+                "completed_at": audit.completed_at.isoformat() if audit.completed_at else None,
+                "user": audit.user.username if audit.user else None,
+                "ip_address": audit.ip_address,
+                "target_type": audit.target_type,
+                "target": audit.target,
+                "kind": audit.kind,
+                "scope": audit.scope,
+                "bytes_before": audit.bytes_before,
+                "bytes_freed": audit.bytes_freed,
+                "succeeded_files": audit.succeeded_files,
+                "failed_files": audit.failed_files,
+                "state": audit.state,
+                "index_sync_state": audit.index_sync_state,
+                "details": audit.details,
+            })
+
+        with gzip.open(backup_file, "wt", encoding="utf-8") as gz_f:
+            json.dump(archive_records, gz_f, ensure_ascii=False, indent=2)
+
+        backup_path_str = str(backup_file)
+        logger.info(
+            "日志审计清理：已将 %d 条待清理审计记录导出备份至 %s",
+            matched_count,
+            backup_path_str,
+        )
+
+    deleted_total = 0
+    batches = 0
+
+    while True:
+        batch_ids = list(
+            LogClearAudit.objects.filter(terminal_q)
+            .values_list("id", flat=True)[:batch_size]
+        )
+        if not batch_ids:
+            break
+
+        with transaction.atomic():
+            deleted_count, _ = LogClearAudit.objects.filter(id__in=batch_ids).delete()
+            deleted_total += deleted_count
+            batches += 1
+
+    logger.info(
+        "日志审计生命周期清理完成：共删除 %d 条超期审计记录，执行 %d 个批次，备份文件: %s",
+        deleted_total,
+        batches,
+        backup_path_str,
+    )
+
+    return {
+        "matched_count": matched_count,
+        "deleted_count": deleted_total,
+        "batches": batches,
+        "dry_run": False,
+        "backup_path": backup_path_str,
+    }

@@ -1,7 +1,7 @@
 {# templates/home/home_page.html #}
 
 {% extends "base.html" %}
-{% load wagtailcore_tags wagtailimages_tags blog_tags static archive_tags  %} {# 新增 archive_tags #}
+{% load wagtailcore_tags wagtailimages_tags blog_tags static archive_tags cache %} {# 新增 archive_tags #}
 
 {% block body_class %}home-page{% endblock %}
 
@@ -31,8 +31,10 @@
     <div class="auto-container">
 
         {#  获取BlogIndexPage的所有实例，轮播 #}
+        {# 性能优化（P2）：首页轮播图片段缓存600秒，消除重复图片rendition查询并实现Lazy QuerySet完全免SQL #}
+        {% cache 600 home_hero_carousel request.LANGUAGE_CODE %}
+        {% if blog_indexs %}
         <div class="single-item-carousel owl-carousel owl-theme home-featured-carousel">
-            {% if blog_indexs %}
                 {% for blog_index in blog_indexs %}
                 <!--Slide-->
                 <div class="slide">
@@ -76,8 +78,9 @@
                     </div>
                 </div>
                 {% endfor %}
-            {% endif %}
         </div>
+        {% endif %}
+        {% endcache %}
         <div class="home-carousel-controls" aria-label="首页轮播控制">
             <button type="button" class="home-carousel-toggle" data-home-carousel-toggle aria-pressed="false">
                 <i class="fa fa-pause" aria-hidden="true"></i>
@@ -144,11 +147,13 @@
                         </div>
                     </div>
 
+                    {# 性能优化（P2）：热门文章片段缓存300秒，彻底消除5篇文章内嵌浏览量与反应表情的20次重复SQL及QuerySet求值 #}
+                    {% cache 300 home_popular_posts request.LANGUAGE_CODE %}
+                    {% if popular_posts %} {# 如果有最热的博客文章 #}
                     <div class="sec-title">
                         <h2>🔥 热门阅读</h2>
                         <div class="separator"></div>
                     </div>
-                    {% if popular_posts %} {# 如果有最热的博客文章 #}
                     <div class="masonry-items-container row clearfix">
 
                         {% for post in popular_posts %} {# 遍历最热的博客文章 #}
@@ -235,6 +240,7 @@
                         {% endfor %}
                     </div>
                     {% endif %}
+                    {% endcache %}
 
                 </div>
             </div>
@@ -244,15 +250,21 @@
                     <aside class="sidebar sticky-top">
 
                         {# 文章归档 #}
+                        {# 性能优化（P2）：侧边栏归档片段缓存600秒 #}
+                        {% cache 600 home_archive_sidebar request.LANGUAGE_CODE %}
                         <div class="sidebar-widget category-widget">
                             <h2>文章归档</h2>
                             {% archive_sidebar %}
                         </div>
+                        {% endcache %}
 
                         {# 热门标签：获取被文章使用最多的前6名标签 #}
+                        {# 性能优化（P2）：侧边栏热门标签片段缓存600秒 #}
+                        {% cache 600 home_top_tags_sidebar request.LANGUAGE_CODE %}
                         <div class="sidebar-widget category-widget">
                             {% top_tags_sidebar %}
                         </div>
+                        {% endcache %}
 
                         {# 随机作者 #}
                         <div class="sidebar-widget about-widget">

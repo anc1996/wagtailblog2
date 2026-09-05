@@ -1,25 +1,5 @@
 # 项目级 Codex 配置 (Repository-scoped)
-
-[model_providers.custom]
-name = "gemini cpa"
-wire_api = "responses"
-requires_openai_auth = false
-base_url = "https://jp.studytop.top/v1"
-env_key = "GEMINI_API_KEY"
-
-[model_providers.sol]
-name = "sol cpa"
-wire_api = "responses"
-requires_openai_auth = false
-base_url = "https://jp.studytop.top/v1"
-env_key = "SOL_API_KEY"
-
-[model_providers.grok]
-name = "grok cpa"
-wire_api = "responses"
-requires_openai_auth = false
-base_url = "https://jp.studytop.top/v1"
-env_key = "GROK_API_KEY"
+disable_response_storage = true
 
 [agents.sol]
 description = "Sol 架构与技术方案设计核心"

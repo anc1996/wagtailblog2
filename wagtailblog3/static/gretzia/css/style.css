@@ -20,12 +20,7 @@
 17. Contact Form
 **********************************************/
 
-@import url('https://fonts.googleapis.com/css?family=Lato:100,100i,300,300i,400,400i,700,700i,900,900i|Lora:400,400i,700,700i|Montserrat:100,100i,200,200i,300,300i,400,400i,500,500i,600,600i,700,700i,800,800i,900,900i|Playfair+Display:400,400i,700,700i,900,900i');
-
-/*font-family: 'Lato', sans-serif;
-font-family: 'Playfair Display', serif;
-font-family: 'Lora', serif;
-font-family: 'Montserrat', sans-serif;*/
+/* 性能优化：已移除境外 Google Fonts 外部依赖，改用本地现代化跨端系统字体栈，消除 11.8 秒网络阻塞 */
 
 
 /*** 
@@ -67,7 +62,7 @@ body {
 	background-repeat:no-repeat;
 	background-position:center top;
 	-webkit-font-smoothing: antialiased;
-	font-family: 'Lato', sans-serif;
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", "Lato", sans-serif;
 }
 
 a{
@@ -87,7 +82,7 @@ h1,h2,h3,h4,h5,h6 {
 	background:none;
 	line-height:1.6em;
 	font-weight:600;
-	font-family: 'Playfair Display', serif;
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", "Playfair Display", Georgia, serif;
 }
 
 input,button,select,textarea{
@@ -105,7 +100,7 @@ input,button,select,textarea{
 p{
 	position:relative;
 	line-height:1.8em;
-	font-family: 'Lato', sans-serif;
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", "Lato", sans-serif;
 }
 
 .auto-container{
@@ -1355,7 +1350,7 @@ img{
 	font-weight:700;
 	letter-spacing:1px;
 	text-transform:uppercase;
-	font-family: 'Lato', sans-serif;
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", "Lato", sans-serif;
 	transition:all 0.3s ease;
 	-moz-transition:all 0.3s ease;
 	-webkit-transition:all 0.3s ease;
@@ -1398,7 +1393,7 @@ img{
 	margin-bottom:22px;
 	letter-spacing:1px;
 	text-transform:uppercase;
-	font-family: 'Lato', sans-serif;
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", "Lato", sans-serif;
 }
 
 .sidebar-widget.social-widget .inner-box{
@@ -1518,7 +1513,7 @@ img{
 	text-align:center;
 	font-weight:400;
 	margin-top:22px;
-	font-family: 'Playfair Display', serif;
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", "Playfair Display", Georgia, serif;
 }
 
 .gallery-widget .owl-nav{
@@ -1796,7 +1791,7 @@ img{
 	margin-bottom:10px;
 	letter-spacing:2px;
 	text-transform:uppercase;
-	font-family: 'Lato', sans-serif;
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", "Lato", sans-serif;
 }
 
 .subscribe-section .text{
@@ -2158,7 +2153,7 @@ img{
 	margin-bottom:5px;
 	color:#2f2f2f;
 	text-transform:uppercase;
-	font-family: 'Lato', sans-serif;
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", "Lato", sans-serif;
 }
 .author-box .inner-box .text{
 	font-size:14px;
@@ -2239,7 +2234,7 @@ img{
 	font-weight:400;
 	display:inline-block;
 	text-transform:uppercase;
-	font-family: 'Lato', sans-serif;
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", "Lato", sans-serif;
 }
 
 .new-posts .prev-post .arrow:hover,
@@ -2316,7 +2311,7 @@ img{
 	font-weight:400;
 	display:inline-block;
 	text-transform:uppercase;
-	font-family: 'Lato', sans-serif;
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", "Lato", sans-serif;
 }
 
 /*Latest Posts*/
@@ -2334,7 +2329,7 @@ img{
 	text-align:center;
 	margin-bottom:25px;
 	text-transform:uppercase;
-	font-family: 'Lato', sans-serif;
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", "Lato", sans-serif;
 }
 
 /*Related Posts*/
@@ -2396,7 +2391,7 @@ img{
 	margin-bottom:30px;
 	letter-spacing:1px;
 	text-transform:uppercase;
-	font-family: 'Lato', sans-serif;
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", "Lato", sans-serif;
 }
 
 /*Comment*/
@@ -2430,7 +2425,7 @@ img{
 	font-size:14px;
 	color:#2f2f2f;
 	margin-bottom:5px;
-	font-family: 'Lato', sans-serif;
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", "Lato", sans-serif;
 }
 
 .comment .inner-box .text{
@@ -2470,7 +2465,7 @@ img{
 	margin-bottom:15px;
 	letter-spacing:1px;
 	text-transform:uppercase;
-	font-family: 'Lato', sans-serif;
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", "Lato", sans-serif;
 }
 
 .default-form .form-group{

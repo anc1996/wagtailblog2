@@ -345,3 +345,21 @@ agent 同时写入，主 agent 负责集成和冲突处理。每个子 agent 必
 主 agent 默认使用 `gpt-5.6-terra` 中推理；涉及生产数据、不可逆迁移、跨服务契约、并发一致性、安全边界、
 回滚失败风险或证据冲突时升级为 `gpt-5.6-sol` 高/xhigh。模型选择不能替代本地测试、配置核查、备份、
 生产授权和回滚门禁。
+
+### 子 Agent 调度与 Token 缓存（Prompt Cache）优化准则
+
+为适配第三方中转通道（CPA/OneAPI）并最大化降低 Token 消耗与首字延迟（TTFT），子 Agent 协作必须严格执行以下前缀缓存与上下文调度守则：
+
+1. **头部前缀恒定（Prefix Invariance）**：
+   - 传递给子 Agent 的初始 Prompt 严禁在头部拼接动态变化的内容（如精确时间戳、随机数、轮次计数器、UUID）；
+   - 固定规则（角色定位、工程约束、验收契约）严格保持在头部，动态指令与变动上下文放置在尾部，确保头部 1000+ Token 稳定命中上游 Prompt Cache。
+2. **最小上下文派发（`fork_context` 最小化）**：
+   - 派生子 Agent（`spawn_agent`）时，**默认使用 `fork_context = false`**；
+   - 子 Agent 拥有独立的紧凑上下文，主 Agent 仅按需提取“当前目标”、“关联文件路径”与“设计约束”作为初始任务发送，杜绝无节制复制主线程长历史导致的大规模 Token 浪费。
+3. **长生命周期实例复用（`send_input` 闭环）**：
+   - 当针对同一子任务进行方案打磨、代码排错、测试重试时，严格复用已有 Agent 实例（通过 `send_input` 交互），不重新 `spawn_agent`；
+   - 该 Agent 的上一轮输出会自动沉淀为下一轮对话的静态前缀，使得后续轮次的 Token 输入几乎全部命中 Cache（计费折扣达 50%~80%）。
+4. **单阶段完成后及时释放（`close_agent`）**：
+   - 子 Agent 交付经审查通过后，主 Agent 必须主动调用 `close_agent`，释放并发槽位，防止僵死 Agent 占用资源或在后续轮次中引发歧义。
+5. **第三方中转鉴权隔离约束**：
+   - 明确所有子代理均通过第三方 CPA（`https://jp.studytop.top/v1`）中转，`requires_openai_auth` 必须保持为 `false`，严禁开启官方 OAuth 鉴权校验；`disable_response_storage = true` 全局继承。

@@ -1,5 +1,5 @@
 {# templates/includes/header.html #}
-{% load wagtailcore_tags wagtailimages_tags blog_tags static i18n %}
+{% load wagtailcore_tags wagtailimages_tags blog_tags static i18n cache %}
 
 <header class="main-header header-style-one"> {# 定义网站的头部区域 #}
 
@@ -100,6 +100,8 @@
                                 {% get_site_root_details as site_root_info %}
 
                                 {% if site_root_info.page_obj %}
+                                    {# 性能优化（P2）：主导航菜单片段缓存600秒，按语言和当前页面隔离 #}
+                                    {% cache 600 main_nav_menu request.LANGUAGE_CODE page.pk %}
                                     {% with home_page=site_root_info.page_obj %}
                                         {# 1.1 显示 Home 链接 (固定项，不作为下拉菜单的触发器) #}
                                         <li class="{% if site_root_info.is_current_or_ancestor %}current{% endif %}">
@@ -111,6 +113,7 @@
                                     {#    这些子页面自身可以是下拉菜单的触发器 #}
                                     {#    'page' 是从视图传递过来的当前页面上下文变量 #}
                                     {% generate_menu_items site_root_info.page_obj page %}
+                                    {% endcache %}
 
                                 {% else %}
                                     {# 如果找不到站点根页面，显示错误或备用链接 #}

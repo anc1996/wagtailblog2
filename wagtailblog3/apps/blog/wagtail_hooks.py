@@ -509,3 +509,52 @@ def insert_markdown_import_token_admin_js():
 	"""在 Wagtail 管理后台引入 Markdown 导入 Token 的异步复制与重新生成交互脚本。"""
 	js_url = static("blog/js/markdown_import_token_admin.js")
 	return format_html('<script src="{}"></script>', js_url)
+
+
+# ==========================================================
+# 首页模板片段缓存精准失效治理（P2）
+# ==========================================================
+def _invalidate_home_fragments() -> None:
+	"""
+	精准清理首页模板片段缓存（严禁调用 cache.clear，防止全站雪崩）。
+	覆盖语言：项目配置的所有有效语言以及默认语言标识。
+	"""
+	from django.core.cache import cache
+	from django.core.cache.utils import make_template_fragment_key
+
+	configured_languages = [code for code, _ in getattr(settings, "LANGUAGES", [])]
+	languages_to_clear = list(set(configured_languages + ["zh-hans", "en", ""]))
+	target_fragments = [
+		"home_popular_posts",
+		"home_hero_carousel",
+		"home_top_tags_sidebar",
+		"home_archive_sidebar",
+	]
+	for fragment_name in target_fragments:
+		for lang in languages_to_clear:
+			cache_key = make_template_fragment_key(fragment_name, [lang])
+			cache.delete(cache_key)
+
+
+@hooks.register("after_publish_page")
+def invalidate_home_cache_after_publish(request, page) -> None:
+	"""
+	当页面发布成功时，触发首页高频展示片段缓存的精准失效。
+	"""
+	_invalidate_home_fragments()
+
+
+@hooks.register("after_edit_page")
+def invalidate_home_cache_after_edit(request, page) -> None:
+	"""
+	当页面修改保存时，触发首页高频展示片段缓存的精准失效。
+	"""
+	_invalidate_home_fragments()
+
+
+@hooks.register("after_delete_page")
+def invalidate_home_cache_after_delete(request, page) -> None:
+	"""
+	当页面被物理或逻辑删除后，触发首页高频展示片段缓存的精准失效。
+	"""
+	_invalidate_home_fragments()

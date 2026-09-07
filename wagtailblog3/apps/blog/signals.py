@@ -12,6 +12,7 @@ from wagtail.signals import page_published, page_unpublished
 
 from .models import Author, BlogCategory, BlogPage, MongoCleanupIntent, PageDeletionIntent, PageDeletionIntentStatus
 from .services.feed_cache import BlogFeedInvalidationService
+from .services.detail_cache import DetailCacheService
 from wagtailblog3.mongo import MongoManager
 
 logger = logging.getLogger(__name__)
@@ -105,10 +106,11 @@ def clear_body_after_save(sender, instance, **kwargs):
 	dispatch_uid="blog.invalidate_feed_on_page_published",
 )
 def invalidate_feed_on_page_published(sender, instance, **kwargs):
-	"""文章首次发布或重新发布后刷新对应站点和语言的订阅源。"""
+	"""文章首次发布或重新发布后刷新订阅源，并在事务提交后推进详情页缓存代次。"""
 	BlogFeedInvalidationService.schedule_scope(
 		BlogFeedInvalidationService.scope_for_page(instance)
 	)
+	DetailCacheService.schedule_invalidation_for_page(instance)
 
 
 @receiver(
@@ -117,10 +119,11 @@ def invalidate_feed_on_page_published(sender, instance, **kwargs):
 	dispatch_uid="blog.invalidate_feed_on_page_unpublished",
 )
 def invalidate_feed_on_page_unpublished(sender, instance, **kwargs):
-	"""取消发布后使文章立即从下一次Feed查询中消失。"""
+	"""取消发布后使文章从下一次Feed中消失，并在事务提交后推进详情页缓存代次。"""
 	BlogFeedInvalidationService.schedule_scope(
 		BlogFeedInvalidationService.scope_for_page(instance)
 	)
+	DetailCacheService.schedule_invalidation_for_page(instance)
 
 
 @receiver(
@@ -129,10 +132,11 @@ def invalidate_feed_on_page_unpublished(sender, instance, **kwargs):
 	dispatch_uid="blog.invalidate_feed_on_page_deleted",
 )
 def invalidate_feed_on_page_deleted(sender, instance, **kwargs):
-	"""删除不触发page_unpublished，必须在页面树仍存在时保存失效范围。"""
+	"""删除不触发page_unpublished，必须在页面树仍存在时保存失效范围，并推进缓存代次。"""
 	BlogFeedInvalidationService.schedule_scope(
 		BlogFeedInvalidationService.scope_for_page(instance)
 	)
+	DetailCacheService.schedule_invalidation_for_page(instance)
 
 
 @receiver(

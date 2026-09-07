@@ -1,4 +1,4 @@
-"""博客应用的 Wagtail 页面、媒体、统计和导入状态模型。
+﻿"""博客应用的 Wagtail 页面、媒体、统计和导入状态模型。
 
 BlogPage 的 StreamField 负责后台结构和校验，正文快照通过 MongoManager 保存，MySQL
 页面/Revision 只保存指针和检索所需元数据。模型方法必须保持 Wagtail 页面生命周期、
@@ -1379,27 +1379,17 @@ class BlogPage(Page):
 	# =========================================================================
 	# 网关 4：前台数据读取网关 (用于博客详情页 serve 渲染时提取真实数据)
 	# =========================================================================
-	def get_content_from_mongodb(self) -> dict[str, Any] | None:
+	def get_content_from_mongodb(self, request: Any = None) -> dict[str, Any] | None:
 		"""读取正式正文，并在内存副本补齐前端 StreamField 所需的块 ID 和 value。"""
 		# 已登记页面只允许读取 published_body_version_id，避免草稿覆盖旧 blog_content 后泄露到公开页。
+		# 优先通过 DetailCacheService 拦截，享受 L2 Redis 缓存与 Single-Flight 并发互斥回源减负。
 		state = None
 		try:
 			state = BlogPublicationState.objects.filter(page_id=self.pk).first()
 			if state and state.published_body_version_id:
-				version = MongoManager().get_content_body_version(
-					"blog_page", self.pk, state.published_body_version_id,
-					state.published_body_sha256 or "",
-					state.published_body_schema_version or 0,
-				)
-				if not isinstance(version.get("body"), list):
-					return None
-				return {
-					"_id": state.published_body_version_id,
-					"page_id": self.pk,
-					"title": self.title,
-					"intro": self.intro,
-					"body": version["body"],
-				}
+				from blog.services.detail_cache import DetailCacheService, is_preview_request
+
+				return DetailCacheService().get_or_set_body(self, state, request=request)
 		except MongoRevisionReadError as exc:
 			logger.warning("blog_published_body_unavailable page_id=%s error=%s", self.pk, type(exc).__name__)
 			return None
@@ -1513,10 +1503,17 @@ class BlogPage(Page):
 		context = super().get_context(request, *args, **kwargs)
 		# 注入标签索引页，供模板生成标签跳转链接
 		context['blog_tag_index_page'] = BlogTagIndexPage.objects.live().first()
-		# 模板只消费一次查询结果，避免文章页为同一组导航重复访问数据库。
-		context['related_posts'] = self.get_related_posts_by_tags()
-		context['prev_post'] = self.get_prev_post()
-		context['next_post'] = self.get_next_post()
+		# 使用详情页多级缓存调度器装配相关文章与前后导航，在热缓存下基于 ID 列表单条查询压降多表聚合 SQL。
+		from blog.services.detail_cache import DetailCacheService, is_preview_request
+
+		cache_service = DetailCacheService()
+		nav_context = cache_service.get_or_set_navigation_context(self, request=request)
+		context['related_posts'] = nav_context.get('related_posts', [])
+		context['prev_post'] = nav_context.get('prev_post')
+		context['next_post'] = nav_context.get('next_post')
+		context['page_generation'] = cache_service.get_page_generation(self.pk) if self.pk else "0"
+		context['render_version'] = getattr(settings, 'BLOG_DETAIL_RENDER_VERSION', '20260906-v1')
+		context['is_preview'] = is_preview_request(request, self)
 		context['is_article_page'] = True
 		article_url = request.build_absolute_uri(self.url) if self.url else request.build_absolute_uri()
 		context['article_structured_data'] = {
@@ -1548,8 +1545,8 @@ class BlogPage(Page):
 
 	def serve(self, request: Any) -> Any:
 		"""读取一次 Mongo 正文、计算资源开关并交给 Wagtail 渲染。"""
-		# 读取一次 Mongo 正文，同时计算前端资源需求，避免模板阶段重复访问数据库。
-		mongo_content = self.get_content_from_mongodb()
+		# 读取一次 Mongo 正文（透传 request 用于判定预览/草稿旁路），同时计算前端资源需求，避免模板阶段重复访问数据库。
+		mongo_content = self.get_content_from_mongodb(request=request)
 		body_data = mongo_content.get('body', []) if mongo_content else []
 		self._frontend_resource_features = self.get_frontend_resource_features(
 			body_data,

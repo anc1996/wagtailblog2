@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load wagtailcore_tags wagtailimages_tags static blog_tags comment_tags %}
+{% load wagtailcore_tags wagtailimages_tags static blog_tags comment_tags cache %}
 {% block title %}{{ page.seo_title|default:page.title|inline_title_text }}{% endblock %}
 
 {% block extra_css %}
@@ -157,15 +157,29 @@
                 <div id="article-scroll-container" class="article-scroll-container">
                     <div class="article-body-content">
                         <div class="content-blocks" data-reading-content data-content-image-gallery>
-                            {% for block in page.body %}
-                                <div class="content-block-wrapper {% if block.block_type == 'rich_text' or block.block_type == 'markdown_block' %}markdown-body{% endif %}" data-block-type="{{ block.block_type }}">
-                                    {% if block.block_type == 'image_block' %}
-                                        {% include "blog/streams/image_block.html" with value=block.value only %}
-                                    {% else %}
-                                        {% include_block block %}
-                                    {% endif %}
-                                </div>
-                            {% endfor %}
+                            {% if not is_preview %}
+                                {% cache 3600 blog_detail_body_html page.pk page_generation render_version %}
+                                    {% for block in page.body %}
+                                        <div class="content-block-wrapper {% if block.block_type == 'rich_text' or block.block_type == 'markdown_block' %}markdown-body{% endif %}" data-block-type="{{ block.block_type }}">
+                                            {% if block.block_type == 'image_block' %}
+                                                {% include "blog/streams/image_block.html" with value=block.value only %}
+                                            {% else %}
+                                                {% include_block block %}
+                                            {% endif %}
+                                        </div>
+                                    {% endfor %}
+                                {% endcache %}
+                            {% else %}
+                                {% for block in page.body %}
+                                    <div class="content-block-wrapper {% if block.block_type == 'rich_text' or block.block_type == 'markdown_block' %}markdown-body{% endif %}" data-block-type="{{ block.block_type }}">
+                                        {% if block.block_type == 'image_block' %}
+                                            {% include "blog/streams/image_block.html" with value=block.value only %}
+                                        {% else %}
+                                            {% include_block block %}
+                                        {% endif %}
+                                    </div>
+                                {% endfor %}
+                            {% endif %}
                         </div>
                     </div>
                 </div>

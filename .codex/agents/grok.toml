@@ -1,6 +1,6 @@
 name = "grok"
 description = "负责全流程对照方案审核与对抗式安全审查的 Grok 审查官"
-model_provider = "grok"
+model_provider = "custom"
 model = "grok-4.6"
 model_reasoning_effort = "high"
 nickname_candidates = ["GrokAuditor", "GrokReviewer"]

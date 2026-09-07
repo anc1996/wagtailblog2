@@ -1,8 +1,8 @@
 name = "sol"
 description = "Sol 架构规划、复杂方案设计与生产部署指挥官"
-model_provider = "sol"
-model = "gpt-5.6-sol"
-model_reasoning_effort = "high"
+model_provider = "custom"
+model = "gpt-6-astra"
+model_reasoning_effort = "medium"
 nickname_candidates = ["SolArchitect", "SolCommander"]
 
 developer_instructions = """

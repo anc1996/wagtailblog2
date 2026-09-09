@@ -89,13 +89,9 @@
 (function($) {
 	
 	"use strict";
-	var preloaderHandled = false;
+	// 架构优化 (P0)：彻底移除白屏 Preloader 阻断，保证首屏 HTML 立即绘制呈现
 	function handlePreloader() {
-		if (preloaderHandled) return;
-		preloaderHandled = true;
-		if($('.preloader').length){
-			$('.preloader').css('pointer-events', 'none').stop(true, true).fadeOut(300);
-		}
+		// 空实现保留供兼容调用，杜绝抛出未定义错误
 	}
 	
 	//更新标题样式并滚动到顶部
@@ -323,39 +319,51 @@
 	
 	
 	
-	//Masonary
+	// Masonry 瀑布流布局治理：单次安全初始化 + 图片就绪后重排，杜绝高度计算坍塌
 	function enableMasonry() {
-		if($('.masonry-items-container').length){
-	
-			var winDow = $(window);
-			// Needed variables
-			var $container=$('.masonry-items-container');
-	
-			$container.isotope({
-				itemSelector: '.masonry-item',
-				 masonry: {
-					columnWidth : 0
-				 },
-				animationOptions:{
-					duration:500,
-					easing:'linear'
-				}
-			});
-	
-			winDow.bind('resize', function(){
-
-				$container.isotope({ 
-					itemSelector: '.masonry-item',
-					animationOptions: {
-						duration: 500,
-						easing	: 'linear',
-						queue	: false
-					}
-				});
-			});
+		var $container = $('.masonry-items-container');
+		if (!$container.length) {
+			return;
 		}
+
+		if ($container.data('isotope')) {
+			$container.isotope('layout');
+			return;
+		}
+
+		$container.isotope({
+			itemSelector: '.masonry-item',
+			masonry: {
+				columnWidth: '.masonry-item'
+			},
+			animationOptions: {
+				duration: 500,
+				easing: 'linear',
+				queue: false
+			}
+		});
+
+		var $images = $container.find('img');
+		function onImageReady() {
+			if ($container.data('isotope')) {
+				$container.isotope('layout');
+			}
+		}
+
+		$images.each(function() {
+			if (this.complete && this.naturalHeight !== 0) {
+				onImageReady();
+			} else {
+				$(this).one('load error', onImageReady);
+			}
+		});
+
+		$(window).on('resize', function() {
+			if ($container.data('isotope')) {
+				$container.isotope('layout');
+			}
+		});
 	}
-	
 	enableMasonry();
 	
 	
@@ -480,12 +488,7 @@
    ========================================================================== */
 	
 	$(window).on('load', function() {
-		handlePreloader();
 		enableMasonry();
-	});	
-
-	$(function() {
-		window.setTimeout(handlePreloader, 1500);
 	});
 
 })(window.jQuery);

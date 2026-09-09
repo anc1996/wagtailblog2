@@ -434,6 +434,22 @@ from .text_editor import *
 from .third_party import *
 
 # ===============================================
+# 博客列表与分类页全链路优化特性开关 (Listing Performance V2)
+# ===============================================
+def _get_listing_perf_env_bool(name: str, default: bool = False) -> bool:
+    val = os.environ.get(name)
+    if val is None:
+        return default
+    return val.strip().lower() in ('1', 'true', 'yes', 'on')
+
+BLOG_INDEX_LISTING_ENGINE_V2 = _get_listing_perf_env_bool('BLOG_INDEX_LISTING_ENGINE_V2', default=False)
+BLOG_INDEX_CACHE_V2 = _get_listing_perf_env_bool('BLOG_INDEX_CACHE_V2', default=False)
+BLOG_SIDEBAR_CACHE_V2 = _get_listing_perf_env_bool('BLOG_SIDEBAR_CACHE_V2', default=False)
+BLOG_ARCHIVE_PROGRESSIVE_V2 = _get_listing_perf_env_bool('BLOG_ARCHIVE_PROGRESSIVE_V2', default=False)
+BLOG_INDEX_COMPAT_POLYMORPHIC_QUERY = _get_listing_perf_env_bool('BLOG_INDEX_COMPAT_POLYMORPHIC_QUERY', default=True)
+BLOG_INDEX_ETAG_V2 = _get_listing_perf_env_bool('BLOG_INDEX_ETAG_V2', default=False)
+
+# ===============================================
 # 打印配置信息（用于启动时确认）
 # ===============================================
 print_database_config()

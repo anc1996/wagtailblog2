@@ -1,4 +1,4 @@
-# 博客应用的 Wagtail 后台扩展
+﻿# 博客应用的 Wagtail 后台扩展
 
 import csv
 import logging
@@ -536,18 +536,41 @@ def _invalidate_home_fragments() -> None:
 			cache.delete(cache_key)
 
 
+
 @hooks.register("after_publish_page")
 def invalidate_home_cache_after_publish(request, page) -> None:
 	"""
-	当页面发布成功时，触发首页高频展示片段缓存的精准失效。
+	当页面发布成功时，触发首页高频展示片段缓存与分类列表/侧栏代次的精准失效。
 	"""
 	_invalidate_home_fragments()
+	try:
+		from .models import BlogPage
+		from .services.listing_invalidation import ListingInvalidationService
+		if isinstance(getattr(page, "specific_deferred", page), BlogPage):
+			ListingInvalidationService.schedule_page_publication(page, event="hook_after_publish")
+	except Exception as e:
+		logger.warning("hook_after_publish_invalidation_failed", exc_info=True)
+
+
+@hooks.register("after_unpublish_page")
+def invalidate_listing_cache_after_unpublish(request, page) -> None:
+	"""
+	当页面下线时，精准推进对应列表分类与侧栏归档代次。
+	"""
+	_invalidate_home_fragments()
+	try:
+		from .models import BlogPage
+		from .services.listing_invalidation import ListingInvalidationService
+		if isinstance(getattr(page, "specific_deferred", page), BlogPage):
+			ListingInvalidationService.schedule_page_publication(page, event="hook_after_unpublish")
+	except Exception as e:
+		logger.warning("hook_after_unpublish_invalidation_failed", exc_info=True)
 
 
 @hooks.register("after_edit_page")
 def invalidate_home_cache_after_edit(request, page) -> None:
 	"""
-	当页面修改保存时，触发首页高频展示片段缓存的精准失效。
+	当页面在修改保存时，若属于已发布文章，按需触发相关片段失效。
 	"""
 	_invalidate_home_fragments()
 
@@ -555,6 +578,6 @@ def invalidate_home_cache_after_edit(request, page) -> None:
 @hooks.register("after_delete_page")
 def invalidate_home_cache_after_delete(request, page) -> None:
 	"""
-	当页面被物理或逻辑删除后，触发首页高频展示片段缓存的精准失效。
+	当页面被彻底或逻辑删除后，触发首页片段缓存失效。
 	"""
 	_invalidate_home_fragments()

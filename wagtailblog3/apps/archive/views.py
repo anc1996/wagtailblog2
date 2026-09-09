@@ -21,39 +21,10 @@ from .services.listing import (
 logger = logging.getLogger(__name__)
 
 
-def get_archive_data():
-    """Return the archive tree used by the existing archive APIs and admin UI."""
-    blog_pages = BlogPage.objects.live()
-
-    yearly_archives = (
-        blog_pages.annotate(year=TruncYear("date"))
-        .values("year")
-        .annotate(count=Count("id"))
-        .order_by("-year")
-    )
-    monthly_archives = (
-        blog_pages.annotate(year=TruncYear("date"), month=TruncMonth("date"))
-        .values("year", "month")
-        .annotate(count=Count("id"))
-        .order_by("-year", "-month")
-    )
-
-    archive_tree = {}
-    for item in yearly_archives:
-        year = item["year"].year
-        archive_tree[year] = {"count": item["count"], "months": {}}
-
-    for item in monthly_archives:
-        year = item["year"].year
-        month = item["month"].month
-        if year in archive_tree:
-            archive_tree[year]["months"][month] = {
-                "count": item["count"],
-                "name": item["month"].strftime("%B"),
-                "display_name": f"{month}月",
-            }
-
-    return archive_tree
+def get_archive_data(site_id: int = 1, locale_id: int = 1):
+    """Return the archive tree used by the existing archive APIs and admin UI (delegates to ArchiveSidebarService)."""
+    from blog.services.sidebar_cache import ArchiveSidebarService
+    return ArchiveSidebarService.get_archive_aggregate(site_id, locale_id)
 
 
 def archives_api(request):

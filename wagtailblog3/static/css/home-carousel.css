@@ -70,21 +70,19 @@
     }
 }
 
-/* 首页热门阅读：访问量与反应统计保持紧凑并列。 */
+/* 首页热门阅读：访问量与反应统计保持紧凑并列，自适应折行杜绝原生滚动条。 */
 .home-page .post-stats {
     display: flex;
     align-items: center;
-    flex-wrap: nowrap;
-    gap: 10px;
+    flex-wrap: wrap;
+    gap: 8px 12px;
     margin: 15px 0;
     padding-top: 15px;
-    overflow-x: auto;
+    overflow: visible;
     color: var(--home-muted, var(--site-muted));
     font-size: 13px;
-    line-height: 1;
-    white-space: nowrap;
+    line-height: 1.4;
     border-top: 1px solid var(--home-border, var(--site-border));
-    scrollbar-width: thin;
 }
 
 .home-page .post-stats .view-count,
@@ -242,8 +240,7 @@
 }
 
 .home-page .news-block-two > .inner-box {
-    height: 100%;
-    overflow: hidden;
+    height: auto;
     border: 1px solid var(--home-border);
     border-radius: 16px;
     background: var(--home-card-bg);
@@ -257,19 +254,20 @@
     transform: translateY(-2px);
 }
 
-/* 无文章封面时让热门阅读卡片回到内容优先，不留下空白图片栏。 */
-.home-page .news-block-two--no-image > .inner-box {
-    display: flex;
-    flex-direction: column;
-}
-
-.home-page .news-block-two--no-image .lower-content {
-    flex: 1 1 auto;
-}
-
-.home-page .news-block-two .inner-box .image,
-.home-page .news-block-two .inner-box .image img {
+.home-page .news-block-two .inner-box .image {
+    position: relative;
+    overflow: hidden;
     border-radius: 15px 15px 0 0;
+    aspect-ratio: 4 / 3;
+    background: var(--home-card-soft, #fbf3ec);
+}
+
+.home-page .news-block-two .inner-box .image img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 15px 15px 0 0;
+    display: block;
 }
 
 .home-page .news-block-two .inner-box .lower-content {

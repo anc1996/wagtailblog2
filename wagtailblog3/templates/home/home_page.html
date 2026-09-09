@@ -158,11 +158,11 @@
 
                         {% for post in popular_posts %} {# 遍历最热的博客文章 #}
                         <!--News Block Two-->
-                        <div class="news-block-two masonry-item col-md-6 col-sm-6 col-xs-12{% if not post.featured_image %} news-block-two--no-image{% endif %}">
+                        <div class="news-block-two masonry-item col-md-6 col-sm-6 col-xs-12">
                             <div class="inner-box">
-                                {% if post.featured_image %}
-                                    <div class="image">
-                                        {# 有文章封面时使用原图作为卡片视觉区，无封面不生成默认占位图。 #}
+                                <div class="image">
+                                    {% if post.featured_image %}
+                                        {# 有文章封面时使用原图作为卡片视觉区 #}
                                         {% image post.featured_image fill-400x300 format-webp as post_img %}
                                         <img src="{{ post_img.url }}"
                                              alt="{{ post.title|inline_title_text }}"
@@ -171,19 +171,22 @@
                                              height="{{ post_img.height }}"
                                              decoding="async"
                                              class="transition-image" />
-                                    </div>
-                                {% endif %}
-                                <div class="lower-content">
-                                    {# 显示文章分类（如果有的话） #}
-                                    {% if post.categories.first %}
-                                        <div class="title">
-                                            <a href="{% pageurl post %}">{{ post.categories.first.name }}</a>
-                                        </div>
                                     {% else %}
-                                        <div class="title">
-                                            <a href="{% pageurl post %}">博客</a>
-                                        </div>
+                                        {# 无封面时优雅回退至默认封面图，保持全卡片结构对称与视觉平衡 #}
+                                        <img src="{% static 'gretzia/images/resource/news-7.jpg' %}"
+                                             alt="{{ post.title|inline_title_text }}"
+                                             loading="lazy"
+                                             width="400"
+                                             height="300"
+                                             decoding="async"
+                                             class="transition-image" />
                                     {% endif %}
+                                </div>
+                                <div class="lower-content">
+                                    {# 显示文章分类：优先展示显式分类或父级专栏名称 #}
+                                    <div class="title">
+                                        <a href="{{ post.category_url|default:post.url }}">{{ post.category_label|default:"博客" }}</a>
+                                    </div>
 
                                     <h2><a href="{% pageurl post %}">{% render_display_title post %}</a></h2>
 

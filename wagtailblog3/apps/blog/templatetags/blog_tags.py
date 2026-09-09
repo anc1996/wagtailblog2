@@ -114,13 +114,18 @@ def top_tags_sidebar(context):
 
 @register.inclusion_tag('blog/tags/random_author_sidebar.html', takes_context=True)
 def random_author_sidebar(context):
-	"""获取并显示一个随机作者的信息。"""
-	random_author_instance = Author.objects.order_by('?').first()
+	"""获取并显示一个随机作者的信息（支持 BLOG_SIDEBAR_CACHE_V2 完整 Kill Switch 降级）."""
+	from django.conf import settings
+	if not getattr(settings, 'BLOG_SIDEBAR_CACHE_V2', False):
+		random_author_instance = Author.objects.order_by('?').first()
+		return {
+			'random_author': random_author_instance,
+			'request': context.get('request') if context else None,
+		}
 
-	return {
-		'random_author': random_author_instance,
-		'request': context.get('request'),
-	}
+	from blog.services.sidebar_cache import RandomAuthorSidebarService
+	request = context.get('request') if context else None
+	return RandomAuthorSidebarService.get_context(request)
 
 
 

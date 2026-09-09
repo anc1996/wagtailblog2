@@ -81,13 +81,39 @@ class HomePage(Page):
 
 		# 聚合访问统计后排序，避免在模板中逐篇计算访问量。
 		# 性能优化（P1）：增加 select_related 与 prefetch_related，杜绝卡片渲染中的分类与封面二次 SQL 查询
-		context['popular_posts'] = BlogPage.objects.live().public().select_related(
-			'featured_image'
-		).prefetch_related(
-			'categories'
-		).annotate(
-			total_views=Sum('view_counts__count')  # view_counts 访问记录中的 count 字段为访问次数
-		).order_by('-total_views')[:5]
+		popular_posts = list(
+			BlogPage.objects.live().public().select_related(
+				'featured_image'
+			).prefetch_related(
+				'categories'
+			).annotate(
+				total_views=Sum('view_counts__count')
+			).order_by('-total_views')[:5]
+		)
+
+		if popular_posts:
+			# 批量预取父级专栏（BlogIndexPage）信息，杜绝在模板循环中触发 N+1 SQL 查询
+			parent_paths = {p.path[:-Page.steplen] for p in popular_posts if len(p.path) > Page.steplen}
+			parents_by_path = {
+				page.path: page
+				for page in Page.objects.filter(path__in=parent_paths).specific()
+			}
+			for post in popular_posts:
+				first_cat = post.categories.all()[0] if post.categories.all() else None
+				parent_path = post.path[:-Page.steplen] if len(post.path) > Page.steplen else ''
+				parent_page = parents_by_path.get(parent_path)
+
+				if first_cat:
+					post.category_label = first_cat.name
+					post.category_url = parent_page.url if parent_page else post.url
+				elif parent_page and parent_page.id != self.id:
+					post.category_label = parent_page.title
+					post.category_url = parent_page.url
+				else:
+					post.category_label = "博客"
+					post.category_url = post.url
+
+		context['popular_posts'] = popular_posts
 
 		# 获取首页目录下的文章索引页，供首页文章区域使用。
 		# 性能优化（P1/P2）：保持 QuerySet 延迟求值特性，避免在 Python 中提前触发 SQL，配合模板片段缓存完全跳过查询

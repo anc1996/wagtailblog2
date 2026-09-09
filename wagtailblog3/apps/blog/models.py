@@ -417,7 +417,13 @@ class BlogIndexPage(Page):
 		FieldPanel('featured_image'),
 	]
 	
-	def get_listing_context(self, query_params: Any) -> dict[str, Any]:
+	def get_listing_context(self, query_params: Any, request: Any = None) -> dict[str, Any]:
+		"""构造 HTML 和 JSON 共用的子页面列表上下文。"""
+		if getattr(settings, 'BLOG_INDEX_LISTING_ENGINE_V2', False):
+			from blog.services.listing import build_listing
+			result = build_listing(request, self, query_params)
+			return result.as_context_dict()
+
 		"""构造 HTML 和 JSON 共用的子页面列表上下文。
 
 		日期排序使用 BlogPage/BlogIndexPage 日期子查询并以发布时间兜底；随后应用公开状态、
@@ -486,8 +492,17 @@ class BlogIndexPage(Page):
 		paginator = Paginator(child_pages, BLOG_INDEX_ITEMS_PER_PAGE)
 		page_obj = paginator.get_page(query_params.get('page'))
 
+		from blog.services.listing import _batch_prefetch_post_data
+		raw_items = list(page_obj.object_list)
+		if hasattr(page_obj.object_list, 'specific'):
+			try:
+				raw_items = page_obj.object_list.specific()
+			except Exception:
+				pass
+		prefetched_pages = _batch_prefetch_post_data(raw_items)
+
 		return {
-			'blog_pages': page_obj.object_list.specific(),
+			'blog_pages': prefetched_pages,
 			'search_query': search_query,
 			'start_date': start_date_str,
 			'end_date': end_date_str,
@@ -509,7 +524,7 @@ class BlogIndexPage(Page):
 	def get_context(self, request: Any) -> dict[str, Any]:
 		"""把列表查询结果合并到 Wagtail 页面上下文。"""
 		context = super().get_context(request)
-		context.update(self.get_listing_context(request.GET))
+		context.update(self.get_listing_context(request.GET, request=request))
 		return context
 	
 	class Meta:
@@ -1650,13 +1665,17 @@ class BlogPage(Page):
 	
 	
 	def get_view_count(self) -> dict[str, int]:
-		"""获取访问统计（委托给 PageViewCounter）"""
+		"""获取访问统计（优先使用预注入的批量统计，未注入时回退至 PageViewCounter）。"""
+		if hasattr(self, '_prefetched_view_count'):
+			return self._prefetched_view_count
 		if not self.pk:
 			return {'today': 0, 'today_unique': 0, 'total': 0, 'total_unique': 0}
 		return PageViewCounter(self.pk).get()
 
 	def get_reactions(self) -> list[dict[str, Any]]:
-		"""获取页面的反应统计"""
+		"""获取页面的反应统计（优先使用预注入的批量统计，未注入时回退至独立聚合）。"""
+		if hasattr(self, '_prefetched_reactions'):
+			return self._prefetched_reactions
 		
 		if not self.pk:
 			return []

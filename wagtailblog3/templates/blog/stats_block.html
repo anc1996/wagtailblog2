@@ -1,29 +1,29 @@
-{% comment %}
-浏览量与反应统计块
-参数: page - 页面对象（BlogPage 类型才有统计数据）
+﻿{% comment %}
+访问量与反应统计块
+参数: page - 页面对象（BlogPage 类型才统计数据）
 {% endcomment %}
 
 <div class="page-stats">
     {% with specific=page.specific %}
-    {% if specific.get_view_count %}
+    {% with vc=specific.get_view_count %}
+    {% if vc and vc.total > 0 %}
         <div class="view-stats">
-            {% with vc=specific.get_view_count %}
             <span class="view-stats-total" title="总访问量">
                 <i class="fa fa-eye" aria-hidden="true"></i>
                 <strong>{{ vc.total }}</strong> 次访问
             </span>
             <span class="view-stats-today" title="今日访问量"><i class="fa fa-calendar-check-o" aria-hidden="true"></i> 今日 <strong>{{ vc.today }}</strong> 次</span>
-            {% endwith %}
         </div>
     {% endif %}
+    {% endwith %}
 
     <div class="reaction-stats" data-page-id="{{ page.id }}">
         {% for reaction in specific.get_reactions %}
             {% if reaction.count > 0 %}
                 <span class="reaction-count" title="{{ reaction.name }}">
                     {% if reaction.name == '点赞' %}<i class="fa fa-thumbs-up" aria-hidden="true"></i>
-                    {% elif reaction.name == '喜爱' %}<i class="fa fa-heart" aria-hidden="true"></i>
-                    {% elif reaction.name == '惊讶' %}<i class="fa fa-exclamation-circle" aria-hidden="true"></i>
+                    {% elif reaction.name == '喜欢' %}<i class="fa fa-heart" aria-hidden="true"></i>
+                    {% elif reaction.name == '震惊' %}<i class="fa fa-exclamation-circle" aria-hidden="true"></i>
                     {% elif reaction.name == '思考' %}<i class="fa fa-lightbulb-o" aria-hidden="true"></i>
                     {% else %}<i class="fa fa-star" aria-hidden="true"></i>{% endif %}
                     <span class="reaction-name">{{ reaction.name }}</span>

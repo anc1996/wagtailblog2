@@ -1,4 +1,5 @@
 {# archive/templates/archive/tags/archive_sidebar.html #}
+{% spaceless %}
 <div class="archive-tree" data-archive-tree>
     {% if archive_tree %}
         <div class="archive-summary" aria-label="归档概览">
@@ -18,7 +19,7 @@
                             <span class="archive-count-badge">{{ year_data.count }}</span>
                         </a>
 
-                        {% if year_data.months %}
+                        {% if year_data.months and year_data.should_render_month_grid|default:True %}
                             <button type="button"
                                     class="month-toggle"
                                     data-target="#months-{{ year }}"
@@ -30,7 +31,7 @@
                         {% endif %}
                     </div>
 
-                    {% if year_data.months %}
+                    {% if year_data.months and year_data.should_render_month_grid|default:True %}
                         <div id="months-{{ year }}" class="months-panel"{% if year != current_year %} hidden{% endif %}>
                             <div class="months-grid" role="list" aria-label="{{ year }}年各月文章数量">
                                 {% for month_data in year_data.month_grid %}
@@ -70,3 +71,4 @@
         <div class="archive-empty"><i class="fa fa-folder-open-o" aria-hidden="true"></i> 暂无归档文章</div>
     {% endif %}
 </div>
+{% endspaceless %}

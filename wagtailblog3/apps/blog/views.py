@@ -1,3 +1,4 @@
+from django.conf import settings
 # 博客应用的接口和作者视图
 from urllib.parse import urlencode, urlsplit
 
@@ -285,6 +286,18 @@ def blog_index_results_api(request, pk):
 				},
 			},
 			status=404,
+		)
+		response['Cache-Control'] = 'private, no-store'
+		return response
+
+	if getattr(settings, 'BLOG_INDEX_LISTING_ENGINE_V2', False):
+		from blog.services.listing import build_listing
+		result = build_listing(request, page, request.GET, output_format='json')
+		response = JsonResponse(
+			{
+				'ok': True,
+				'data': result.payload,
+			}
 		)
 		response['Cache-Control'] = 'private, no-store'
 		return response

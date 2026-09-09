@@ -13,6 +13,7 @@ from wagtail.signals import page_published, page_unpublished
 from .models import Author, BlogCategory, BlogPage, MongoCleanupIntent, PageDeletionIntent, PageDeletionIntentStatus
 from .services.feed_cache import BlogFeedInvalidationService
 from .services.detail_cache import DetailCacheService
+from .services.listing_invalidation import ListingInvalidationService
 from wagtailblog3.mongo import MongoManager
 
 logger = logging.getLogger(__name__)
@@ -106,11 +107,12 @@ def clear_body_after_save(sender, instance, **kwargs):
 	dispatch_uid="blog.invalidate_feed_on_page_published",
 )
 def invalidate_feed_on_page_published(sender, instance, **kwargs):
-	"""文章首次发布或重新发布后刷新订阅源，并在事务提交后推进详情页缓存代次。"""
+	"""文章首次发布或重新发布后刷新订阅源，并在事务提交后推进详情页与列表页缓存代次。"""
 	BlogFeedInvalidationService.schedule_scope(
 		BlogFeedInvalidationService.scope_for_page(instance)
 	)
 	DetailCacheService.schedule_invalidation_for_page(instance)
+	ListingInvalidationService.schedule_page_publication(instance, event="page_published")
 
 
 @receiver(
@@ -119,12 +121,12 @@ def invalidate_feed_on_page_published(sender, instance, **kwargs):
 	dispatch_uid="blog.invalidate_feed_on_page_unpublished",
 )
 def invalidate_feed_on_page_unpublished(sender, instance, **kwargs):
-	"""取消发布后使文章从下一次Feed中消失，并在事务提交后推进详情页缓存代次。"""
+	"""取消发布后使文章从下一次Feed中消失，并在事务提交后推进详情页与列表页缓存代次。"""
 	BlogFeedInvalidationService.schedule_scope(
 		BlogFeedInvalidationService.scope_for_page(instance)
 	)
 	DetailCacheService.schedule_invalidation_for_page(instance)
-
+	ListingInvalidationService.schedule_page_publication(instance, event="page_unpublished")
 
 @receiver(
 	pre_delete,
@@ -137,7 +139,8 @@ def invalidate_feed_on_page_deleted(sender, instance, **kwargs):
 		BlogFeedInvalidationService.scope_for_page(instance)
 	)
 	DetailCacheService.schedule_invalidation_for_page(instance)
-
+	delete_scope = ListingInvalidationService.capture_delete_scope(instance)
+	ListingInvalidationService.schedule_delete_invalidation(delete_scope, reason="page_deleted")
 
 @receiver(
 	post_save,
@@ -172,6 +175,12 @@ def invalidate_feed_on_page_deleted(sender, instance, **kwargs):
 def invalidate_feed_on_related_content_changed(sender, instance, **kwargs):
 	"""作者、分类和标签可影响多篇文章，保守刷新全部Feed范围。"""
 	BlogFeedInvalidationService.schedule_all()
+	ListingInvalidationService.schedule_scopes_bump(
+		listing_scopes=set(),
+		archive_scopes=set(),
+		author_scopes={(0, 0)},
+		reason=f"related_content_changed:{sender.__name__}",
+	)
 
 
 @receiver(

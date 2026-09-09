@@ -8,7 +8,6 @@
     <link href="{% static 'gretzia/css/animate.css' %}" rel="stylesheet">
     <link rel="stylesheet" href="{% static 'archive/css/archive.css' %}?v=20260726-4">
     <link rel="stylesheet" href="{% static 'blog/css/blog.css' %}?v=20260726-1">
-    <link rel="stylesheet" href="{% static 'blog/css/blog-index.css' %}?v=20260825-4">
 {% endblock %}
 
 {% block extra_css_after_site_theme %}
@@ -87,7 +86,7 @@
 
 {% block extra_js %}
     {{ block.super }}
-    <script src="{% static 'archive/js/archive.js' %}?v=20260726-4"></script>
+    <script defer src="{% static 'archive/js/archive.js' %}?v=20260726-4"></script>
     <script defer src="{% static 'vendor/axios/axios.min.js' %}?v=1.19.0"></script>
     <script defer src="{% static 'blog/js/blog_index_page.js' %}?v=20260807-2"></script>
 {% endblock %}

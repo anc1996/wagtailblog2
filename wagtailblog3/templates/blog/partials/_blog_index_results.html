@@ -8,13 +8,13 @@
             <p>按标题、发布日期和阅读顺序快速查找文章。</p>
         </div>
         {% if has_active_filters %}
-            <a class="filter-clear-link" href="{% pageurl page %}">
+            <a class="filter-clear-link" href="{{ page_url|default:page.url }}">
                 <i class="fa fa-undo" aria-hidden="true"></i> 清除筛选
             </a>
         {% endif %}
     </div>
 
-    <form method="get" action="{% pageurl page %}" id="blog_filter_form" class="filter-form" role="search">
+    <form method="get" action="{{ page_url|default:page.url }}" id="blog_filter_form" class="filter-form" role="search">
         <div class="filter-grid">
             <div class="filter-field filter-field--search">
                 <label for="blog_search">文章标题</label>
@@ -78,11 +78,16 @@
 
     <div class="blog-list-items">
         {% for post in blog_pages %}
-            <article class="post-list-item{% if not post.specific.featured_image %} post-list-item--no-image{% endif %}">
-                {% if post.specific.featured_image %}
-                    <a class="post-card-image post-card-image--actual" href="{% pageurl post %}" aria-label="阅读 {{ post.title|inline_title_text }}">
-                        {% image post.specific.featured_image width-420 as img %}
-                        {# 首张卡片服务首屏，其余图片延迟加载，降低列表页初始请求量。 #}
+            <article class="post-list-item{% if not post.featured_image %} post-list-item--no-image{% endif %}">
+                {% if post.image_url %}
+                    <a class="post-card-image post-card-image--actual" href="{{ post.url }}" aria-label="阅读 {{ post.title|inline_title_text }}">
+                        <img src="{{ post.image_url }}" alt="{{ post.title|inline_title_text }}"
+                             width="{{ post.image_width|default:420 }}" height="{{ post.image_height|default:280 }}" decoding="async"
+                             {% if forloop.first %}loading="eager" fetchpriority="high"{% else %}loading="lazy"{% endif %}>
+                    </a>
+                {% elif post.featured_image %}
+                    <a class="post-card-image post-card-image--actual" href="{{ post.url }}" aria-label="阅读 {{ post.title|inline_title_text }}">
+                        {% image post.featured_image width-420 as img %}
                         <img src="{{ img.url }}" alt="{{ post.title|inline_title_text }}"
                              width="{{ img.width }}" height="{{ img.height }}" decoding="async"
                              {% if forloop.first %}loading="eager" fetchpriority="high"{% else %}loading="lazy"{% endif %}>
@@ -90,14 +95,23 @@
                 {% endif %}
 
                 <div class="post-card-content">
-                    <h3 class="post-card-title"><a href="{% pageurl post %}">{% render_display_title post %}</a></h3>
+                    <h3 class="post-card-title"><a href="{{ post.url }}">{% render_display_title post %}</a></h3>
 
                     <div class="post-meta-info">
-                        {% with authors=post.specific.authors.all %}
-                            {% if authors %}
+                        {% with authors=post.listing_authors %}
+                            {% if authors or authors is not None %}
+                                {% if authors %}
+                                    <span class="author">
+                                        <i class="fa fa-user" aria-hidden="true"></i>
+                                        {% for author in authors %}
+                                            <a href="{% url 'blog:author_detail' pk=author.pk %}">{{ author.name }}</a>{% if not forloop.last %}, {% endif %}
+                                        {% endfor %}
+                                    </span>
+                                {% endif %}
+                            {% elif post.specific.authors.all %}
                                 <span class="author">
                                     <i class="fa fa-user" aria-hidden="true"></i>
-                                    {% for author in authors %}
+                                    {% for author in post.specific.authors.all %}
                                         <a href="{% url 'blog:author_detail' pk=author.pk %}">{{ author.name }}</a>{% if not forloop.last %}, {% endif %}
                                     {% endfor %}
                                 </span>
@@ -105,19 +119,21 @@
                         {% endwith %}
 
                         <span class="date">
-                            <i class="fa fa-calendar" aria-hidden="true"></i>{{ post.specific.date|date:"Y-m-d" }}
+                            <i class="fa fa-calendar" aria-hidden="true"></i>{{ post.date|date:"Y-m-d" }}
                         </span>
 
                         {% include "blog/stats_block.html" with page=post %}
 
-                        {% with specific=post.specific %}
-                            {% with tags=specific.tags.all %}
+                        {% with tags=post.listing_tags %}
+                            {% if tags or tags is not None %}
                                 {% if tags %}
                                     <div class="post-tags-row" aria-label="文章标签">
                                         <i class="fa fa-tags post-tags-icon" aria-hidden="true"></i>
                                         <div class="post-tags-list">
                                             {% for tag in tags %}
-                                                {% if blog_tag_index_page %}
+                                                {% if blog_tag_index_url %}
+                                                    <a class="post-tag" href="{{ blog_tag_index_url }}?tag={{ tag.slug }}">{{ tag.name }}</a>
+                                                {% elif blog_tag_index_page %}
                                                     <a class="post-tag" href="{% pageurl blog_tag_index_page %}?tag={{ tag.slug }}">{{ tag.name }}</a>
                                                 {% else %}
                                                     <span class="post-tag">{{ tag.name }}</span>
@@ -126,15 +142,28 @@
                                         </div>
                                     </div>
                                 {% endif %}
-                            {% endwith %}
+                            {% elif post.specific.tags.all %}
+                                <div class="post-tags-row" aria-label="文章标签">
+                                    <i class="fa fa-tags post-tags-icon" aria-hidden="true"></i>
+                                    <div class="post-tags-list">
+                                        {% for tag in post.specific.tags.all %}
+                                            {% if blog_tag_index_page %}
+                                                <a class="post-tag" href="{% pageurl blog_tag_index_page %}?tag={{ tag.slug }}">{{ tag.name }}</a>
+                                            {% else %}
+                                                <span class="post-tag">{{ tag.name }}</span>
+                                            {% endif %}
+                                        {% endfor %}
+                                    </div>
+                                </div>
+                            {% endif %}
                         {% endwith %}
                     </div>
 
                     <div class="post-card-summary">
-                        <p>{{ post.specific.intro|striptags|truncatechars:180 }}</p>
+                        <p>{{ post.intro|striptags|truncatechars:180 }}</p>
                     </div>
 
-                    <a href="{% pageurl post %}" class="post-card-link">
+                    <a href="{{ post.url }}" class="post-card-link">
                         阅读全文 <i class="fa fa-long-arrow-right" aria-hidden="true"></i>
                     </a>
                 </div>
@@ -144,7 +173,7 @@
                 <i class="fa fa-search" aria-hidden="true"></i>
                 <h3>没有找到符合条件的文章</h3>
                 <p>请尝试调整关键词、日期范围或排序方式。</p>
-                <a class="filter-clear-link" href="{% pageurl page %}">查看全部文章</a>
+                <a class="filter-clear-link" href="{{ page_url|default:page.url }}">查看全部文章</a>
             </div>
         {% endfor %}
     </div>
@@ -171,7 +200,7 @@
         {% endif %}
 
         {% if page_obj.paginator.num_pages > 2 %}
-            <form method="get" action="{% pageurl page %}" class="pagination-jump-form">
+            <form method="get" action="{{ page_url|default:page.url }}" class="pagination-jump-form">
                 {% if search_query %}<input type="hidden" name="search" value="{{ search_query }}">{% endif %}
                 {% if start_date %}<input type="hidden" name="start_date" value="{{ start_date }}">{% endif %}
                 {% if end_date %}<input type="hidden" name="end_date" value="{{ end_date }}">{% endif %}

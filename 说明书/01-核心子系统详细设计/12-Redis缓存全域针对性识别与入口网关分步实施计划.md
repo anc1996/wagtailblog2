@@ -212,7 +212,7 @@ systemctl restart wagtailblog3.service wagtailblog3-celery-maintenance.service w
 | **节点 3** | 阶段三：Django Cache 统一网关 | `settings/database.py` | **已完成** | `unified_key_maker` / `unified_reverse_key` 100% 双向可逆，兼容 `delete_pattern` |
 | **节点 4** | 阶段四：业务 Key 协议工厂封装 | `redis_protocol.py` 及各服务 | **已完成** | 封装 `RedisKeyProtocol`；重构 `listing.py`、`sidebar_cache.py`、`detail_cache.py`、`listing_invalidation.py`；修复 Lua 锁底层物理键名映射 |
 | **节点 5** | 阶段五：定向测试与门禁验证 | `test_redis_protocol.py` | **已完成** | 44 项定向测试全绿；`git diff --check`、`manage.py check`、`check_css_tokens.py` 全绿 |
-| **节点 6** | 阶段六：生产提交与平滑部署 | 生产虚拟机 192.168.20.2 | **待用户授权** | 待对话人批准 Git Commit 与生产服务平滑滚动升级 |
+| **节点 6** | 阶段六：生产提交与平滑部署 | 生产虚拟机 192.168.20.2 | **已完成 (全绿上线)** | 经 Sol 架构师深度审查；Git Commit 9337e96 & 276d80b 上线；4 大服务 active；DB 1/11/14/15 物理分离；热请求 85ms |
 
 ### 4.2 核心代码落盘事实
 1. **新建协议工厂**：`wagtailblog3/apps/blog/services/redis_protocol.py`
@@ -230,4 +230,43 @@ systemctl restart wagtailblog3.service wagtailblog3-celery-maintenance.service w
    - 实测向 Redis DB 5 写入物理键 `wblog:test:listing:v2:s_1:loc_2:idx_10:gen_1:q_livecheck123`，读写反解与原子删除均验证无误。
 
 ### 4.3 当前所处链条位置
-**当前位置**：节点 5（测试验证与门禁核验已全部通过）-> **等待节点 6（向用户申请生产提交与部署授权）**。
+**当前位置**：**全部节点完工交付（节点 1 至节点 6 全部 100% 验收落地，生产稳定高效运行）**。
+
+---
+
+## 5. 生产上线实测记录与归档 (2026-09-09)
+
+### 5.1 部署环境与版本追踪
+- **生产目标机**：192.168.20.2（ziliao）
+- **发布 Commit SHA**：276d80b62c59492a7d289401365afb3f209a030d
+- **代码分支**：main
+- **部署前 Sol 架构师审查阻断项处置**：
+  1. 环境变量加载核验：确认 systemd 对应 4 个服务单元均挂载 EnvironmentFile，实机读取 /proc/<PID>/environ 证实 WAGTAILBLOG_ENV=production 全量生效。
+  2. Celery 任务排空门禁：部署前通过 Django Shell 检查 DB 2，maintenance 队列长度为 0，unacked 为 0，unacked_index 为 0，无任何飞行任务。
+  3. 凭据与阻塞命令清理：剔除所有包含硬编码密码与 KEYS * 的临时调试脚本并提交推送。
+
+### 5.2 生产 4 大应用服务运行态核验
+- wagtailblog3.service：ctive (running)，uWSGI 4 核心 prefork+threaded 模式，响应 HTTP 200。
+- wagtailblog3-celery-maintenance.service：ctive (running)，celery inspect ping 响应 maintenance@ziliao: OK pong。
+- wagtailblog3-celery-beat.service：ctive (running)，正常调度。
+- wagtailblog3-filebeat.service：ctive (running)，日志正常收集。
+
+### 5.3 物理与逻辑双重隔离实测抽检
+- **DB 1 (业务缓存)**：已生成符合协议规范的全新键名，如 wblog:prod:sidebar:v2:archive:aggregate:2:1:1:1、wblog:prod:sidebar:v2:author:pick:...、wblog:prod:cache:wagtail-rendition-...。
+- **DB 11 (评论限流)**：完全独立的专用库，避免与缓存踩踏。
+- **DB 14 (Celery Broker)**：Kombu 绑定键自动携带前缀，如 wblog:prod:broker:_kombu.binding.maintenance。
+- **DB 15 (Celery Result)**：任务元数据自动携带前缀，如 wblog:prod:result:celery-task-meta-*。
+- **DB 2/3/4/10 (电商与外系统)**：wagtailblog 彻底撤出，不再发生任何键名污染与锁竞争。
+
+### 5.4 生产实测响应性能 (tools/benchmark_prod.py 实机采样)
+- **目标分类慢页面（公文材料/政务公开题材/，122 篇文章）**：
+  - 冷启动：**248.50 ms**
+  - 热缓存平均：**85.75 ms**（最低 **84.33 ms**，从原超 10 秒骤降至 85 毫秒内，提速超 100 倍）
+- **分类 AJAX 分页接口（Page 2）**：
+  - 冷启动：**83.41 ms**
+  - 热响应平均：**51.27 ms**（最低 **46.78 ms**）
+- **全站首页（/zh-hans/）**：
+  - 冷启动：**196.21 ms**
+  - 热响应平均：**85.11 ms**（最低 **83.70 ms**）
+- **侧边栏年月份架构**：
+  - 仅近 3 年（2026、2025、2024）带 + 号折叠展开器；历史更早年份（2023 以前）自动折叠为历史归档，彻底消除假展开。

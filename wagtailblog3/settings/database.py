@@ -78,36 +78,147 @@ DATABASES = {
 }
 
 # ==========================================================
-# Redis 配置
+# Redis 缓存与入口网关配置
 # ==========================================================
 REDIS_HOST = os.environ.get('REDIS_HOST', SERVICE_HOST)
 REDIS_PORT = _env_int('REDIS_PORT', 6379)
 REDIS_PASSWORD = os.environ.get('REDIS_PASSWORD', '')
-REDIS_DB = _env_int('REDIS_DB', 1)  # 用于计数器的数据库
-REDIS_CACHE_DB = _env_int('REDIS_CACHE_DB', 1)
-REDIS_COMMENT_CACHE_DB = _env_int('REDIS_COMMENT_CACHE_DB', 2)
 
 WAGTAILBLOG_ENV = os.environ.get('WAGTAILBLOG_ENV', 'test').strip().lower()
-REDIS_KEY_PREFIX = os.environ.get('REDIS_KEY_PREFIX', 'prod' if WAGTAILBLOG_ENV == 'production' else 'test')
+IS_PROD_ENV = (WAGTAILBLOG_ENV == 'production')
 
-# Redis 缓存配置
+# 根据环境物理分库隔离：生产与宿主机 shop 电商系统物理避让，测试使用 DB 5~8
+DEFAULT_REDIS_CACHE_DB = 1 if IS_PROD_ENV else 5
+DEFAULT_REDIS_COMMENT_DB = 11 if IS_PROD_ENV else 6
+DEFAULT_CELERY_BROKER_DB = 14 if IS_PROD_ENV else 7
+DEFAULT_CELERY_RESULT_DB = 15 if IS_PROD_ENV else 8
+
+REDIS_CACHE_DB = _env_int('REDIS_CACHE_DB', DEFAULT_REDIS_CACHE_DB)
+REDIS_COMMENT_CACHE_DB = _env_int('REDIS_COMMENT_CACHE_DB', DEFAULT_REDIS_COMMENT_DB)
+REDIS_DB = REDIS_CACHE_DB  # 兼容旧代码引用
+
+# Redis 业务模块与通用前缀规范
+REDIS_KEY_PREFIX = os.environ.get('REDIS_KEY_PREFIX', 'cache')
+REDIS_COMMENT_KEY_PREFIX = os.environ.get('REDIS_COMMENT_KEY_PREFIX', 'rate')
+REDIS_GENERIC_PREFIXES = {'cache', 'rate'}
+
+
+def unified_key_maker(key: str, key_prefix: str, version: int) -> str:
+	"""
+	Django Cache 全局键识别网关 (KEY_FUNCTION)。
+
+	将业务层或第三方框架传入的原始 key 统一包装为六段式全域安全标识，
+	彻底消除多系统（如与宿主机 shop 电商）与多环境（生产与测试）键踩踏：
+	1. 已规范全域 key（形如 wblog:{env}:*）：幂等直通，不重复前缀；
+	2. 业务规范前缀（形如 wblog:* 但缺少环境段）：统一安全组装为 wblog:{env}:{remainder}；
+	3. 通用缓存 key（如 wagtail_site_root_paths、template.cache 等）：
+	   组装为 wblog:{env}:{prefix}:{clean_key}，prefix 默认为 cache 或 rate；
+	4. 显式多版本支持：当 version != 1 且 key 未带版本后缀时，追加 :v{version}。
+
+	参数说明:
+		key (str): 业务层传入的原始缓存键
+		key_prefix (str): CACHES 配置中指定的 KEY_PREFIX (如 'cache' 或 'rate')
+		version (int): 缓存版本号 (Django 默认为 1)
+
+	返回值:
+		str: 规范化的全局唯一 Redis 缓存键
+	"""
+	app_id = 'wblog'
+	raw_env = os.environ.get('WAGTAILBLOG_ENV', 'test').strip().lower()
+	env_id = 'prod' if raw_env in ('production', 'prod') else 'test'
+	clean_key = str(key).strip(':')
+
+	# 1. 幂等防护：若已经是当前全域规范键，直接返回
+	if clean_key.startswith(f'{app_id}:{env_id}:'):
+		return clean_key
+
+	# 2. 补全环境标识：若带有应用标识前缀但缺少环境标识
+	if clean_key.startswith(f'{app_id}:'):
+		remainder = clean_key[len(app_id) + 1:].lstrip(':')
+		return f'{app_id}:{env_id}:{remainder}'
+
+	# 3. 规整通用缓存前缀（消除 .env 中旧设置 REDIS_KEY_PREFIX=test/prod 造成的命名冗余）
+	prefix = str(key_prefix).strip(':') if key_prefix else 'cache'
+	if prefix in ('prod', 'test', 'dev', env_id):
+		prefix = 'cache'
+	elif 'comment' in prefix or prefix == 'rate':
+		prefix = 'rate'
+
+	full_key = f'{app_id}:{env_id}:{prefix}:{clean_key}'
+
+	# 4. 版本号处理 (支持 django-redis 模式字符串如 '1' 的安全转换)
+	try:
+		ver_int = int(version) if version is not None else 1
+	except (ValueError, TypeError):
+		ver_int = 1
+
+	if ver_int != 1 and not full_key.endswith(f':v{ver_int}'):
+		full_key = f'{full_key}:v{ver_int}'
+
+	return full_key
+
+
+def unified_reverse_key(key: str) -> str:
+	"""
+	Django Cache 全局键逆向解析网关 (REVERSE_KEY_FUNCTION)。
+
+	从 Redis 物理键中精准提取出业务层原本传入的原始 key，供 django-redis
+	的 `iter_keys`、`delete_pattern` 等批量操作使用。满足严格双向可逆契约：
+	unified_reverse_key(unified_key_maker(k)) == k。
+
+	参数说明:
+		key (str): Redis 底层的物理存储键
+
+	返回值:
+		str: 还原后的业务原始键
+	"""
+	app_id = 'wblog'
+	raw_env = os.environ.get('WAGTAILBLOG_ENV', 'test').strip().lower()
+	env_id = 'prod' if raw_env in ('production', 'prod') else 'test'
+	prefix_base = f'{app_id}:{env_id}:'
+
+	# 若非当前应用与环境的前缀，原样返回避免破坏未知键
+	if not key.startswith(prefix_base):
+		return key
+
+	remainder = key[len(prefix_base):]
+	first_token = remainder.split(':', 1)[0]
+
+	# 若为通用缓存前缀（如 cache:wagtail_site_root_paths 或 rate:comment:101），剥离通用前缀
+	if first_token in REDIS_GENERIC_PREFIXES:
+		tokens = remainder.split(':', 1)
+		return tokens[1] if len(tokens) > 1 else remainder
+
+	# 若为业务层传入的 wblog:* 键，恢复完整业务键标识
+	return f'{app_id}:{remainder}'
+
+
+# Redis 缓存配置 (接入统一网关与物理隔离)
 CACHES = {
 	'default': {
 		'BACKEND': 'django_redis.cache.RedisCache',
 		'LOCATION': f'redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_CACHE_DB}',
 		'KEY_PREFIX': REDIS_KEY_PREFIX,
+		'KEY_FUNCTION': 'wagtailblog3.settings.database.unified_key_maker',
+		'REVERSE_KEY_FUNCTION': 'wagtailblog3.settings.database.unified_reverse_key',
 		'OPTIONS': {
 			'CLIENT_CLASS': 'django_redis.client.DefaultClient',
-			'PASSWORD': REDIS_PASSWORD
+			'PASSWORD': REDIS_PASSWORD,
+			'KEY_FUNCTION': 'wagtailblog3.settings.database.unified_key_maker',
+			'REVERSE_KEY_FUNCTION': 'wagtailblog3.settings.database.unified_reverse_key',
 		}
 	},
-	'comment_rate_limit_cache': {  # 新的缓存实例，专门用于评论频率限制
+	'comment_rate_limit_cache': {  # 评论与点赞频率限制独立缓存实例
 		'BACKEND': 'django_redis.cache.RedisCache',
 		'LOCATION': f'redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_COMMENT_CACHE_DB}',
-		'KEY_PREFIX': f'{REDIS_KEY_PREFIX}_comment',
+		'KEY_PREFIX': REDIS_COMMENT_KEY_PREFIX,
+		'KEY_FUNCTION': 'wagtailblog3.settings.database.unified_key_maker',
+		'REVERSE_KEY_FUNCTION': 'wagtailblog3.settings.database.unified_reverse_key',
 		'OPTIONS': {
 			'CLIENT_CLASS': 'django_redis.client.DefaultClient',
-			'PASSWORD': REDIS_PASSWORD
+			'PASSWORD': REDIS_PASSWORD,
+			'KEY_FUNCTION': 'wagtailblog3.settings.database.unified_key_maker',
+			'REVERSE_KEY_FUNCTION': 'wagtailblog3.settings.database.unified_reverse_key',
 		}
 	}
 }
@@ -189,25 +300,37 @@ def get_celery_config(time_zone, redis_host, redis_port, redis_password):
 	"""
 	# 测试环境可通过独立队列隔离不同代码版本的 Worker；生产默认值保持兼容。
 	maintenance_queue = os.environ.get('CELERY_MAINTENANCE_QUEUE', 'maintenance').strip() or 'maintenance'
+	raw_env = os.environ.get('WAGTAILBLOG_ENV', 'test').strip().lower()
+	is_prod = (raw_env in ('production', 'prod'))
+	env_name = 'prod' if is_prod else 'test'
+	default_broker_db = 14 if is_prod else 7
+	default_result_db = 15 if is_prod else 8
 	try:
-		broker_db = int(os.environ.get('CELERY_BROKER_DB', '2'))
-		result_db = int(os.environ.get('CELERY_RESULT_DB', '3'))
+		broker_db = int(os.environ.get('CELERY_BROKER_DB', str(default_broker_db)))
+		result_db = int(os.environ.get('CELERY_RESULT_DB', str(default_result_db)))
 	except ValueError:
-		broker_db, result_db = 2, 3
+		broker_db, result_db = default_broker_db, default_result_db
 	return {
 		# 所有显式任务投递都必须读取同一个队列名，测试环境才能与生产 Redis 队列隔离。
 		'CELERY_MAINTENANCE_QUEUE': maintenance_queue,
+		# Celery 全局键识别网关：为消息队列与异步任务结果自动附加全域前缀，防止与商城任务踩踏
+		'CELERY_BROKER_TRANSPORT_OPTIONS': {
+			'global_keyprefix': f'wblog:{env_name}:broker:',
+		},
+		'CELERY_RESULT_BACKEND_TRANSPORT_OPTIONS': {
+			'global_keyprefix': f'wblog:{env_name}:result:',
+		},
 		# --------------------------------------------------
 		# 基础时区配置
 		# --------------------------------------------------
 		'CELERY_TIMEZONE': time_zone,
 		# 设置 Celery 使用的时区，确保定时任务按照指定时区执行
 		# 例如：'Asia/Shanghai' 表示使用中国标准时间
-		
+
 		'CELERY_ENABLE_UTC': True,
 		# 启用 UTC 时间存储，内部统一使用 UTC 时间，避免时区转换问题
 		# 建议始终设为 True，让 Celery 自动处理时区转换
-		
+
 		# --------------------------------------------------
 		# 消息代理和结果后端配置
 		# --------------------------------------------------
@@ -215,12 +338,12 @@ def get_celery_config(time_zone, redis_host, redis_port, redis_password):
 		# 消息代理地址，用于存储待执行的任务
 		# 格式：redis://[:password]@host:port/db_number
 		# 这里使用 Redis DB 2 作为消息队列存储
-		
+
 		'CELERY_RESULT_BACKEND': f'redis://:{redis_password}@{redis_host}:{redis_port}/{result_db}',
 		# 任务结果存储后端，用于保存任务执行结果
 		# 这里使用 Redis DB 3 专门存储任务执行结果
 		# 将消息代理和结果后端分开使用不同的 DB，提高性能和数据隔离性
-		
+
 		# --------------------------------------------------
 		# 任务序列化配置
 		# --------------------------------------------------
@@ -228,14 +351,14 @@ def get_celery_config(time_zone, redis_host, redis_port, redis_password):
 		# 任务参数的序列化格式，使用 JSON 格式
 		# 可选值：'json', 'pickle', 'yaml', 'msgpack'
 		# JSON 格式安全性高，推荐用于生产环境
-		
+
 		'CELERY_ACCEPT_CONTENT': ['json'],
 		# 允许接收的内容类型白名单，只接受 JSON 格式
 		# 这是一个安全设置，防止接收不安全的序列化数据（如 pickle）
-		
+
 		'CELERY_RESULT_SERIALIZER': 'json',
 		# 任务结果的序列化格式，与任务序列化保持一致
-		
+
 		# --------------------------------------------------
 		# 任务执行模式配置
 		# --------------------------------------------------
@@ -243,39 +366,39 @@ def get_celery_config(time_zone, redis_host, redis_port, redis_password):
 		# 是否启用即时执行模式（同步执行）
 		# False：任务异步执行，发送到消息队列由 Worker 处理（生产环境设置）
 		# True：任务同步执行，不经过消息队列，直接在当前进程执行（仅用于测试）
-		
+
 		'CELERY_TASK_EAGER_PROPAGATES': True,
 		# 在即时执行模式下，是否传播任务异常
 		# True：异常会直接抛出，便于调试
 		# False：异常被捕获并存储在结果后端
-		
+
 		'CELERY_WORKER_PREFETCH_MULTIPLIER': 1,
 		# Worker 预取任务的数量倍数
 		# 1 表示 Worker 每次只预取 1 个任务
 		# 较小的值适合执行时间长、资源消耗大的任务，避免任务堆积
 		# 较大的值适合执行时间短的任务，提高吞吐量
-		
+
 		'CELERY_TASK_ACKS_LATE': True,
 		# 延迟任务确认模式
 		# True：任务执行完成后才向消息代理确认（推荐设置）
 		# False：任务被 Worker 接收后立即确认
 		# 设为 True 可以防止 Worker 崩溃导致任务丢失
-		
+
 		# --------------------------------------------------
 		# 任务路由配置
 		# --------------------------------------------------
 		'CELERY_TASK_ROUTES': {
 			# 将不同类型的任务路由到不同的队列，实现任务优先级和资源隔离
-			
+
 			'base.tasks.send_form_confirmation_email': {'queue': 'email'},
 			# 表单确认邮件发送任务 → email 队列
-			
+
 			'base.tasks.send_admin_notification_email': {'queue': 'email'},
 			# 管理员通知邮件发送任务 → email 队列
-			
+
 			'base.tasks.send_bulk_email': {'queue': 'email'},
 			# 批量邮件发送任务 → email 队列
-			
+
 			'base.tasks.cleanup_email_logs': {'queue': maintenance_queue},
 			'blog.tasks.cleanup_analytics_details': {'queue': maintenance_queue},
 			'blog.tasks.cleanup_markdown_import_artifact': {'queue': maintenance_queue},
@@ -289,23 +412,23 @@ def get_celery_config(time_zone, redis_host, redis_port, redis_password):
 			# 邮件日志清理任务 → maintenance 队列
 			# 维护类任务使用独立队列，避免影响业务任务
 		},
-		
+
 		# --------------------------------------------------
 		# 队列定义配置
 		# --------------------------------------------------
 		'CELERY_TASK_DEFAULT_QUEUE': 'default',
 		# 默认队列名称，未指定队列的任务会进入此队列
-		
+
 		'CELERY_TASK_QUEUES': {
 			# 定义三个队列，每个队列有独立的交换器和路由键
-			
+
 			'default': {
 				'exchange': 'default',  # 交换器名称
 				'exchange_type': 'direct',  # 交换器类型：直连模式
 				'routing_key': 'default',  # 路由键
 			},
 			# 默认队列：处理常规业务任务
-			
+
 			'email': {
 				'exchange': 'email',
 				'exchange_type': 'direct',
@@ -313,7 +436,7 @@ def get_celery_config(time_zone, redis_host, redis_port, redis_password):
 			},
 			# 邮件队列：专门处理邮件发送任务
 			# 可以为此队列配置专门的 Worker，优化邮件发送性能
-			
+
 			maintenance_queue: {
 				'exchange': maintenance_queue,
 				'exchange_type': 'direct',
@@ -322,7 +445,7 @@ def get_celery_config(time_zone, redis_host, redis_port, redis_password):
 			# 维护队列：处理数据清理、定期维护等低优先级任务
 			# 建议在系统空闲时段处理这类任务
 		},
-		
+
 		# --------------------------------------------------
 		# 任务重试配置
 		# --------------------------------------------------
@@ -330,12 +453,12 @@ def get_celery_config(time_zone, redis_host, redis_port, redis_password):
 		# 任务失败后的默认重试延迟时间（秒）
 		# 60 秒后重试，避免立即重试导致资源浪费
 		# 可以根据具体任务类型调整，例如网络请求可能需要更长延迟
-		
+
 		'CELERY_TASK_MAX_RETRIES': 3,
 		# 任务的最大重试次数
 		# 重试 3 次后仍失败，任务将被标记为失败
 		# 防止无限重试占用资源
-		
+
 		# --------------------------------------------------
 		# 任务超时配置
 		# --------------------------------------------------
@@ -343,13 +466,13 @@ def get_celery_config(time_zone, redis_host, redis_port, redis_password):
 		# 任务软超时限制（秒）- 5 分钟
 		# 达到软超时后，会向任务发送 SoftTimeLimitExceeded 异常
 		# 任务可以捕获此异常进行清理工作，然后优雅退出
-		
+
 		'CELERY_TASK_TIME_LIMIT': 600,
 		# 任务硬超时限制（秒）- 10 分钟
 		# 达到硬超时后，Worker 进程会被强制终止
 		# 硬超时应该大于软超时，给任务留出清理时间
 		# 防止任务长时间运行占用 Worker
-		
+
 		# --------------------------------------------------
 		# 结果过期配置
 		# --------------------------------------------------
@@ -357,7 +480,7 @@ def get_celery_config(time_zone, redis_host, redis_port, redis_password):
 		# 任务结果的过期时间（秒）- 1 小时
 		# 超过此时间后，结果会从结果后端自动删除
 		# 避免结果数据无限累积占用存储空间
-		
+
 		# --------------------------------------------------
 		# 错误处理配置
 		# --------------------------------------------------
@@ -366,13 +489,13 @@ def get_celery_config(time_zone, redis_host, redis_port, redis_password):
 		# True：任务会重新进入队列，由其他 Worker 处理
 		# False：任务会丢失
 		# 配合 CELERY_TASK_ACKS_LATE=True 使用，提高任务可靠性
-		
+
 		'CELERY_TASK_IGNORE_RESULT': False,
 		# 是否忽略任务结果
 		# False：保存任务结果到结果后端
 		# True：不保存结果，适用于不需要获取返回值的任务
 		# 保存结果可以方便任务状态追踪和调试
-		
+
 		# --------------------------------------------------
 		# 监控和事件配置
 		# --------------------------------------------------
@@ -380,34 +503,34 @@ def get_celery_config(time_zone, redis_host, redis_port, redis_password):
 		# 是否发送任务事件
 		# True：Worker 会发送任务开始、成功、失败等事件
 		# 这些事件可以被 Flower 等监控工具使用
-		
+
 		'CELERY_SEND_EVENTS': True,
 		# 是否发送所有类型的事件（包括 Worker 心跳等）
 		# True：发送完整的事件信息，便于系统监控
 		# 注意：事件发送会增加少量网络开销
-		
+
 		'CELERY_TASK_SEND_SENT_EVENT': True,
 		# 是否在任务发送到队列时发送事件
 		# True：可以追踪任务从创建到执行的完整生命周期
 		# 适用于需要详细审计和监控的场景
-		
+
 		# --------------------------------------------------
 		# 定时任务配置（Celery Beat）
 		# --------------------------------------------------
 		'CELERY_BEAT_SCHEDULE': {
 			# 定义周期性执行的任务
-			
+
 			'cleanup-email-logs': {
 				# 定时任务唯一标识符
-				
+
 				'task': 'base.tasks.cleanup_email_logs',
 				# 要执行的任务路径
-				
+
 				'schedule': 60 * 60 * 24,
 				# 执行间隔：24 小时（86400 秒）
 				# 可以使用 crontab 对象实现更复杂的调度
 				# 例如：crontab(hour=2, minute=0) 表示每天凌晨 2 点执行
-				
+
 				'options': {'queue': maintenance_queue}
 				# 任务选项：指定使用 maintenance 队列
 				# 维护任务在低优先级队列执行，不影响核心业务
@@ -462,7 +585,7 @@ def get_celery_config(time_zone, redis_host, redis_port, redis_password):
 				'schedule': 300,
 				'options': {'queue': maintenance_queue},
 			},
-			
+
 			# 可以在这里添加更多定时任务
 			# 例如：
 			# 'send-daily-report': {
@@ -623,20 +746,20 @@ WAGTAILSEARCH_BACKENDS = {
 		# 1. 搜索引擎底层的通用适配器驱动
 		# 使用 Wagtail 原生支持的 Elasticsearch 8.x 版本官方后端
 		'BACKEND': 'wagtail.search.backends.elasticsearch8',
-		
+
 		# 2. ES 集群的物理连接地址
 		# 本地单节点或集群网关的 REST API 端点
 		'URLS': [os.environ.get('ELASTICSEARCH_URL', f'http://{SERVICE_HOST}:9200')],
-		
+
 		# 3. 隔离命名空间（索引前缀）
 		# 在多套环境（如开发/测试/生产）公用同一个 ES 集群时，防止索引冲突
 		# 实际生成的索引名形如: wagtailblog__apps_blog_blogpage 等
 		'INDEX_PREFIX': os.environ.get('ELASTICSEARCH_INDEX_PREFIX', 'wagtailblog-test'),
-		
+
 		# 4. HTTP 网络超时时间（单位：秒）
 		# 限制 Django 向 ES 发送检索或批量建立索引（Bulk Indexing）时的最大等待时间
 		'TIMEOUT': _env_int('ELASTICSEARCH_TIMEOUT', 10),
-		
+
 		# =========================================================================
 		# 核心高级配置：深度定制 Elasticsearch 索引级别的分词行为 (IK Analyzer)
 		# =========================================================================
@@ -656,7 +779,7 @@ WAGTAILSEARCH_BACKENDS = {
 							'type': 'custom',
 							'tokenizer': 'ik_max_word'
 						},
-						
+
 						# ---------------------------------------------------------
 						# 【B. 前台搜索分词器 (Query Time Analyzer)】
 						# ---------------------------------------------------------
@@ -822,23 +945,23 @@ def print_database_config(stream=None):
 	write("=" * 60)
 	write("     系统核心引擎与数据库配置     ")
 	write(f"  [MySQL]  数据库: {DATABASES['default']['NAME']}")
-	
+
 	# 假设你定义了 MONGO_DB 字典，如果没有请根据你的实际变量名调整
 	mongo_db_name = globals().get('MONGO_DB', {}).get('NAME', '未配置')
 	write(f"  [MongoDB] 数据库: {mongo_db_name}")
 	write(f"  [Redis]  主机: {REDIS_HOST}:{REDIS_PORT}")
-	
+
 	# 假设你定义了 AWS_STORAGE_BUCKET_NAME 变量
 	minio_bucket = globals().get('AWS_STORAGE_BUCKET_NAME', '未配置')
 	write(f"  [MinIO]  Bucket: {minio_bucket}")
-	
+
 	# 🌟 新增：动态侦测并打印 Wagtail 搜索引擎 (Elasticsearch) 的加载状态
 	es_config = WAGTAILSEARCH_BACKENDS.get('default', {})
 	# 截取 backend 字符串的最后一部分 (例如: wagtail.search.backends.elasticsearch8 -> elasticsearch8)
 	es_backend = es_config.get('BACKEND', '未加载').split('.')[-1]
 	es_url = es_config.get('URLS', ['未配置'])[0]
 	es_index = es_config.get('INDEX_PREFIX', '未配置')
-	
+
 	write(f"  [Search] 引擎: {es_backend.upper()}")
 	write(f"           节点: {es_url}")
 	write(f"           索引前缀: {es_index}")

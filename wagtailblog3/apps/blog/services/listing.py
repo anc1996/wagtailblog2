@@ -381,7 +381,8 @@ def _generate_listing_cache_key(
     """生成隔离且可代次失效的列表缓存键."""
     query_repr = f"p={filters.page}:s={filters.search}:sd={filters.start_date}:ed={filters.end_date}:sp={filters.sort_primary}:ss={filters.sort_secondary}"
     query_hash = hashlib.sha256(query_repr.encode("utf-8")).hexdigest()[:16]
-    return f"wblog:listing:v2:s_{site_id}:loc_{locale_id}:idx_{index_id}:gen_{generation}:q_{query_hash}"
+    from blog.services.redis_protocol import RedisKeyProtocol
+    return RedisKeyProtocol.listing_cache_key(site_id, locale_id, index_id, query_hash, generation)
 
 
 def _is_preview_request(request: HttpRequest | None) -> bool:
@@ -839,7 +840,9 @@ class ListingService:
                     return hit_result
 
                 # Single-Flight 防击穿互斥锁 (TTL 5s)
-                lock_key = f"wblog:listing:v2:lock:{index_page.pk}:{hashlib.sha256(cache_key.encode()).hexdigest()[:12]}"
+                from blog.services.redis_protocol import RedisKeyProtocol
+                lock_hash = hashlib.sha256(cache_key.encode()).hexdigest()[:12]
+                lock_key = RedisKeyProtocol.listing_lock_key(index_page.pk, lock_hash)
                 token = uuid.uuid4().hex
                 acquired = bool(cache_backend.add(lock_key, token, timeout=5))
                 if not acquired:
@@ -998,7 +1001,9 @@ end
                             raw_redis = None
 
                     if raw_redis and not hasattr(raw_redis, "_mock_return_value") and hasattr(raw_redis, "eval"):
-                        raw_redis.eval(release_lua, 1, lock_key, token)
+                        # 确保直连 Redis 执行 Lua 时传入真实底层物理键 (包含前缀网关修饰)
+                        real_lock_key = cache_backend.make_key(lock_key) if hasattr(cache_backend, "make_key") else lock_key
+                        raw_redis.eval(release_lua, 1, real_lock_key, token)
                     else:
                         current_lock = cache_backend.get(lock_key)
                         if current_lock == token:

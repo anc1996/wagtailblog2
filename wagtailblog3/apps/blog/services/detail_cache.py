@@ -71,19 +71,22 @@ class DetailCacheService:
     def _body_key(
         self, site_id: int, locale_id: int, page_id: int, body_version_id: str, schema_version: int
     ) -> str:
-        return (
-            f"{self.namespace}:body:{site_id}:{locale_id}:{page_id}:"
-            f"{body_version_id}:{schema_version}"
+        from blog.services.redis_protocol import RedisKeyProtocol
+        return RedisKeyProtocol.detail_body_key(
+            self.namespace, site_id, locale_id, page_id, body_version_id, schema_version
         )
 
     def _body_lock_key(self, page_id: int, body_version_id: str) -> str:
-        return f"{self.namespace}:lock:body:{page_id}:{body_version_id}"
+        from blog.services.redis_protocol import RedisKeyProtocol
+        return RedisKeyProtocol.detail_body_lock_key(self.namespace, page_id, body_version_id)
 
     def _generation_key(self, page_id: int) -> str:
-        return f"{self.namespace}:generation:{page_id}"
+        from blog.services.redis_protocol import RedisKeyProtocol
+        return RedisKeyProtocol.detail_generation_key(self.namespace, page_id)
 
     def _nav_key(self, site_id: int, locale_id: int, page_id: int, generation: str) -> str:
-        return f"{self.namespace}:nav:{site_id}:{locale_id}:{page_id}:{generation}"
+        from blog.services.redis_protocol import RedisKeyProtocol
+        return RedisKeyProtocol.detail_nav_key(self.namespace, site_id, locale_id, page_id, generation)
 
     @staticmethod
     def _new_generation() -> str:

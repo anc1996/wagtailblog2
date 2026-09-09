@@ -12,8 +12,7 @@
 
 ## 2. 技术栈与环境事实基线
 
-- **核心技术栈**：Python 3.13、Django 5.2.8、Wagtail 8.0（严格锁定在
-equirements.txt）、MySQL 8.4、MongoDB (pymongo 4.11)、Redis 5.2、Elasticsearch 8.19、Celery 5.5。
+- **核心技术栈**：Python 3.13、Django 5.2.8、Wagtail 8.0（严格锁定在 requirements.txt）、MySQL 8.4、MongoDB (pymongo 4.11)、Redis 5.2、Elasticsearch 8.19、Celery 5.5。
 - **工作区拓扑**：
   - **Windows 主机**（192.168.20.1）：负责本地代码编辑，工作目录 F:\openclaw\workspace\wagtail\wagtailblog2；
   - **WSL2 测试环境**（192.168.20.5，Debian）：共享同一 NTFS 代码目录 /mnt/f/openclaw/workspace/wagtail/wagtailblog2；Conda 环境 /root/anaconda3/envs/wagtailblog-test；
@@ -30,7 +29,7 @@ equirements.txt）、MySQL 8.4、MongoDB (pymongo 4.11)、Redis 5.2、Elasticsea
 ## 4. 代码注释与 Git 提交规范
 
 - **运行时代码注释**：新增或修改的代码必须补充精准的中文注释、docstring 与 Python 类型标注（Type Hints）；注释重点阐述业务边界与异常补偿原因，不罗列显而易见代码；
-- **Git 提交信息强制中文**：所有 commit 摘要与正文严禁纯英文。统一遵循 Conventional Commits 格式：<类型>(<模块可选>): <中文动作与改动目的>（例如：eat(blog): 落地博客详情页多级缓存机制、docs(agents): 精简AGENTS规则并落地开发技能）。
+- **Git 提交信息强制中文**：所有 commit 摘要与正文严禁纯英文。统一遵循 Conventional Commits 格式：<类型>(<模块可选>): <中文动作与改动目的>（例如：feat(blog): 落地博客详情页多级缓存机制、docs(agents): 精简AGENTS规则并落地开发技能）。
 
 ## 5. 本地与 CI/CD 自动化门禁
 
@@ -52,13 +51,13 @@ equirements.txt）、MySQL 8.4、MongoDB (pymongo 4.11)、Redis 5.2、Elasticsea
 - **对话人（用户）：终审决策与发布唯一授权人**。严禁未经用户明确同意擅自提交代码或触发生产变更。
 - **子代理调度与 Token 优化准则**：
   1. **禁止使用 Astra**：所有子代理统一使用 gpt-5.6-sol、gemini-3.8-flash-high 或 grok-4.6；
-  2. **最小上下文派发**：派生子代理（spawn_agent）时**强制使用 ork_turns="none"**，仅派发紧凑的初始目标，避免长历史重复复制导致 Token 浪费；
+  2. **最小上下文派发**：派生子代理（spawn_agent）时**强制使用 fork_turns="none"**，仅派发紧凑的初始目标，避免长历史重复复制导致 Token 浪费；
   3. **头部前缀恒定**：保持子代理 Prompt 固定规则在头部，确保稳定命中 Prompt Cache；
-  4. **实例复用**：针对同一子任务排错打磨时，优先通过 send_message 或 ollowup_task 复用已有实例。
+  4. **实例复用**：针对同一子任务排错打磨时，优先通过 send_message 或 followup_task 复用已有实例。
 
 ## 7. 工具调用与专用 Skill 指引
 
-- **实事求是原则**：所有 MCP 与外部工具以当前会话实际暴露的清单为准。如果会话未挂载 context7、etch、github 或 google-toolbox，**严禁凭空假设其存在**，直接平稳回退至本地 shell、git、ssh、python 脚本或已配置的工具；
+- **实事求是原则**：所有 MCP 与外部工具以当前会话实际暴露的清单为准。如果会话未挂载 context7、fetch、github 或 google-toolbox，**严禁凭空假设其存在**，直接平稳回退至本地 shell、git、ssh、python 脚本或已配置的工具；
 - **Playwright 产物归宿**：浏览器端到端测试调试产物（截图、trace、视频、HTML 报告）**统一写入 output/playwright/<task-name>/**，严格受 .gitignore 保护，严禁提交；
 - **加载项目专属技能**：关于 Wagtail 8.0 双存储详细契约、Elasticsearch Outbox 异步索引、WSL2 定向测试命令表、Playwright 跨端测试流程及生产 4 大应用服务 Maker-Checker 分步部署，请直接加载项目专属技能：
   - **wagtailblog-dev-workflow**（位于 .codex/skills/wagtailblog-dev-workflow/）。

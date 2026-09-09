@@ -114,15 +114,18 @@ class ListingInvalidationService:
 
     @classmethod
     def get_listing_generation_key(cls, site_id: int, locale_id: int, index_page_id: int) -> str:
-        return f"wblog:list:v2:generation:{site_id}:{locale_id}:{index_page_id}"
+        from blog.services.redis_protocol import RedisKeyProtocol
+        return RedisKeyProtocol.listing_generation_key(site_id, locale_id, index_page_id)
 
     @classmethod
     def get_archive_generation_key(cls, site_id: int, locale_id: int) -> str:
-        return f"wblog:sidebar:v2:generation:archive:{site_id}:{locale_id}"
+        from blog.services.redis_protocol import RedisKeyProtocol
+        return RedisKeyProtocol.sidebar_archive_generation_key(site_id, locale_id)
 
     @classmethod
     def get_author_generation_key(cls, site_id: int, locale_id: int) -> str:
-        return f"wblog:sidebar:v2:generation:author:{site_id}:{locale_id}"
+        from blog.services.redis_protocol import RedisKeyProtocol
+        return RedisKeyProtocol.sidebar_author_generation_key(site_id, locale_id)
 
     # ---------------------------------------------------------
     # 代次读取接口 (Fail-Open)

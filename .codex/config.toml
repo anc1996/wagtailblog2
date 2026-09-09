@@ -19,3 +19,25 @@ nickname_candidates = ["GeminiCoder", "GeminiTester"]
 description = "负责全流程对照方案审核与对抗式安全审查的 Grok 审查官"
 config_file = "agents/grok.toml"
 nickname_candidates = ["GrokAuditor", "GrokReviewer"]
+[mcp_servers.playwright]
+type = "stdio"
+command = "D:\\softwarepro\\nodejs\\node.exe"
+args = ["C:\\Users\\haryk\\.codemoss\\dependencies\\mcp-adapter.cjs", "D:\\softwarepro\\nodejs\\node.exe", "C:\\Users\\haryk\\.codemoss\\dependencies\\playwright-mcp\\node_modules\\@playwright\\mcp\\cli.js", "--browser", "chrome", "--executable-path", "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", "--isolated", "--caps", "devtools,pdf,vision", "--output-dir", "F:\\openclaw\\workspace\\wagtail\\wagtailblog2\\output\\playwright-mcp"]
+
+[mcp_servers.context7]
+type = "stdio"
+command = "D:\\softwarepro\\nodejs\\node.exe"
+args = ["C:\\Users\\haryk\\.codemoss\\dependencies\\mcp-adapter.cjs", "D:\\softwarepro\\nodejs\\node.exe", "C:\\Users\\haryk\\.codemoss\\dependencies\\context7-mcp\\node_modules\\@upstash\\context7-mcp\\dist\\index.js"]
+
+[mcp_servers.fetch]
+type = "stdio"
+command = "D:\\softwarepro\\nodejs\\node.exe"
+args = ["C:\\Users\\haryk\\.codemoss\\dependencies\\mcp-adapter.cjs", "D:\\softwarepro\\nodejs\\node.exe", "C:\\Users\\haryk\\.codemoss\\dependencies\\fetch-mcp\\node_modules\\@yawlabs\\fetch-mcp\\dist\\index.js"]
+
+[mcp_servers.google-toolbox]
+type = "stdio"
+command = "D:\\softwarepro\\nodejs\\node.exe"
+args = ["C:\\Users\\haryk\\.codemoss\\dependencies\\mcp-adapter.cjs", "D:\\softwarepro\\nodejs\\node.exe", "C:\\Users\\haryk\\.codemoss\\dependencies\\toolbox-mcp\\node_modules\\@toolbox-sdk\\server\\bin\\run.js", "--stdio", "--config", "C:\\Users\\haryk\\.codemoss\\dependencies\\toolbox-mcp\\toolbox.yaml"]
+
+[mcp_servers.github]
+url = "https://api.githubcopilot.com/mcp/"

@@ -108,11 +108,13 @@ class ArchiveSidebarService:
 
     @classmethod
     def get_aggregate_cache_key(cls, site_id: int, locale_id: int, gen: int) -> str:
-        return f"wblog:sidebar:v2:archive:aggregate:{site_id}:{locale_id}:{gen}:{ARCHIVE_POLICY_VERSION}"
+        from blog.services.redis_protocol import RedisKeyProtocol
+        return RedisKeyProtocol.sidebar_archive_aggregate_key(site_id, locale_id, gen, ARCHIVE_POLICY_VERSION)
 
     @classmethod
     def get_lock_cache_key(cls, site_id: int, locale_id: int, gen: int) -> str:
-        return f"wblog:sidebar:v2:archive:lock:{site_id}:{locale_id}:{gen}:{ARCHIVE_POLICY_VERSION}"
+        from blog.services.redis_protocol import RedisKeyProtocol
+        return RedisKeyProtocol.sidebar_archive_lock_key(site_id, locale_id, gen, ARCHIVE_POLICY_VERSION)
 
     @classmethod
     def calculate_aggregate(cls, site_id: int, locale_id: int) -> dict[int, dict[str, Any]]:
@@ -319,11 +321,13 @@ class RandomAuthorSidebarService:
 
     @classmethod
     def get_candidates_cache_key(cls, site_id: int, locale_id: int, gen: int) -> str:
-        return f"wblog:sidebar:v2:author:candidates:{site_id}:{locale_id}:{gen}"
+        from blog.services.redis_protocol import RedisKeyProtocol
+        return RedisKeyProtocol.sidebar_author_candidates_key(site_id, locale_id, gen)
 
     @classmethod
     def get_pick_cache_key(cls, site_id: int, locale_id: int, gen: int, time_bucket: str) -> str:
-        return f"wblog:sidebar:v2:author:pick:{site_id}:{locale_id}:{gen}:{time_bucket}"
+        from blog.services.redis_protocol import RedisKeyProtocol
+        return RedisKeyProtocol.sidebar_author_pick_key(site_id, locale_id, gen, time_bucket)
 
     @classmethod
     def get_candidate_ids(cls, site_id: int, locale_id: int) -> list[int]:

@@ -252,7 +252,7 @@ class ArchiveSidebarService:
             year_count = raw_year_data['count']
             total_posts += year_count
 
-            is_initially_hidden = index >= 5 and year != current_year
+            is_initially_hidden = index >= 3 and year != current_year
             if is_initially_hidden:
                 hidden_year_count += 1
 

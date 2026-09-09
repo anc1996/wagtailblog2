@@ -19,7 +19,7 @@
                             <span class="archive-count-badge">{{ year_data.count }}</span>
                         </a>
 
-                        {% if year_data.months and year_data.should_render_month_grid|default:True %}
+                        {% if year_data.months and year_data.should_render_month_grid %}
                             <button type="button"
                                     class="month-toggle"
                                     data-target="#months-{{ year }}"
@@ -31,7 +31,7 @@
                         {% endif %}
                     </div>
 
-                    {% if year_data.months and year_data.should_render_month_grid|default:True %}
+                    {% if year_data.months and year_data.should_render_month_grid %}
                         <div id="months-{{ year }}" class="months-panel"{% if year != current_year %} hidden{% endif %}>
                             <div class="months-grid" role="list" aria-label="{{ year }}年各月文章数量">
                                 {% for month_data in year_data.month_grid %}

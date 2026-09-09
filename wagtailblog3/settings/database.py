@@ -87,11 +87,15 @@ REDIS_DB = _env_int('REDIS_DB', 1)  # 用于计数器的数据库
 REDIS_CACHE_DB = _env_int('REDIS_CACHE_DB', 1)
 REDIS_COMMENT_CACHE_DB = _env_int('REDIS_COMMENT_CACHE_DB', 2)
 
+WAGTAILBLOG_ENV = os.environ.get('WAGTAILBLOG_ENV', 'test').strip().lower()
+REDIS_KEY_PREFIX = os.environ.get('REDIS_KEY_PREFIX', 'prod' if WAGTAILBLOG_ENV == 'production' else 'test')
+
 # Redis 缓存配置
 CACHES = {
 	'default': {
 		'BACKEND': 'django_redis.cache.RedisCache',
 		'LOCATION': f'redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_CACHE_DB}',
+		'KEY_PREFIX': REDIS_KEY_PREFIX,
 		'OPTIONS': {
 			'CLIENT_CLASS': 'django_redis.client.DefaultClient',
 			'PASSWORD': REDIS_PASSWORD
@@ -100,6 +104,7 @@ CACHES = {
 	'comment_rate_limit_cache': {  # 新的缓存实例，专门用于评论频率限制
 		'BACKEND': 'django_redis.cache.RedisCache',
 		'LOCATION': f'redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_COMMENT_CACHE_DB}',
+		'KEY_PREFIX': f'{REDIS_KEY_PREFIX}_comment',
 		'OPTIONS': {
 			'CLIENT_CLASS': 'django_redis.client.DefaultClient',
 			'PASSWORD': REDIS_PASSWORD

@@ -3,7 +3,7 @@ from datetime import date
 from unittest.mock import MagicMock, call, patch
 
 from django.core.paginator import Paginator
-from django.test import RequestFactory, SimpleTestCase
+from django.test import RequestFactory, SimpleTestCase, override_settings
 
 from blog.models import (
     BLOG_INDEX_ITEMS_PER_PAGE,
@@ -123,6 +123,7 @@ class BlogIndexListingContextTests(SimpleTestCase):
         self.assertEqual(_normalise_blog_index_date("2025-02-30"), ("", None))
 
 
+@override_settings(BLOG_INDEX_LISTING_ENGINE_V2=False)
 class BlogIndexResultsApiTests(SimpleTestCase):
     def setUp(self):
         self.factory = RequestFactory()

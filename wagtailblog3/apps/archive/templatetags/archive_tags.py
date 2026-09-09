@@ -38,7 +38,7 @@ def _legacy_archive_sidebar(context: dict[str, Any], current_year: int | None = 
         archive_tree[year] = {
             'count': item['count'],
             'months': {},
-            'should_render_month_grid': True,
+            'should_render_month_grid': False,
         }
 
     for item in monthly_archives:
@@ -55,10 +55,15 @@ def _legacy_archive_sidebar(context: dict[str, Any], current_year: int | None = 
 
     total_posts = 0
     hidden_year_count = 0
+    top_years_to_expand = set(list(archive_tree)[:3])
+    if current_year and current_year in archive_tree:
+        top_years_to_expand.add(current_year)
+
     for index, year in enumerate(archive_tree):
         year_data = archive_tree[year]
+        year_data['should_render_month_grid'] = (year in top_years_to_expand)
         year_data['url'] = reverse('archive:year_archive', args=[year])
-        year_data['is_initially_hidden'] = index >= 5 and year != current_year
+        year_data['is_initially_hidden'] = index >= 3 and year != current_year
         if year_data['is_initially_hidden']:
             hidden_year_count += 1
         total_posts += year_data['count']

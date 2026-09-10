@@ -25,13 +25,15 @@
 
 | 物理库 | 分配系统 | 角色用途 | 统一前缀协议 | 关联配置项 (settings/.env) |
 | :--- | :--- | :--- | :--- | :--- |
-| **DB 1** | **博客生产** | 核心业务缓存 (default cache) | `prod:1:...` (或 `wblog:prod:cache:`) | `REDIS_CACHE_DB=1` / `REDIS_KEY_PREFIX=prod` |
+| **DB 1** | **系统保留** | 原博客缓存库（已平滑迁移腾空，备用） | — | 历史闲置 |
 | **DB 2~4**| **商城专用** | 商城系统 Session、验证码、历史、购物车 | (shop 独占) | 博客系统**严禁使用** |
-| **DB 5** | **博客测试** | 测试环境核心缓存 | `test:1:...` | `.env.test` -> `REDIS_CACHE_DB=5` |
-| **DB 6** | **博客测试** | 测试环境评论频率限制缓存 | `test_comment:...` | `.env.test` -> `REDIS_COMMENT_CACHE_DB=6` |
+| **DB 5** | **博客测试** | 测试环境核心缓存 | `wblog:test:...` | `.env.test` -> `REDIS_CACHE_DB=5` |
+| **DB 6** | **博客测试** | 测试环境评论频率限制缓存 | `wblog:test:rate:...` | `.env.test` -> `REDIS_COMMENT_CACHE_DB=6` |
 | **DB 7** | **博客测试** | 测试环境 Celery Broker 队列 | `wblog:test:broker:` | `.env.test` -> `CELERY_BROKER_DB=7` |
 | **DB 8** | **博客测试** | 测试环境 Celery Result 结果 | `wblog:test:result:` | `.env.test` -> `CELERY_RESULT_DB=8` |
-| **DB 11**| **博客生产** | 生产环境评论/访问限流专属缓存 | `prod_comment:...` | `.env.production` -> `REDIS_COMMENT_CACHE_DB=11` |
+| **DB 10**| **商城专用** | 商城系统 Celery 任务结果存储后端 | (shop 独占) | 博客系统**严禁使用** |
+| **DB 12**| **博客生产** | 生产环境评论/访问限流专属缓存 | `wblog:prod:rate:...` | `.env.production` -> `REDIS_COMMENT_CACHE_DB=12` |
+| **DB 13**| **博客生产** | 生产环境核心业务缓存 (default cache) | `wblog:prod:...` | `.env.production` -> `REDIS_CACHE_DB=13` |
 | **DB 14**| **博客生产** | 生产环境 Celery Broker 消息代理 | `wblog:prod:broker:` | `.env.production` -> `CELERY_BROKER_DB=14` |
 | **DB 15**| **博客生产** | 生产环境 Celery Result 任务结果 | `wblog:prod:result:` | `.env.production` -> `CELERY_RESULT_DB=15` |
 

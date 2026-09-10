@@ -61,7 +61,9 @@
     {# --- CSS 样式表 (优化加载顺序) --- #}
     {# 1. 先加载框架库 #}
     <link href="{% static 'gretzia/css/bootstrap.css' %}" rel="stylesheet">
-    <link href="{% static 'gretzia/css/font-awesome.css' %}" rel="stylesheet">
+        <!-- 健全的 Font Awesome 6.x Free 及其 v4 兼容垫片 -->
+    <link href="{% static 'vendor/fontawesome/css/all.min.css' %}" rel="stylesheet">
+    <link href="{% static 'vendor/fontawesome/css/v4-shims.min.css' %}" rel="stylesheet">
     <link href="{% static 'gretzia/css/hover.css' %}" rel="stylesheet">
 
     {# 2. 再加载模版主样式 #}

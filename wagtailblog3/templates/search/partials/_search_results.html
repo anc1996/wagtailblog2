@@ -45,9 +45,12 @@
                         {% elif result.last_published_at %}
                             <span class="result-date"><i class="fa fa-calendar" aria-hidden="true"></i>{{ result.last_published_at|date:"Y年m月d日" }}</span>
                         {% endif %}
+                        {% include "blog/stats_block.html" with page=result mode="views_only" %}
                     </div>
 
                     <h3 class="result-title"><a href="{% pageurl result %}">{% render_display_title result %}</a></h3>
+
+                    {% include "blog/stats_block.html" with page=result mode="reactions_only" %}
 
                     {% if result.search_highlight_fragments %}
                         <div class="result-highlights" aria-label="命中片段">

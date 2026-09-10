@@ -1,4 +1,4 @@
-{% load static wagtailcore_tags %}
+{% load static blog_tags wagtailcore_tags %}
 {% if page.pk %}
 <div class="reaction-buttons"
      data-page-id="{{ page.id }}"
@@ -11,25 +11,20 @@
             title="{{ reaction.name }}"
             type="button"
         >
-            {% if reaction.name == '点赞' %}<i class="fa fa-thumbs-up"></i>
-            {% elif reaction.name == '喜爱' %}<i class="fa fa-heart"></i>
-            {% elif reaction.name == '惊讶' %}<i class="fa fa-surprise"></i>
-            {% elif reaction.name == '思考' %}<i class="fa fa-lightbulb-o"></i>
-            {% else %}<i class="fa fa-star"></i>{% endif %}
-
+            <i class="{{ reaction.icon|ensure_fa_prefix }}" aria-hidden="true"></i>
+            <span class="reaction-name">{{ reaction.name }}</span>
             <span class="count">{{ reaction.count }}</span>
         </button>
     {% endfor %}
 </div>
 
-
 {% else %}
 
-{# 预览模式下显示占位内容 #}
+{# 预览模式下显示占位提示 #}
 <div class="reaction-buttons reaction-preview-placeholder">
     <p class="preview-notice">
         <i class="fa fa-info-circle"></i>
-        文章反应功能将在发布后可用
+        文章反应功能将在发布后激活
     </p>
 </div>
 

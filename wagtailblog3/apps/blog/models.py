@@ -1,4 +1,5 @@
-﻿"""博客应用的 Wagtail 页面、媒体、统计和导入状态模型。
+from django.utils.html import format_html
+"""博客应用的 Wagtail 页面、媒体、统计和导入状态模型。
 
 BlogPage 的 StreamField 负责后台结构和校验，正文快照通过 MongoManager 保存，MySQL
 页面/Revision 只保存指针和检索所需元数据。模型方法必须保持 Wagtail 页面生命周期、
@@ -16,6 +17,7 @@ from django.utils.dateparse import parse_date
 from django.core.paginator import Paginator
 from django.db import DatabaseError, models, transaction
 from django import forms
+from django.core.validators import RegexValidator
 from django.db.models import Count, Subquery, OuterRef, F
 from django.conf import settings
 from django.utils.html import strip_tags  # 用于去除HTML标签
@@ -288,7 +290,7 @@ class BlogImage(AbstractImage):
 	"""自定义博客图片模型，使用 caption 作为缺省替代文本。"""
 	caption = models.CharField(max_length=255, blank=True)
 	admin_form_fields = Image.admin_form_fields + ('caption',)  # 添加caption字段到后台表单
-	
+
 	@property
 	def default_alt_text(self) -> str:
 		"""返回图片 caption，缺失时回退到图片标题。"""
@@ -303,7 +305,7 @@ class BlogRendition(AbstractRendition):
 		on_delete=models.CASCADE,
 		related_name='renditions'
 	)
-	
+
 	class Meta:
 		# 确保每个图片的渲染是唯一的
 		unique_together = (
@@ -319,12 +321,12 @@ class BlogTagIndexPage(Page):
 	"""
 	parent_page_types = ['wagtailcore.Page', 'home.HomePage', 'blog.BlogIndexPage']
 	subpage_types = []
-	
+
 	# 每页显示的标签显示数
 	items_tag_page = 50
 	# 每页显示的文章数
 	items_per_page = 20
-	
+
 	def get_context(self, request: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
 		"""复用标签查询服务构造 HTML 页面上下文，保证页面和 JSON 端点规则一致。"""
 		from blog.services.tag_listing import get_tag_index_context
@@ -343,9 +345,9 @@ class BlogTagIndexPage(Page):
 # 标签模型
 class BlogPageTag(TaggedItemBase):
 	"""博客页面与 taggit 标签的父子关联模型。"""
-	
+
 	# TaggedItemBase 是一个抽象模型，用于定义标签与模型的关联关系。
-	
+
 	content_object = ParentalKey(
 		'BlogPage',
 		related_name='tagged_items',
@@ -359,15 +361,15 @@ class BlogCategory(models.Model):
 	"""博客分类片段，使用唯一 slug 作为稳定筛选标识。"""
 	name = models.CharField(max_length=255)
 	slug = models.SlugField(unique=True, max_length=80)
-	
+
 	panels = [
 		FieldPanel('name'),
 		FieldPanel('slug'),
 	]
-	
+
 	def __str__(self) -> str:
 		return self.name
-	
+
 	class Meta:
 		verbose_name = "博客分类"
 		verbose_name_plural = "博客分类"
@@ -399,10 +401,10 @@ def _normalise_blog_index_date(value: object) -> tuple[str, Any]:
 # 博客索引页面
 class BlogIndexPage(Page):
 	"""博客索引页面，提供公开子页筛选、排序和分页上下文。"""
-	
+
 	date = models.DateField("发布日期", default=timezone.now)  # 添加日期字段
 	intro = RichTextField("页面介绍", blank=True)
-	
+
 	featured_image = models.ForeignKey(
 		'BlogImage',
 		null=True,
@@ -410,13 +412,13 @@ class BlogIndexPage(Page):
 		on_delete=models.SET_NULL,
 		related_name='+'
 	)  # 特色图片
-	
+
 	content_panels = Page.content_panels + [
 		FieldPanel('date'),
 		FieldPanel('intro'),
 		FieldPanel('featured_image'),
 	]
-	
+
 	def get_listing_context(self, query_params: Any, request: Any = None) -> dict[str, Any]:
 		"""构造 HTML 和 JSON 共用的子页面列表上下文。"""
 		if getattr(settings, 'BLOG_INDEX_LISTING_ENGINE_V2', False):
@@ -465,7 +467,7 @@ class BlogIndexPage(Page):
 		blog_index_page_date_subquery = Subquery(
 			BlogIndexPage.objects.filter(page_ptr_id=OuterRef('pk')).values('date')[:1]
 		)
-		
+
 		child_pages = self.get_children().live().public().annotate(
 			sort_date=Coalesce(
 				blog_page_date_subquery,
@@ -526,7 +528,7 @@ class BlogIndexPage(Page):
 		context = super().get_context(request)
 		context.update(self.get_listing_context(request.GET, request=request))
 		return context
-	
+
 	class Meta:
 		verbose_name = "博客索引页"
 		verbose_name_plural = "博客索引页"
@@ -569,17 +571,17 @@ class BlogPageForm(WagtailAdminPageForm):
 	def __init__(self, *args: Any, **kwargs: Any) -> None:
 		"""初始化编辑表单；页面正文为空壳时按 Revision 指针恢复 Mongo 草稿。"""
 		instance = kwargs.get('instance')
-		
+
 		# 只要当前表单有关联的真实页面实例，立即启动拦截
 		if instance and instance.pk:
 			# 强行透视：检查当前关系型数据库（MySQL）吐出来的 body 是不是空壳
 			is_body_empty = not instance.body or (hasattr(instance.body, '__len__') and len(instance.body) == 0)
-			
+
 			if is_body_empty:
 				mongo_manager = MongoManager()
 				content = None
 				content_source = "none"
-				
+
 				# 第一阶段：有历史指针时只能恢复该快照，避免草稿被正式正文污染。
 				latest_revision = instance.revisions.order_by('-created_at').first()
 				if latest_revision:
@@ -640,14 +642,14 @@ class BlogPageForm(WagtailAdminPageForm):
 							raise BlogRevisionBodyUnavailableError("revision_page_mismatch")
 						instance._validate_revision_body_data(content['body'])
 						content_source = "revision"
-				
+
 				# 第二阶段：只有从未保存 Revision 的页面才可读取正式正文。
 				# 已存在无指针 Revision 时必须保留它自己的 MySQL 正文或空状态。
 				if latest_revision is None and getattr(instance, 'mongo_content_id', None):
 					content = mongo_manager.get_blog_content(instance.mongo_content_id)
 					if content:
 						content_source = "live"
-				
+
 			# 第三阶段：把 Mongo 字典转换为带块 ID 的 StreamValue，供后台编辑器渲染。
 				if content and 'body' in content:
 					# 直接调用模型内封装好的 UUID 补齐与 StreamValue 重建方法
@@ -676,7 +678,7 @@ class BlogPageForm(WagtailAdminPageForm):
 						"blog_body_admin_missing page_id=%s",
 						instance.pk,
 					)
-		
+
 		# 正文恢复完成后再绑定表单，保证 Wagtail 初始字段读取到完整内容。
 		super().__init__(*args, **kwargs)
 		if instance and instance.pk:
@@ -742,7 +744,7 @@ class BlogPageForm(WagtailAdminPageForm):
 			round((time.monotonic() - started_at) * 1000, 1),
 			errors,
 		)
-		
+
 
 # 博客页面
 class BlogPage(Page):
@@ -752,9 +754,9 @@ class BlogPage(Page):
 	保存轻量元数据和正文指针。保存、发布、取消发布和删除方法必须维持两个存储之间的
 	顺序与补偿边界，前台读取失败时只能降级为空正文，不能伪造已发布内容。
 	"""
-	
+
 	date = models.DateField("发布日期")  # 发布日期
-	
+
 	# 将 CharField 更改为 RichTextField，并指定允许的功能
 	intro = RichTextField(
 		"简介",
@@ -769,16 +771,16 @@ class BlogPage(Page):
 			'blockquote'  # 引用块
 		]
 	)
-	
+
 	# 作者字段
 	authors = ParentalManyToManyField('blog.Author', blank=True)
-	
+
 	# 分类
 	categories = ParentalManyToManyField('blog.BlogCategory', blank=True)
-	
+
 	# 标签
 	tags = ClusterTaggableManager(through=BlogPageTag, blank=True)
-	
+
 	featured_image = models.ForeignKey(
 		'BlogImage',
 		null=True,
@@ -786,9 +788,9 @@ class BlogPage(Page):
 		on_delete=models.SET_NULL,
 		related_name='+'
 	)  # 特色图片
-	
+
 	mongo_content_id = models.CharField("MongoDB内容ID", max_length=50, blank=True, null=True)
-	
+
 	# StreamField 只负责后台结构和校验，正文实际持久化到 MongoDB。
 	body = StreamField([
 		# 富文本块 - 使用Wagtail内置编辑器
@@ -801,47 +803,47 @@ class BlogPage(Page):
 			          ],
 			label="富文本"
 		)),
-		
+
 		# 代码块 - 使用wagtail-codeblock
 		("code_block", PureCodeBlock(default_language='python')),
-		
-		
+
+
 		# Markdown块 - 使用项目自有 Vditor 编辑器和安全渲染器
 		('markdown_block', VditorMarkdownBlock(
 			icon='code',
 			label="Markdown (支持代码高亮和数学公式)",
 			help_text="支持标准Markdown、代码高亮、数学公式"
 		)),
-		
+
 		# StreamField 中注册我们的 MermaidBlock ---
 		('mermaid_chart', MermaidBlock()),
-		
+
 		# 嵌入块 - 将原来的 EmbedBlock 整体升级为我们的 CustomEmbedBlock
 		('embed_block', CustomEmbedBlock(
 			label="嵌入媒体",
 		)),
-		
+
 		# 表格块
 		('table_block', CustomTableBlock(
 			label="表格"
 		)),
-		
+
 		# 原始HTML - 高级用户使用
 		('raw_html', RawHTMLBlock(
 			label="原始HTML",
 			help_text="适用于高级用户的HTML代码插入"
 		)),
-		
+
 		# 媒体文件
 		('document_block', DocumentChooserBlock(icon='doc-full', label="文档块")),
 		('image_block', ImageChooserBlock(icon='image', label="图片块")),
 		('audio_block', AudioBlock(icon='media', label="音频块")),
 		('video_block', VideoBlock(icon='media', label="视频块")),
 	], use_json_field=True, blank=True, null=True)
-	
+
 	# 绑定自定义表单，使后台打开页面时能从 MongoDB 恢复正文并记录校验诊断。
 	base_form_class = BlogPageForm
-	
+
 	# 索引字段：body_text 会按需从 MongoDB 拼接纯文本供搜索后端使用。
 	# Wagtail 核心 Page 字段必须完整继承；移除本模型重复声明的标题自动补全字段。
 	search_fields = Page.search_fields + [
@@ -853,7 +855,7 @@ class BlogPage(Page):
 		index.FilterField('tags'),
 		index.FilterField('categories'),
 	]
-	
+
 	content_panels = [
 		HelpPanel(
 			mark_safe(
@@ -878,36 +880,36 @@ class BlogPage(Page):
 			FieldPanel("authors", widget=forms.CheckboxSelectMultiple),
 			FieldPanel('categories', widget=forms.CheckboxSelectMultiple),
 		], heading="博客信息"),
-		
+
 		# 3. 简介及其他字段
 		FieldPanel('intro'),
 		FieldPanel('featured_image'),
 		FieldPanel('body'),
 		InlinePanel('gallery_images', label="Gallery images"),
 	]
-	
+
 	promote_panels = [
 		MultiFieldPanel([
 			FieldPanel('slug'),
 			FieldPanel('seo_title'),
 			FieldPanel('search_description'),
 		], heading="For Search Engines"),
-		
+
 		MultiFieldPanel([
 			FieldPanel('show_in_menus'),
 		], heading="Display options"),
 	]
-	
+
 	# FieldPanel： FieldPanel 用于在 Wagtail 后台编辑界面中显示和编辑单个字段。这个字段通常是直接定义在当前模型上的 Django 模型字段。
 	# InlinePanel： 用于在 Wagtail 后台编辑界面中管理与当前模型实例有关联的一组子级模型实例。它通常用于管理通过 ParentalKey 建立的父子关系。
-	
+
 	class Meta:
 		verbose_name = "博客页面"
 		verbose_name_plural = "博客页面"
 		indexes = [
 			models.Index(fields=['date']),  # 为博客发布日期添加索引，优化时间筛选查询
 		]
-	
+
 	def _hydrate_streamfield_from_mongo(self, body_data: Any, *, strict: bool = False) -> Any:
 		"""从 Mongo 字典重建后台编辑器需要的 StreamValue。
 
@@ -922,7 +924,7 @@ class BlogPage(Page):
 				type(body_data).__name__,
 			)
 			return []
-		
+
 		# Wagtail 动态块依赖稳定 ID；历史 Mongo 数据缺少 ID 时先补齐，避免前端组件无法挂载。
 		missing_ids = 0
 		for block in body_data:
@@ -941,7 +943,7 @@ class BlogPage(Page):
 			missing_ids,
 			block_types,
 		)
-		
+
 		try:
 			# 适配器负责把 Mongo 的普通字典转换成 Wagtail 块值；失败时保留原始数据做惰性回退。
 			stream_value = MongoDBStreamFieldAdapter.from_mongodb(body_data, self.body.stream_block)
@@ -969,7 +971,7 @@ class BlogPage(Page):
 				raise BlogRevisionBodyUnavailableError("revision_body_invalid")
 			if 'value' not in block:
 				raise BlogRevisionBodyUnavailableError("revision_body_invalid")
-	
+
 	# =========================================================================
 	# 网关 1：拦截快照序列化 (保存草稿、生成历史记录时自动触发)
 	# =========================================================================
@@ -987,12 +989,12 @@ class BlogPage(Page):
 			[block.block_type for block in self.body],
 		)
 		data = super().serializable_data()
-		
+
 		if hasattr(self.body, 'raw_data') and self.body.raw_data:
 			draft_content = self.body.raw_data
 		else:
 			draft_content = MongoDBStreamFieldAdapter.to_mongodb(self.body)
-		
+
 		# 版本身份由持久化页面主键和规范化正文共同确定；保存失败时不得创建半成品 Revision。
 		mongo_manager = MongoManager()
 		body_version = mongo_manager.save_content_body_version(
@@ -1002,7 +1004,7 @@ class BlogPage(Page):
 		)
 		# 兼容期继续保存旧快照，确保尚未升级的新读路径仍可恢复这次草稿。
 		draft_pointer = mongo_manager.save_blog_revision_body(self.pk, draft_content)
-		
+
 		# MySQL Revision 只保存指针，避免把大段正文写入关系数据库。
 		data['mongo_draft_pointer'] = str(draft_pointer)
 		if (
@@ -1023,9 +1025,9 @@ class BlogPage(Page):
 			draft_pointer,
 			round((time.monotonic() - started_at) * 1000, 1),
 		)
-		
+
 		return data
-	
+
 	# =========================================================================
 	# 网关 2：反序列化还原 (后台点击预览、查看历史记录时自动触发)
 	# =========================================================================
@@ -1140,14 +1142,14 @@ class BlogPage(Page):
 
 		# 没有草稿指针的旧 Revision 由 Wagtail 超类从其 MySQL JSON 正文还原。
 		return obj
-	
+
 	def get_latest_revision_as_object(self) -> "BlogPage":
 		"""
 		拦截 EditView 初始化表单。
 		升级铁娘子级空值防线，防止因 StreamValue 对象的 truthy 判定历史残留导致逃过拦截。
 		"""
 		obj = super().get_latest_revision_as_object()
-		
+
 		# 同时检查布尔值和块数量，规避不同 Wagtail 版本对空 StreamValue 的 truthy 差异。
 		is_body_empty = not obj.body or (hasattr(obj.body, '__len__') and len(obj.body) == 0)
 		latest_revision = self.revisions.order_by('-created_at').first()
@@ -1163,9 +1165,9 @@ class BlogPage(Page):
 			)
 			if content and 'body' in content:
 				obj.body = self._hydrate_streamfield_from_mongo(content['body'])
-		
+
 		return obj
-	
+
 	# =========================================================================
 	# 网关 3：正式线上保存防线 (点击发布、或更新状态时触发)
 	# =========================================================================
@@ -1238,7 +1240,7 @@ class BlogPage(Page):
 		)
 		update_fields = kwargs.get('update_fields')
 		draft_only = bool(getattr(self, '_markdown_import_draft_only', False))
-		
+
 		# update_fields 不含 body 时视为元数据更新，避免把不完整的表单正文覆盖到正式 Mongo 内容。
 		is_draft_metadata_update = update_fields is not None and 'body' not in update_fields
 		logger.info(
@@ -1248,7 +1250,7 @@ class BlogPage(Page):
 			is_draft_metadata_update,
 			list(update_fields) if update_fields is not None else None,
 		)
-		
+
 		if not is_draft_metadata_update and not draft_only:
 			# 已登记页面的公开正文由不可变版本指针负责；编辑草稿时不能覆盖旧的 blog_content 正文。
 			# 未登记旧页面仍沿用兼容写入路径，待后续迁移完成后再统一切换。
@@ -1305,7 +1307,7 @@ class BlogPage(Page):
 					)
 				except Exception as e:
 					logger.error(f"保存线上主内容至 MongoDB 失败: {e}", exc_info=True)
-		
+
 		# 临时清空 body 后调用父类保存，确保关系数据库不落正文；finally 恢复内存对象供后续流程继续使用。
 		real_body = self.body
 		self.body = []
@@ -1321,7 +1323,7 @@ class BlogPage(Page):
 			getattr(self, "mongo_content_id", None),
 			round((time.monotonic() - started_at) * 1000, 1),
 		)
-		
+
 	def publish(self, revision: Any, *args: Any, **kwargs: Any) -> Any:
 		"""发布前校验指定 Revision 的 Mongo 正文版本，再执行 Wagtail 发布。
 
@@ -1390,7 +1392,7 @@ class BlogPage(Page):
 		request_page_deletion(self)
 		# 保持 Wagtail 删除调用方的返回契约，但页面会在异步最终步骤删除。
 		return (0, {})
-	
+
 	# =========================================================================
 	# 网关 4：前台数据读取网关 (用于博客详情页 serve 渲染时提取真实数据)
 	# =========================================================================
@@ -1418,10 +1420,10 @@ class BlogPage(Page):
 		try:
 			mongo_manager = MongoManager()
 			content = mongo_manager.get_blog_content(self.mongo_content_id)
-			
+
 			if not content or 'body' not in content or not isinstance(content['body'], list):
 				return None
-			
+
 			# Mongo 中的历史块可能没有 id/value；这里仅补齐内存副本，不改变数据库原文。
 			for block in content['body']:
 				if isinstance(block, dict):
@@ -1432,7 +1434,7 @@ class BlogPage(Page):
 			return content
 		except Exception as e:
 			return None
-	
+
 	# =========================================================================
 	# 核心安全补丁：修复 Django 5.x 严格类型校验，防止未发布页面预览引发 ValueError
 	# =========================================================================
@@ -1445,7 +1447,7 @@ class BlogPage(Page):
 		return BlogPage.objects.live().filter(categories__id__in=self.categories.values_list('id', flat=True),
 		                                      first_published_at__lt=self.first_published_at).distinct().order_by(
 			'-first_published_at').first()
-	
+
 	def get_next_post(self) -> Any:
 		"""返回同分类中较晚发布的文章；没有分类时回退到全站文章。"""
 		if not self.pk or not getattr(self, 'first_published_at', None): return None
@@ -1455,7 +1457,7 @@ class BlogPage(Page):
 		return BlogPage.objects.live().filter(categories__id__in=self.categories.values_list('id', flat=True),
 		                                      first_published_at__gt=self.first_published_at).distinct().order_by(
 			'first_published_at').first()
-	
+
 	@staticmethod
 	def _strip_markdown_code(text: object) -> str:
 		"""移除围栏代码和行内代码，避免把代码中的美元符误判为数学公式。"""
@@ -1567,12 +1569,12 @@ class BlogPage(Page):
 			body_data,
 			has_gallery=self.gallery_images.exists(),
 		)
-		
+
 		if mongo_content and 'body' in mongo_content:
-			
+
 			# 保持 Mongo 原始值不变，Markdown 由块在输出阶段渲染。
 			source_body_data = mongo_content['body']
-			
+
 			# 只在内存中重建 StreamField，不修改 Mongo 中保存的值。
 			try:
 				self.body = MongoDBStreamFieldAdapter.from_mongodb(source_body_data, self.body.stream_block)
@@ -1580,19 +1582,19 @@ class BlogPage(Page):
 				from wagtail.blocks.stream_block import StreamValue
 				logger.error(f"使用适配器创建StreamValue失败: {e}", exc_info=True)
 				self.body = StreamValue(self.body.stream_block, source_body_data, is_lazy=True)
-		
+
 		# 父类负责站点、预览和模板选择；此时 self.body 已经是可渲染的 StreamValue。
 		response = super().serve(request)
 		# 只在页面成功交给响应链路后标记统计对象，避免正文读取或模板渲染失败也被计入浏览量。
 		if self.pk:
 			request._blog_analytics_page_id = self.pk
 		return response
-	
+
 	@property
 	def body_text(self) -> str:
 		"""ES 索引专用：从 MongoDB 拉取并拼接纯文本。"""
 		return self.get_full_text_for_search()
-	
+
 	def get_full_text_for_search(self, content: Any = None) -> str:
 		"""按块类型提取可搜索纯文本，不把 HTML 或 Markdown 标记送入索引。"""
 		if content is None:
@@ -1634,36 +1636,36 @@ class BlogPage(Page):
 				if isinstance(block_value, dict) and block_value.get('title'):
 					text_parts.append(str(block_value['title']))
 		return ' '.join(filter(None, text_parts))
-	
-	
+
+
 	def get_related_posts_by_tags(self, max_posts: int = 5) -> Any:
 		"""按重合标签数排序获取公开相关文章；预览或无标签页面返回空 QuerySet。"""
-		
+
 		#  预览模式保护
 		if not self.pk:
 			return BlogPage.objects.none()
-		
+
 		# 获取当前文章的所有标签
 		if not self.tags.exists():
 			return BlogPage.objects.none()
-		
+
 		tag_ids = [tag.tag_id for tag in self.tagged_items.all()]
-		
+
 		# 查找至少有一个相同标签的其他文章
 		related_posts = BlogPage.objects.live().filter(
 			tagged_items__tag_id__in=tag_ids
 		).exclude(
 			id=self.id  # 排除当前文章
 		).distinct()
-		
+
 		# 先按重合标签数，再按发布时间排序，让关联度最高且较新的文章靠前。
 		related_posts = related_posts.annotate(
 			same_tags=models.Count('tagged_items', filter=models.Q(tagged_items__tag_id__in=tag_ids))
 		).order_by('-same_tags', '-first_published_at')[:max_posts]
-		
+
 		return related_posts
-	
-	
+
+
 	def get_view_count(self) -> dict[str, int]:
 		"""获取访问统计（优先使用预注入的批量统计，未注入时回退至 PageViewCounter）。"""
 		if hasattr(self, '_prefetched_view_count'):
@@ -1676,23 +1678,23 @@ class BlogPage(Page):
 		"""获取页面的反应统计（优先使用预注入的批量统计，未注入时回退至独立聚合）。"""
 		if hasattr(self, '_prefetched_reactions'):
 			return self._prefetched_reactions
-		
+
 		if not self.pk:
 			return []
-		
+
 		# 先取完整反应类型列表，再用聚合结果补齐没有记录的类型为 0。
 		reaction_types = ReactionType.objects.all()
-		
+
 		# 获取该页面的反应计数
 		reaction_counts = Reaction.objects.filter(page=self).values(
 			'reaction_type'
 		).annotate(
 			count=Count('id')
 		)
-		
+
 		# 转换为字典格式
 		counts = {r['reaction_type']: r['count'] for r in reaction_counts}
-		
+
 		# 构建完整结果
 		result = []
 		for rt in reaction_types:
@@ -1702,9 +1704,9 @@ class BlogPage(Page):
 				'icon': rt.icon,
 				'count': counts.get(rt.id, 0)
 			})
-		
+
 		return result
-	
+
 	def user_has_reacted(self, request: Any) -> bool:
 		"""检查当前用户是否对页面有反应"""
 		if request.user.is_authenticated:
@@ -1722,13 +1724,13 @@ class BlogPage(Page):
 
 class BlogPageGalleryImage(Orderable):
 	"""博客页面画廊图片模型"""
-	
+
 	# Orderable 是 Wagtail 提供的一个 Mixin 类。Mixin 是一种在 Python 中复用代码的方式，您可以将一个或多个 Mixin 类与其他类一起继承，从而将 Mixin 中的功能“混合”到您的类中。
 	# Orderable Mixin 的主要作用是为您的模型添加一个 sort_order 字段。这个字段是一个整数，用于记录模型实例的排序顺序。
-	
+
 	# 关联到BlogPage
 	page = ParentalKey(BlogPage, on_delete=models.CASCADE, related_name='gallery_images')
-	
+
 	# 关联您自定义的图片模型
 	image = models.ForeignKey(
 		'blog.BlogImage',  # <-- 使用您自定义的图片模型
@@ -1736,7 +1738,7 @@ class BlogPageGalleryImage(Orderable):
 		related_name='+'
 	)
 	caption = models.CharField(blank=True, max_length=250)
-	
+
 	panels = [
 		FieldPanel('image'),
 		FieldPanel('caption'),
@@ -1820,12 +1822,12 @@ class PageViewCount(models.Model):
 	scroll_90_visitor_count = models.PositiveBigIntegerField(default=0)
 	active_reading_seconds = models.PositiveBigIntegerField(default=0)
 	v2_started_at = models.DateTimeField(null=True, blank=True)
-	
+
 	class Meta:
 		verbose_name = "页面访问统计"
 		verbose_name_plural = "页面访问统计"
 		unique_together = ('page', 'date')
-	
+
 	def __str__(self) -> str:
 		"""返回便于后台识别页面、日期和访问次数的摘要。"""
 		return f"{self.page.title} - {self.date} - {self.view_count_v2}次浏览"
@@ -1940,22 +1942,57 @@ class FeedClientDaily(models.Model):
 
 
 
-# 反应类型模型
-@register_snippet
+# 反应类型图标输入正则校验器（严格白名单防注入）
+reaction_icon_validator = RegexValidator(
+	regex=r'^[a-zA-Z0-9\-_ ]+$',
+	message="图标类名只能包含英文字母、数字、空格、中划线和下划线",
+)
+
+# 反应类型模型（通过 wagtail_hooks 中的 ReactionTypeSnippetViewSet 定制化注册，避免原生重叠）
 class ReactionType(models.Model):
-	"""定义可供前台选择的反应类型及其展示顺序。"""
+	"""定义供前台选择的反应类型及展示顺序与图标绑定。"""
 	name = models.CharField("反应名称", max_length=50)
-	icon = models.CharField("图标CSS类", max_length=50)
+	icon = models.CharField(
+		"图标CSS类",
+		max_length=50,
+		validators=[reaction_icon_validator],
+		default="fa-thumbs-up",
+		help_text="Font Awesome 图标类名，例如 fa-thumbs-up、fa-heart 等",
+	)
 	display_order = models.PositiveSmallIntegerField("显示顺序", default=0)
-	
+
 	class Meta:
 		verbose_name = "反应类型"
 		verbose_name_plural = "反应类型"
 		ordering = ['display_order']
-	
+
 	def __str__(self) -> str:
-		"""返回反应类型名称，供后台选择器和日志使用。"""
+		"""返回反应类型名称，供后台选择与日志使用。"""
 		return self.name
+
+	def icon_preview(self) -> str:
+		"""在 Wagtail 后台列表单元格中渲染图标视觉预览小卡片。"""
+		css_class = self.get_normalized_icon()
+		safe_class = "".join(c for c in css_class if c.isalnum() or c in "-_ ")
+		return format_html(
+			'<div class="reaction-icon-cell" style="display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 8px; background: rgba(0, 125, 126, 0.08); border: 1px solid rgba(0, 125, 126, 0.2);">'
+			'  <i class="{}" style="font-size: 1.25rem; color: #007d7e;"></i>'
+			'</div>',
+			safe_class,
+		)
+
+	icon_preview.short_description = "图标预览"
+
+	def get_normalized_icon(self) -> str:
+		"""返回具备标准样式族前缀的图标类名（供后台预览与前台渲染安全复用）。"""
+		raw = (self.icon or "").strip()
+		if not raw:
+			return "fa-solid fa-heart"
+		parts = raw.split()
+		families = {"fa", "fas", "far", "fab", "fa-solid", "fa-regular", "fa-brands"}
+		if any(p in families for p in parts):
+			return raw
+		return f"fa-solid {raw}"
 
 
 # 用户反应模型
@@ -1968,7 +2005,7 @@ class Reaction(models.Model):
 	session_key = models.CharField(max_length=100, blank=True, null=True)
 	ip_address = models.GenericIPAddressField()
 	created_at = models.DateTimeField(auto_now_add=True)
-	
+
 	class Meta:
 		verbose_name = "用户反应"
 		verbose_name_plural = "用户反应"
@@ -1976,7 +2013,7 @@ class Reaction(models.Model):
 			('page', 'user'),  # 每个用户对每个页面只能有一个反应
 			('page', 'session_key', 'ip_address')  # 对于匿名用户，按会话和IP限制
 		)
-	
+
 	def __str__(self) -> str:
 		"""返回用户、反应类型和页面标题组成的后台摘要。"""
 		user_str = self.user.username if self.user else f"匿名({self.session_key[:10]})"
@@ -1986,7 +2023,7 @@ class Reaction(models.Model):
 @register_snippet
 class Author(models.Model):
 	"""保存作者资料、头像和可选的富文本简介，供文章元数据复用。"""
-	
+
 	name = models.CharField(max_length=255)  # 作者名称
 	slug = models.SlugField(max_length=255, unique=True, blank=True, allow_unicode=True)
 	author_image = models.ForeignKey(
@@ -1996,7 +2033,7 @@ class Author(models.Model):
 		on_delete=models.SET_NULL,  # 删除图片时设置为空
 		related_name='+'  # 不需要反向关系
 	)  # 作者图片
-	
+
 	# 使用 RichTextField 允许在后台编辑时使用富文本格式
 	bio = StreamField([
 		('paragraph', RichTextBlock(
@@ -2012,7 +2049,7 @@ class Author(models.Model):
 		blank=True,
 		verbose_name="个人简介"
 	)
-	
+
 	# 列表中的每个元素都定义了在Wagtail管理后台中显示的一个字段。 panels列表决定了哪些字段将出现在Snippet的编辑界面中。
 	# 您在这里使用的是panels而不是content_panels；由于片段通常不需要诸如slug或发布日期之类的字段，
 	# 因此它们的编辑界面不会分为单独的“内容”/“推广”/“设置”选项卡。因此无需区分“内容面板”和“推广面板”。
@@ -2022,7 +2059,7 @@ class Author(models.Model):
 		FieldPanel('author_image'),
 		FieldPanel('bio', heading="个人简介"),  # 使用 StreamFieldPanel 显示富文本简介
 	]  # 在管理界面中显示的字段
-	
+
 	def __str__(self) -> str:
 		"""返回作者名称作为后台显示文本。"""
 		return self.name
@@ -2038,58 +2075,58 @@ class Author(models.Model):
 				counter += 1
 			self.slug = candidate
 		return super().save(*args, **kwargs)
-	
+
 	# 在 Author 类中添加这个方法
 	def get_bio_preview(self, word_limit: int = 3) -> str:
 		"""获取简介的预览版本，限制字数"""
 		if not self.bio:
 			return ""
-		
+
 		preview_text = ""
 		word_count = 0
-		
+
 		for block in self.bio:
 			if block.block_type == 'paragraph':
 				# 处理段落块
 				block_text = strip_tags(str(block.value))
-				
+
 				# 分割单词并计算
 				words = block_text.split()
 				remaining_words = word_limit - word_count
-				
+
 				if remaining_words <= 0:
 					break
-				
+
 				if len(words) <= remaining_words:
 					preview_text += block_text + " "
 					word_count += len(words)
 				else:
 					preview_text += " ".join(words[:remaining_words]) + "..."
 					break
-		
+
 		# 忽略图片块，只处理文本
-		
+
 		return preview_text.strip()
-	
+
 	def get_bio_preview_html(self, word_limit: int = 3) -> str:
 		"""获取带HTML格式的简介预览"""
 		if not self.bio:
 			return ""
-		
+
 		preview_html = ""
 		word_count = 0
-		
+
 		for block in self.bio:
 			if block.block_type == 'paragraph':
 				block_html = str(block.value)
 				block_text = strip_tags(block_html)
-				
+
 				words = block_text.split()
 				remaining_words = word_limit - word_count
-				
+
 				if remaining_words <= 0:
 					break
-				
+
 				if len(words) <= remaining_words:
 					preview_html += f"<p>{block_html}</p>"
 					word_count += len(words)
@@ -2098,9 +2135,9 @@ class Author(models.Model):
 					truncated_text = " ".join(words[:remaining_words]) + "..."
 					preview_html += f"<p>{truncated_text}</p>"
 					break
-		
+
 		return mark_safe(preview_html)
-	
+
 	class Meta:
 		verbose_name = '作者'
 		verbose_name_plural = '作者列表'

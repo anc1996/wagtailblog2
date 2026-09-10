@@ -725,3 +725,40 @@
         display: block;
     }
 }
+
+/* 作者详情页文章卡片：独立用户反应行 */
+.author-detail-page .reaction-stats-row {
+    display: flex;
+    flex-wrap: wrap;
+    width: 100%;
+    margin: 2px 0 0;
+}
+
+.author-detail-page .reaction-stats {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+
+.author-detail-page .reaction-count {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-height: 26px;
+    padding: 2px 8px;
+    font-size: 12px;
+    border-radius: 999px;
+    border: 1px solid rgba(178, 96, 88, 0.22);
+    background: rgba(178, 96, 88, 0.08);
+    color: #96534c;
+    white-space: nowrap;
+}
+
+.author-detail-page .reaction-count > i {
+    color: #b26058;
+}
+
+.author-detail-page .reaction-count strong {
+    font-weight: 700;
+}

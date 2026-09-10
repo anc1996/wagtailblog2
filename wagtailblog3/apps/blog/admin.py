@@ -18,7 +18,7 @@ class PageViewAdmin(admin.ModelAdmin):
     list_filter = ('date',)
     search_fields = ('page__title', 'ip_address', 'user__username')
     date_hierarchy = 'last_viewed_at'
-    
+
     def has_add_permission(self, request):
         # 不允许手动添加，应通过中间件自动生成
         return False
@@ -37,7 +37,7 @@ class PageViewCountAdmin(admin.ModelAdmin):
     list_filter = ('date',)
     search_fields = ('page__title',)
     date_hierarchy = 'date'
-    
+
     def has_add_permission(self, request):
         # 不允许手动添加，应通过数据同步生成
         return False
@@ -49,11 +49,7 @@ class PageViewCountAdmin(admin.ModelAdmin):
     def has_delete_permission(self, request, obj=None):
         return False
 
-@admin.register(ReactionType)
-class ReactionTypeAdmin(admin.ModelAdmin):
-    list_display = ('name', 'icon', 'display_order')
-    search_fields = ('name',)
-    ordering = ('display_order',)
+# ReactionType 管理已由 Wagtail ReactionTypeSnippetViewSet 接管
 
 @admin.register(Reaction)
 class ReactionAdmin(admin.ModelAdmin):
@@ -70,13 +66,13 @@ class TagsSnippetViewSet(SnippetViewSet):
     model = Tag
     icon = "tag"
     menu_label = "博客标签"  # 在片段列表中显示的中文名称
-    
+
     # 关闭强制挂载到主菜单，让标签自动归入 Wagtail 的“片段”菜单。
     add_to_admin_menu = False
-    
+
     # 后台新建或修改标签时只显示名称字段，避免编辑者直接修改派生 slug。
     panels = [FieldPanel("name")]
-    
+
     # 显式指定列标题和数据库排序字段，确保计数列可以正确排序。
     list_display = [
         "name",
@@ -84,7 +80,7 @@ class TagsSnippetViewSet(SnippetViewSet):
         Column("post_count", label="文章引用数量", sort_key="post_count")
     ]
     search_fields = ("name",)
-    
+
     def get_queryset(self, request):
         """
 		重写查询集：在数据库层面直接计算每个标签被 BlogPage 引用的次数
@@ -257,3 +253,170 @@ class PageViewSnippetViewSet(SnippetViewSet):
 
     def get_queryset(self, request):
         return self.model.objects.select_related("page", "user")
+
+
+from django import forms
+from django.utils.html import format_html, escape
+from django.utils.safestring import mark_safe
+
+# 32 款精选高频博客互动反应图标（涵盖正面表达、爱心、火热、幽默、思考、惊叹与行动）
+REACTION_ICON_CHOICES = [
+    ("", "-- 请选择预设图标 --"),
+    # 常用基础态度
+    ("fa-thumbs-up", "👍 点赞 / 赞同 (fa-thumbs-up)"),
+    ("fa-thumbs-down", "👎 点踩 / 反对 (fa-thumbs-down)"),
+    ("fa-heart", "❤️ 喜欢 / 喜爱 (fa-heart)"),
+    ("fa-star", "⭐ 收藏 / 推荐 (fa-star)"),
+    ("fa-fire", "🔥 精彩 / 火热 (fa-fire)"),
+    ("fa-lightbulb", "💡 思考 / 启发 (fa-lightbulb)"),
+    ("fa-surprise", "😮 惊讶 / 震惊 (fa-surprise)"),
+    ("fa-check", "✅ 赞同 / 确认 (fa-check)"),
+    ("fa-bookmark", "🔖 存签 / 留底 (fa-bookmark)"),
+    # 表情与情绪
+    ("fa-face-smile", "😊 微笑 / 友善 (fa-face-smile)"),
+    ("fa-face-laugh-squint", "😂 搞笑 / 爆笑 (fa-face-laugh-squint)"),
+    ("fa-face-smile-beam", "😄 开心 / 灿烂 (fa-face-smile-beam)"),
+    ("fa-face-sad-tear", "😢 难过 / 伤感 (fa-face-sad-tear)"),
+    ("fa-face-flushed", "😳 害羞 / 汗颜 (fa-face-flushed)"),
+    ("fa-circle-question", "❓ 疑问 / 探讨 (fa-circle-question)"),
+    ("fa-eye", "👀 围观 / 关注 (fa-eye)"),
+    # 鼓励、祝贺与荣誉
+    ("fa-hands-clapping", "👏 鼓掌 / 喝彩 (fa-hands-clapping)"),
+    ("fa-rocket", "🚀 火箭 / 起飞 (fa-rocket)"),
+    ("fa-trophy", "🏆 冠军 / 优秀 (fa-trophy)"),
+    ("fa-medal", "🏅 勋章 / 认可 (fa-medal)"),
+    ("fa-champagne-glasses", "🥂 庆祝 / 干杯 (fa-champagne-glasses)"),
+    ("fa-cake-candles", "🎂 祝福 / 生日 (fa-cake-candles)"),
+    ("fa-bullseye", "🎯 击中 / 精准 (fa-bullseye)"),
+    ("fa-crown", "👑 精华 / 卓越 (fa-crown)"),
+    # 场景与极客生活
+    ("fa-mug-hot", "☕ 咖啡 / 赞赏 (fa-mug-hot)"),
+    ("fa-beer-mug-empty", "🍺 干杯 / 惬意 (fa-beer-mug-empty)"),
+    ("fa-code", "💻 极客 / 代码 (fa-code)"),
+    ("fa-pen-nib", "✍️ 好文 / 文笔 (fa-pen-nib)"),
+    ("fa-book-open", "📖 研读 / 知识 (fa-book-open)"),
+    ("fa-shield-halved", "🛡️ 稳健 / 严谨 (fa-shield-halved)"),
+    ("fa-bell", "🔔 提醒 / 关注 (fa-bell)"),
+    ("fa-hand-peace", "✌️ 胜利 / 友好 (fa-hand-peace)"),
+    ("__custom__", "✏️ [手工输入其他 FontAwesome 类名...]"),
+]
+
+
+class ReactionIconSelectWidget(forms.Widget):
+    """兼具语义下拉选择、自定义输入与实时图标渲染的复合 Widget。"""
+
+    def render(self, name, value, attrs=None, renderer=None):
+        current_val = value or "fa-thumbs-up"
+        known_values = {k for k, _ in REACTION_ICON_CHOICES if k and k != "__custom__"}
+        is_known = current_val in known_values
+
+        # 构建选项 HTML
+        options_html = []
+        for val, label in REACTION_ICON_CHOICES:
+            selected = ' selected="selected"' if (val == current_val if is_known else val == "__custom__") else ""
+            options_html.append(f'<option value="{escape(val)}"{selected}>{escape(label)}</option>')
+
+        # 初始预览图标类名（自动规范化）
+        init_preview_class = current_val if any(current_val.startswith(p) for p in ["fa ", "fas ", "far ", "fab ", "fa-solid ", "fa-regular "]) else f"fa-solid {current_val}"
+        safe_preview_class = "".join(c for c in init_preview_class if c.isalnum() or c in "-_ ")
+
+        widget_id = (attrs or {}).get("id", f"id_{name}")
+        select_id = f"{widget_id}_select"
+        input_id = f"{widget_id}"
+        preview_id = f"{widget_id}_preview_icon"
+
+        input_display = "none" if is_known else "block"
+
+        html = f"""
+        <div class="reaction-icon-widget-container" style="display: flex; flex-direction: column; gap: 8px; max-width: 560px;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div style="flex: 1;">
+                    <select id="{select_id}" class="reaction-preset-select" style="width: 100%; height: 40px; border-radius: 6px; border: 1px solid #ccc; padding: 4px 8px; font-size: 14px;">
+                        {''.join(options_html)}
+                    </select>
+                </div>
+                <div style="width: 44px; height: 44px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; border: 1px solid rgba(0, 125, 126, 0.25); background: rgba(0, 125, 126, 0.06);">
+                    <i id="{preview_id}" class="{safe_preview_class}" style="font-size: 1.5rem; color: #007d7e; transition: transform 0.15s ease;"></i>
+                </div>
+            </div>
+            <div id="{widget_id}_custom_wrap" style="display: {input_display};">
+                <input type="text" id="{input_id}" name="{name}" value="{escape(current_val)}" placeholder="输入自定义 Font Awesome 类名，例如 fa-solid fa-star" style="width: 100%; height: 38px; border-radius: 6px; border: 1px solid #007d7e; padding: 4px 10px; font-size: 14px; font-family: monospace;">
+                <small style="color: #666; font-size: 12px; margin-top: 4px; display: block;">提示：可填入任何 Font Awesome 6 类名（如 <code>fa-solid fa-heart</code> 或简写 <code>fa-heart</code>）。</small>
+            </div>
+        </div>
+        <script>
+        (function() {{
+            var select = document.getElementById("{select_id}");
+            var input = document.getElementById("{input_id}");
+            var customWrap = document.getElementById("{widget_id}_custom_wrap");
+            var preview = document.getElementById("{preview_id}");
+
+            function updatePreview(val) {{
+                if (!val) return;
+                var trimmed = val.trim();
+                var families = ["fa", "fas", "far", "fab", "fa-solid", "fa-regular", "fa-brands"];
+                var parts = trimmed.split(" ").filter(Boolean);
+                var hasFamily = parts.some(function(p) {{ return families.indexOf(p) !== -1; }});
+                var cls = hasFamily ? trimmed : "fa-solid " + trimmed;
+                // 清洗非法字符防注入
+                cls = cls.replace(/[^a-zA-Z0-9_ -]/g, "");
+                preview.className = cls;
+                preview.style.transform = "scale(1.2)";
+                setTimeout(function() {{ preview.style.transform = "scale(1)"; }}, 150);
+            }}
+
+            if (select && input) {{
+                select.addEventListener("change", function() {{
+                    var val = this.value;
+                    if (val === "__custom__") {{
+                        customWrap.style.display = "block";
+                        input.focus();
+                    }} else if (val) {{
+                        customWrap.style.display = "none";
+                        input.value = val;
+                        updatePreview(val);
+                    }}
+                }});
+
+                input.addEventListener("input", function() {{
+                    updatePreview(this.value);
+                }});
+            }}
+        }})();
+        </script>
+        """
+        return mark_safe(html)
+
+
+class ReactionTypeSnippetViewSet(SnippetViewSet):
+    """反应类型定制化 SnippetViewSet：提供列表图标预览、显示顺序排序与可视化图标选型。"""
+    model = ReactionType
+    icon = "smile"
+    menu_label = "反应类型"
+    add_to_admin_menu = False
+    ordering = ("display_order", "id")
+    search_fields = ("name", "icon")
+
+    list_display = [
+        "name",
+        Column("icon_preview", label="图标预览"),
+        Column("icon", label="CSS 类名"),
+        Column("display_order", label="显示顺序", sort_key="display_order"),
+    ]
+
+    panels = [
+        FieldPanel("name"),
+        FieldPanel("icon", widget=ReactionIconSelectWidget),
+        FieldPanel("display_order"),
+    ]
+
+    def icon_preview(self, instance):
+        """在 Snippet 列表单元格中渲染图标视觉小卡片与标准色彩。"""
+        css_class = instance.get_normalized_icon()
+        safe_class = "".join(c for c in css_class if c.isalnum() or c in "-_ ")
+        return format_html(
+            '<div class="reaction-icon-cell" style="display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 8px; background: rgba(0, 125, 126, 0.08); border: 1px solid rgba(0, 125, 126, 0.2);">'
+            '  <i class="{}" style="font-size: 1.25rem; color: #007d7e;"></i>'
+            '</div>',
+            safe_class,
+        )

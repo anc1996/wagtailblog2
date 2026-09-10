@@ -1,36 +1,47 @@
-﻿{% comment %}
-访问量与反应统计块
-参数: page - 页面对象（BlogPage 类型才统计数据）
+{% load blog_tags %}
+{% comment %}
+文章访问量与用户反馈反应统计块
+支持参数:
+- page: 页面对象 (BlogPage 类型或通用 Page)
+- mode: 渲染模式
+    - "views_only": 仅渲染访问量统计 (.view-stats)
+    - "reactions_only": 仅渲染用户反应表情独立行 (.reaction-stats-row)
+    - 缺省或 "both": 依次渲染访问量与反应统计
 {% endcomment %}
+{% with specific=page.specific %}
 
-<div class="page-stats">
-    {% with specific=page.specific %}
+{% if not mode or mode == "views_only" or mode == "both" %}
     {% with vc=specific.get_view_count %}
     {% if vc and vc.total > 0 %}
-        <div class="view-stats">
+        <div class="view-stats" aria-label="文章访问统计">
             <span class="view-stats-total" title="总访问量">
                 <i class="fa fa-eye" aria-hidden="true"></i>
                 <strong>{{ vc.total }}</strong> 次访问
             </span>
-            <span class="view-stats-today" title="今日访问量"><i class="fa fa-calendar-check-o" aria-hidden="true"></i> 今日 <strong>{{ vc.today }}</strong> 次</span>
+            <span class="view-stats-today" title="今日访问量">
+                <i class="fa fa-calendar-check-o" aria-hidden="true"></i> 今日 <strong>{{ vc.today }}</strong> 次
+            </span>
         </div>
     {% endif %}
     {% endwith %}
+{% endif %}
 
-    <div class="reaction-stats" data-page-id="{{ page.id }}">
-        {% for reaction in specific.get_reactions %}
-            {% if reaction.count > 0 %}
-                <span class="reaction-count" title="{{ reaction.name }}">
-                    {% if reaction.name == '点赞' %}<i class="fa fa-thumbs-up" aria-hidden="true"></i>
-                    {% elif reaction.name == '喜欢' %}<i class="fa fa-heart" aria-hidden="true"></i>
-                    {% elif reaction.name == '震惊' %}<i class="fa fa-exclamation-circle" aria-hidden="true"></i>
-                    {% elif reaction.name == '思考' %}<i class="fa fa-lightbulb-o" aria-hidden="true"></i>
-                    {% else %}<i class="fa fa-star" aria-hidden="true"></i>{% endif %}
-                    <span class="reaction-name">{{ reaction.name }}</span>
-                    <strong>{{ reaction.count }}</strong>
-                </span>
-            {% endif %}
-        {% endfor %}
-    </div>
+{% if not mode or mode == "reactions_only" or mode == "both" %}
+    {% with active_list=specific.get_reactions|active_reactions %}
+    {% if active_list %}
+        <div class="reaction-stats-row" data-page-id="{{ page.id }}" aria-label="用户反馈表情">
+            <div class="reaction-stats">
+                {% for reaction in active_list %}
+                    <span class="reaction-count" title="{{ reaction.name }}">
+                        <i class="{{ reaction.icon|ensure_fa_prefix }}" aria-hidden="true"></i>
+                        <span class="reaction-name">{{ reaction.name }}</span>
+                        <strong>{{ reaction.count }}</strong>
+                    </span>
+                {% endfor %}
+            </div>
+        </div>
+    {% endif %}
     {% endwith %}
-</div>
+{% endif %}
+
+{% endwith %}

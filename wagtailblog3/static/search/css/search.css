@@ -774,3 +774,63 @@ a.popular-tag:focus {
         justify-content: center;
     }
 }
+
+/* 搜索结果卡片：访问量与独立用户反应统计行 */
+.search-result .view-stats {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: #887f78;
+}
+
+.search-result .view-stats-total,
+.search-result .view-stats-today {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: #fbf6ef;
+    border: 1px solid #eee3d5;
+}
+
+.search-result .view-stats-total i,
+.search-result .view-stats-today i {
+    color: #b56a3d;
+}
+
+.search-result .reaction-stats-row {
+    display: flex;
+    flex-wrap: wrap;
+    width: 100%;
+    margin: 4px 0 10px;
+}
+
+.search-result .reaction-stats {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+
+.search-result .reaction-count {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    font-size: 12px;
+    border-radius: 999px;
+    border: 1px solid rgba(178, 96, 88, 0.22);
+    background: rgba(178, 96, 88, 0.08);
+    color: #96534c;
+    white-space: nowrap;
+}
+
+.search-result .reaction-count > i {
+    color: #b26058;
+}
+
+.search-result .reaction-count strong {
+    font-weight: 700;
+}

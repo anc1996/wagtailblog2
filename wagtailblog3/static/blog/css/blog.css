@@ -752,6 +752,24 @@
     color: #888;
     transition: color 0.2s;
 }
+.reaction-btn .reaction-name {
+    font-weight: 550;
+    font-size: 13.5px;
+    letter-spacing: 0.01em;
+}
+.reaction-btn .count {
+    font-weight: 700;
+    font-size: 12.5px;
+    margin-left: 2px;
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: rgba(166, 111, 63, 0.14);
+    color: inherit;
+}
+.reaction-btn.active .count {
+    background: rgba(255, 255, 255, 0.28);
+    color: #fffaf3;
+}
 .reaction-btn:hover {
     background: #f0e0cd;
     border-color: #c28b59;

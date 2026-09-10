@@ -1778,7 +1778,7 @@ footer .social-boxed .social-icon-two {
     font-style: normal;
     font-weight: 400;
     font-display: block;
-    src: url("../webfonts/fa-brands-400.woff2") format("woff2");
+    src: url("../vendor/fontawesome/webfonts/fa-brands-400.woff2") format("woff2");
 }
 
 @font-face {
@@ -1786,7 +1786,7 @@ footer .social-boxed .social-icon-two {
     font-style: normal;
     font-weight: 900;
     font-display: block;
-    src: url("../webfonts/fa-solid-900.woff2") format("woff2");
+    src: url("../vendor/fontawesome/webfonts/fa-solid-900.woff2") format("woff2");
 }
 
 footer .footer-social-icon {
@@ -2112,6 +2112,16 @@ footer .main-footer {
     color: #fff8f1;
     background: linear-gradient(145deg, #b7794e, #83502f);
     border-color: #c1875d;
+}
+
+:root[data-theme='dark'] .blog-page-wrapper .reaction-btn .count {
+    background: rgba(255, 255, 255, 0.09);
+    color: #e8ded4;
+}
+
+:root[data-theme='dark'] .blog-page-wrapper .reaction-btn.active .count {
+    background: rgba(255, 255, 255, 0.22);
+    color: #ffffff;
 }
 
 :root[data-theme='dark'] .blog-page-wrapper .zen-trigger {

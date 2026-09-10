@@ -1,3 +1,4 @@
+from typing import Any
 # 博客应用的模板标签
 import logging
 from collections import Counter
@@ -213,3 +214,34 @@ def get_tag_index_page():
     """
 	# 返回第一个已发布的标签索引页；不存在时返回 None。
     return BlogTagIndexPage.objects.live().first()
+
+
+@register.filter
+def ensure_fa_prefix(icon_class: str | None) -> str:
+	"""确保 Font Awesome 图标类名具备样式族前缀（兼容 fa-* 与 fas/far fa-*）。
+
+	若类名缺少样式族前缀（例如仅配置了 fa-thumbs-up），自动前置补齐 fa-solid；
+	若已包含 fas、far、fab、fa、fa-solid、fa-regular、fa-brands 等前缀，
+	则直接保持原样输出；若为空则返回默认心形图标。
+	"""
+	if not icon_class:
+		return "fa-solid fa-heart"
+	raw = str(icon_class).strip()
+	parts = raw.split()
+	if not parts:
+		return "fa-solid fa-heart"
+	families = {"fa", "fas", "far", "fab", "fa-solid", "fa-regular", "fa-brands"}
+	if any(p in families for p in parts):
+		return raw
+	return f"fa-solid {raw}"
+
+@register.filter
+def active_reactions(reactions: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+	"""筛选出具有实际互动计数（count > 0）的文章反应列表。
+
+	用于博客列表页、标签页、归档页、作者页与搜索页卡片中，
+	确保当文章暂无任何用户反应时，不渲染多余的空白反应行或容器边距。
+	"""
+	if not reactions:
+		return []
+	return [r for r in reactions if (r.get("count") or 0) > 0]

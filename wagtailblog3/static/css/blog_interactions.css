@@ -1,25 +1,109 @@
-/* 页面统计样式 */
+/* =========================================================
+   1. 访问统计与反应行全局基础规则
+   ========================================================= */
 .page-stats {
     display: flex;
+    flex-wrap: wrap;
+    align-items: center;
     justify-content: space-between;
-    margin: 10px 0;
+    gap: 8px;
+    margin: 8px 0;
     font-size: 0.9em;
     color: #666;
 }
 
+.view-stats {
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
 .view-stats span {
-    margin-right: 10px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
 }
 
-.reaction-stats {
+/* 独立用户反应行：确保在各类列表卡片中占据整行，不与其他元数据混杂 */
+.reaction-stats-row {
     display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    width: 100%;
+    margin: 0.45rem 0;
+    line-height: 1.4;
 }
 
-.reaction-count {
-    margin-left: 10px;
+.reaction-stats-row:empty {
+    display: none;
 }
 
-/* 反应按钮样式 */
+.reaction-stats-row .reaction-stats {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.45rem;
+}
+
+.reaction-stats-row .reaction-count {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    min-height: 26px;
+    padding: 0.2rem 0.65rem;
+    font-size: 0.82rem;
+    line-height: 1.2;
+    border-radius: 999px;
+    border: 1px solid rgba(178, 96, 88, 0.22);
+    background: rgba(178, 96, 88, 0.08);
+    color: #96534c;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+.reaction-stats-row .reaction-count:hover {
+    background: rgba(178, 96, 88, 0.15);
+    border-color: rgba(178, 96, 88, 0.35);
+}
+
+.reaction-stats-row .reaction-count > i {
+    color: #b26058;
+    font-size: 0.88rem;
+}
+
+.reaction-stats-row .reaction-count .reaction-name {
+    font-weight: 500;
+}
+
+.reaction-stats-row .reaction-count strong {
+    font-weight: 700;
+    margin-left: 0.15rem;
+}
+
+/* 深色模式下的全局独立反应行适配 */
+:root[data-theme='dark'] .reaction-stats-row .reaction-count {
+    border-color: rgba(220, 140, 130, 0.28);
+    background: rgba(220, 140, 130, 0.12);
+    color: #e2b3ab;
+}
+
+:root[data-theme='dark'] .reaction-stats-row .reaction-count:hover {
+    background: rgba(220, 140, 130, 0.2);
+    border-color: rgba(220, 140, 130, 0.45);
+}
+
+:root[data-theme='dark'] .reaction-stats-row .reaction-count > i {
+    color: #ea9f95;
+}
+
+:root[data-theme='dark'] .reaction-stats-row .reaction-count strong {
+    color: #fce3de;
+}
+
+/* =========================================================
+   2. 详情页文章反应按钮基础规范（支持图标 + 词语 + 计数）
+   ========================================================= */
 .article-reactions {
     margin: 30px 0;
     padding: 15px;
@@ -29,6 +113,7 @@
 
 .reaction-buttons {
     display: flex;
+    flex-wrap: wrap;
     gap: 10px;
 }
 
@@ -36,15 +121,29 @@
     background: #f5f5f5;
     border: 1px solid #ddd;
     border-radius: 20px;
-    padding: 5px 15px;
+    padding: 6px 14px;
     cursor: pointer;
     transition: all 0.2s;
-    display: flex;
+    display: inline-flex;
     align-items: center;
+    gap: 6px;
+    font-size: 13.5px;
 }
 
 .reaction-btn i {
-    margin-right: 5px;
+    font-size: 14px;
+}
+
+.reaction-btn .reaction-name {
+    font-weight: 500;
+}
+
+.reaction-btn .count {
+    font-weight: 700;
+    font-size: 12.5px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.06);
 }
 
 .reaction-btn:hover {
@@ -55,4 +154,8 @@
     background: #e6f2ff;
     border-color: #b3d9ff;
     color: #0066cc;
+}
+
+.reaction-btn.active .count {
+    background: rgba(0, 102, 204, 0.15);
 }

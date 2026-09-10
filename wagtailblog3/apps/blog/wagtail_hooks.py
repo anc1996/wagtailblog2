@@ -29,6 +29,7 @@ from wagtail.admin.rich_text.converters.html_to_contentstate import InlineStyleE
 from wagtail.snippets.models import register_snippet
 
 from .admin import (
+	ReactionTypeSnippetViewSet,
 	MarkdownImportTokenSnippetViewSet,
 	PageViewSnippetViewSet,
 	TagsSnippetViewSet,
@@ -137,7 +138,11 @@ def global_admin_css():
 	项目的其他后台组件仍使用其中的图标类。
 	"""
 	# 通过 static() 获取带缓存版本的路径，再用 format_html 安全插入 HTML 属性。
-	return format_html('<link rel="stylesheet" href="{}">', static("css/all.min.css"))
+	return format_html(
+		'<link rel="stylesheet" href="{}">\n<link rel="stylesheet" href="{}">',
+		static("vendor/fontawesome/css/all.min.css"),
+		static("vendor/fontawesome/css/v4-shims.min.css"),
+	)
 
 
 # 为编辑器加载诊断和项目自有正文上下文脚本。
@@ -456,6 +461,7 @@ def register_underline_feature(features):
 register_snippet(TagsSnippetViewSet)
 register_snippet(PageViewSnippetViewSet)
 register_snippet(MarkdownImportTokenSnippetViewSet)
+register_snippet(ReactionTypeSnippetViewSet)
 
 
 @hooks.register("register_snippet_listing_buttons")

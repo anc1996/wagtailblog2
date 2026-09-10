@@ -63,8 +63,10 @@
 
             <div class="meta archive-post-meta">
                 <span class="archive-post-date"><i class="fa fa-calendar-o" aria-hidden="true"></i>{{ post.date|date:"Y年m月d日" }}</span>
-                {% include "blog/stats_block.html" with page=post %}
+                {% include "blog/stats_block.html" with page=post mode="views_only" %}
             </div>
+
+            {% include "blog/stats_block.html" with page=post mode="reactions_only" %}
 
             {% if post.featured_image %}
                 <a href="{% pageurl post %}" class="featured-image-link">

@@ -122,7 +122,7 @@
                             <i class="fa fa-calendar" aria-hidden="true"></i>{{ post.date|date:"Y-m-d" }}
                         </span>
 
-                        {% include "blog/stats_block.html" with page=post %}
+                        {% include "blog/stats_block.html" with page=post mode="views_only" %}
 
                         {% with tags=post.listing_tags %}
                             {% if tags or tags is not None %}
@@ -158,6 +158,8 @@
                             {% endif %}
                         {% endwith %}
                     </div>
+
+                    {% include "blog/stats_block.html" with page=post mode="reactions_only" %}
 
                     <div class="post-card-summary">
                         <p>{{ post.intro|striptags|truncatechars:180 }}</p>

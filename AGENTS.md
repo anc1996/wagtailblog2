@@ -58,7 +58,10 @@
 ## 7. 工具调用与专用 Skill 指引
 
 - **实事求是原则**：所有 MCP 与外部工具以当前会话实际暴露的清单为准。如果会话未挂载 context7、fetch、github 或 google-toolbox，**严禁凭空假设其存在**，直接平稳回退至本地 shell、git、ssh、python 脚本或已配置的工具；
-- **Playwright 产物归宿**：浏览器端到端测试调试产物（截图、trace、视频、HTML 报告）**统一写入 output/playwright/<task-name>/**，严格受 .gitignore 保护，严禁提交；
+- **浏览器测试工具分工与用户场景模拟（Playwright vs browser-skill）**：
+  1. **无状态与 CI 自动化测试（playwright）**：用于离线端到端自动化回归、跨端截图、无 Cookie 冷启动渲染与性能追踪；产物（截图、trace、视频、HTML 报告）**统一写入 output/playwright/<task-name>/**，严格受 .gitignore 保护，严禁提交；
+  2. **真实用户登录态与前后台场景测试（browser-skill）**：当需要模拟真实用户操作场景、测试已登录用户权限互动（如前台评论互动、点赞）或验证 Wagtail 管理后台配置时，**优先启用 browser-skill**。直接借用对话人在宿主浏览器（Chrome/Edge）已登录好的会话、Cookie 与 Session 展开实机交互测试，无需繁琐的账号密码重复登录；
+  3. **凭据安全红线**：严禁在代码、日志、文档或对话输出中抓取、转储或外泄用户的真实 Cookie、Token 或密码。
 - **加载项目专属技能**：关于 Wagtail 8.0 双存储详细契约、Elasticsearch Outbox 异步索引、WSL2 定向测试命令表、Playwright 跨端测试流程及生产 4 大应用服务 Maker-Checker 分步部署，请直接加载项目专属技能：
   - **wagtailblog-dev-workflow**（位于 .codex/skills/wagtailblog-dev-workflow/）。
 

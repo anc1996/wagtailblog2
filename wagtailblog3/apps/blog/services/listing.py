@@ -396,8 +396,20 @@ def _is_preview_request(request: HttpRequest | None) -> bool:
     )
 
 
-def _batch_prefetch_post_data(posts: list[Any], request: HttpRequest | None = None) -> list[Any]:
-    """对列表页的文章集合执行批量抓取、统计聚合与 ListingCard DTO 投射."""
+def _batch_prefetch_post_data(
+    posts: list[Any],
+    request: HttpRequest | None = None,
+    as_dto: bool = True,
+) -> list[Any]:
+    """对列表页的文章集合执行批量抓取、统计聚合与 ListingCard DTO 投射.
+
+    参数说明:
+        posts: 待装配的文章列表（可为 BlogPage 或 Wagtail Page 实例）
+        request: 当前 HTTP 请求对象，用于生成相对或绝对 URL
+        as_dto: 是否投射为轻量安全 ListingCard DTO。
+            - True (默认): 投射为纯 DTO，隔离 ORM 与 Mongo 引用，用于分类首页及 Redis 缓存；
+            - False: 挂载预取统计与切片至原始 BlogPage 实例并直接返回模型列表，消除归档与作者页的 N+1 并保留 pageurl/specific 兼容性。
+    """
     if not posts:
         return []
 
@@ -412,17 +424,26 @@ def _batch_prefetch_post_data(posts: list[Any], request: HttpRequest | None = No
 
     from blog.models import BlogPage, BlogPageTag, BlogRendition, PageViewCount, Reaction
 
-    # 1. 批量加载 BlogPage 模型属性与特色图片 (1 次查询)
-    try:
-        pages_qs = (
-            BlogPage.objects.filter(pk__in=page_ids)
-            .defer("body")
-            .select_related("featured_image")
-        )
-        pages_by_id = {p.pk: p for p in pages_qs}
-    except Exception:
-        logger.warning("listing_batch_fetch_pages_failed", exc_info=True)
-        pages_by_id = {}
+    # 1. 批量加载 BlogPage 模型属性与特色图片 (若传入对象已为 BlogPage 且包含图片引用则优先复用，消除重复查询)
+    pages_by_id = {}
+    needed_page_ids = []
+    for p in real_pages:
+        if isinstance(p, BlogPage) and hasattr(p, "featured_image"):
+            pages_by_id[p.pk] = p
+        else:
+            needed_page_ids.append(p.pk)
+
+    if needed_page_ids:
+        try:
+            pages_qs = (
+                BlogPage.objects.filter(pk__in=needed_page_ids)
+                .defer("body")
+                .select_related("featured_image")
+            )
+            for p in pages_qs:
+                pages_by_id[p.pk] = p
+        except Exception:
+            logger.warning("listing_batch_fetch_pages_failed", exc_info=True)
 
     # 2. 批量加载作者关联 (1 次查询，通过 through 消除 N+1 与多重 prefetch)
     authors_by_page: dict[int, list[Any]] = defaultdict(list)
@@ -483,31 +504,38 @@ def _batch_prefetch_post_data(posts: list[Any], request: HttpRequest | None = No
     except Exception:
         logger.warning("listing_batch_fetch_reactions_failed", exc_info=True)
 
-    # 6. 批量预取特色图片切片 (Rendition width-420，仅在存在图片时 1 次查询)
-    renditions_by_image: dict[int, Any] = {}
+    # 6. 批量预取特色图片切片 (同时支持列表 width-420 与归档 fill-300x200，1 次查询)
+    renditions_by_image: dict[int, list[Any]] = defaultdict(list)
     try:
         image_ids = [
             p.featured_image_id
             for p in pages_by_id.values()
             if getattr(p, "featured_image_id", None)
         ]
+        for raw_p in posts:
+            f_id = getattr(raw_p, "featured_image_id", None)
+            if f_id and f_id not in image_ids:
+                image_ids.append(f_id)
         if image_ids:
             rends = BlogRendition.objects.filter(
-                image_id__in=image_ids, filter_spec="width-420"
+                image_id__in=image_ids,
+                filter_spec__in=["width-420", "fill-300x200"],
             )
             for rend in rends:
-                renditions_by_image[rend.image_id] = rend
+                renditions_by_image[rend.image_id].append(rend)
     except Exception:
         logger.warning("listing_batch_fetch_renditions_failed", exc_info=True)
 
-    # 7. 投射为安全强隔离的 ListingCard DTO
+    # 7. 投射为安全强隔离的 ListingCard DTO 或挂载至模型实例
     projected_cards: list[Any] = []
+    enhanced_posts: list[Any] = []
+
     for raw_item in posts:
         pid = getattr(raw_item, "pk", None)
         post_instance = pages_by_id.get(pid)
 
         # 非 BlogPage 多态节点兼容回退
-        if post_instance is None:
+        if post_instance is None and as_dto:
             projected_cards.append(getattr(raw_item, "specific", raw_item))
             continue
 
@@ -534,44 +562,61 @@ def _batch_prefetch_post_data(posts: list[Any], request: HttpRequest | None = No
             for rt in reaction_types
         ]
 
-        # 挂载预注入属性以支持直接访问
-        post_instance._prefetched_view_count = view_count_dict
-        post_instance._prefetched_reactions = reactions_list
-
         authors_list = authors_by_page.get(pid, [])
-        post_instance.listing_authors = authors_list
-
         tags_list = tags_by_page.get(pid, [])
-        post_instance.listing_tags = tags_list
 
-        # 切片预取
-        featured_img = getattr(post_instance, "featured_image", None)
+        # 挂载预注入属性至所有相关对象实例（包含原始 post 与新查出的 post_instance）
+        target_models = {raw_item}
+        if post_instance is not None:
+            target_models.add(post_instance)
+
+        for obj in target_models:
+            if obj is not None:
+                obj._prefetched_view_count = view_count_dict
+                obj._prefetched_reactions = reactions_list
+                obj.listing_authors = authors_list
+                obj.listing_tags = tags_list
+                img_obj = getattr(obj, "featured_image", None)
+                if img_obj is not None and getattr(img_obj, "id", None) in renditions_by_image:
+                    img_rends = renditions_by_image[img_obj.id]
+                    img_obj.prefetched_renditions = list(img_rends)
+
+        if not as_dto:
+            enhanced_posts.append(raw_item)
+            continue
+
+        # 切片预取 (DTO 模式：优先匹配 width-420)
+        featured_img = getattr(post_instance, "featured_image", None) or getattr(raw_item, "featured_image", None)
         featured_rendition = None
         img_url = None
         img_w = None
         img_h = None
         if featured_img is not None and getattr(featured_img, "id", None) in renditions_by_image:
-            featured_rendition = renditions_by_image[featured_img.id]
-            featured_img.prefetched_renditions = [featured_rendition]
-            img_url = getattr(featured_rendition, "url", None)
-            img_w = getattr(featured_rendition, "width", None)
-            img_h = getattr(featured_rendition, "height", None)
+            img_rends = renditions_by_image[featured_img.id]
+            featured_img.prefetched_renditions = list(img_rends)
+            w420_rend = next((r for r in img_rends if r.filter_spec == "width-420"), img_rends[0] if img_rends else None)
+            if w420_rend is not None:
+                featured_rendition = w420_rend
+                img_url = getattr(w420_rend, "url", None)
+                img_w = getattr(w420_rend, "width", None)
+                img_h = getattr(w420_rend, "height", None)
 
         post_url = None
-        if hasattr(post_instance, "get_url"):
+        target_for_url = post_instance or raw_item
+        if hasattr(target_for_url, "get_url"):
             try:
-                post_url = post_instance.get_url(request=request)
+                post_url = target_for_url.get_url(request=request)
             except Exception:
                 post_url = None
         if not post_url:
-            post_url = getattr(post_instance, "url", None) or f"/{getattr(post_instance, 'slug', '')}/"
+            post_url = getattr(target_for_url, "url", None) or f"/{getattr(target_for_url, 'slug', '')}/"
 
         card = ListingCard(
             pk=pid,
-            title=getattr(post_instance, "title", ""),
+            title=getattr(target_for_url, "title", ""),
             url=post_url,
-            date=getattr(post_instance, "date", None),
-            intro=getattr(post_instance, "intro", "") or "",
+            date=getattr(target_for_url, "date", None),
+            intro=getattr(target_for_url, "intro", "") or "",
             featured_image=featured_img,
             featured_rendition=featured_rendition,
             authors=authors_list,
@@ -584,7 +629,7 @@ def _batch_prefetch_post_data(posts: list[Any], request: HttpRequest | None = No
         )
         projected_cards.append(card)
 
-    return projected_cards
+    return enhanced_posts if not as_dto else projected_cards
 
 
 

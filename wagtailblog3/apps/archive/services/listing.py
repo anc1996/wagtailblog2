@@ -6,10 +6,11 @@ from datetime import date
 from urllib.parse import urlencode
 
 from django.core.paginator import EmptyPage, PageNotAnInteger, Paginator
-from django.http import Http404
+from django.http import Http404, HttpRequest
 from django.urls import reverse
 
 from blog.models import BlogPage, BlogTagIndexPage
+from blog.services.listing import _get_cached_tag_index_page
 
 
 ARCHIVE_PAGE_SIZE = 10
@@ -31,7 +32,7 @@ def _get_month_date_range(*, year: int, month: int) -> tuple[date, date]:
     return start_date, date(year, month + 1, 1)
 
 
-def get_archive_listing_context(*, year: int, month: int | None, query_params):
+def get_archive_listing_context(*, year: int, month: int | None, query_params, request: HttpRequest | None = None):
     """Build the normalized, paginated context for an archive scope."""
     _validate_scope(year=year, month=month)
 
@@ -63,6 +64,13 @@ def get_archive_listing_context(*, year: int, month: int | None, query_params):
     except EmptyPage:
         pages = paginator.page(paginator.num_pages)
 
+    from blog.services.listing import _batch_prefetch_post_data
+    pages.object_list = _batch_prefetch_post_data(
+        list(pages.object_list),
+        request=request,
+        as_dto=False,
+    )
+
     archive_url_name = "archive:month_archive" if month is not None else "archive:year_archive"
     archive_url_args = (year, month) if month is not None else (year,)
     results_api_name = (
@@ -88,7 +96,7 @@ def get_archive_listing_context(*, year: int, month: int | None, query_params):
         ),
         "search_query": search_query,
         "total_count": paginator.count,
-        "blog_tag_index_page": BlogTagIndexPage.objects.live().public().first(),
+        "blog_tag_index_page": _get_cached_tag_index_page(),
     }
 
 

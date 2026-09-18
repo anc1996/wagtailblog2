@@ -1,4 +1,6 @@
-﻿"""分类列表查询预算测试 (Listing Query Budget Tests).
+from archive.services.listing import get_archive_listing_context
+from blog.views import get_author_posts_context
+"""分类列表查询预算测试 (Listing Query Budget Tests).
 
 严格核验：
 1. 20 篇真实文章在冷路径下的业务 SQL 预算 (<= 10 次)；
@@ -305,6 +307,68 @@ class ListingQueryBudgetTests(TestCase):
                 res_blog = build_listing(request, self.index_page, {})
             self.assertLessEqual(len(ctx_blog.captured_queries), 10)
             self.assertEqual(res_blog.total_results, 20)
+
+    def test_archive_listing_context_stays_within_sql_budget(self):
+        """验证归档页面在预取装配下的 SQL 查询预算 (<= 10 次)，彻底消除 N+1."""
+        today = timezone.localdate()
+        request = self.factory.get(f"/zh-hans/archive/year/{today.year}/month/{today.month}/")
+
+        with CaptureQueriesContext(connection) as ctx:
+            context = get_archive_listing_context(year=today.year, month=today.month, query_params={})
+            html = render_to_string("archive/partials/_archive_results.html", context, request=request)
+
+        query_count = len(ctx.captured_queries)
+        self.assertLessEqual(
+            query_count,
+            10,
+            f"归档页完整渲染业务 SQL 超出预算: 实际 {query_count} 次，预算 <= 10 次",
+        )
+        self.assertEqual(context["total_count"], 20)
+        self.assertIn("公文测试文章-20", html)
+
+        # 验证循环访问 post 预取属性时 0 额外 SQL
+        with CaptureQueriesContext(connection) as sub_ctx:
+            for post in context["pages"]:
+                _ = post.get_view_count()
+                _ = post.get_reactions()
+                _ = list(post.tags.all())
+                _ = post.url
+        self.assertEqual(
+            len(sub_ctx.captured_queries),
+            0,
+            "遍历归档页 post 属性时产生意外 SQL 查询，N+1 消除不彻底！",
+        )
+
+    def test_author_posts_context_stays_within_sql_budget(self):
+        """验证作者专栏页在预取装配下的 SQL 查询预算 (<= 10 次)，彻底消除 N+1."""
+        request = self.factory.get(f"/zh-hans/authors/{self.author1.pk}/")
+
+        with CaptureQueriesContext(connection) as ctx:
+            context = get_author_posts_context(author=self.author1, query_params={})
+            fragment_context = {"author": self.author1, **context}
+            html = render_to_string("blog/partials/_author_post_results.html", fragment_context, request=request)
+
+        query_count = len(ctx.captured_queries)
+        self.assertLessEqual(
+            query_count,
+            10,
+            f"作者页完整渲染业务 SQL 超出预算: 实际 {query_count} 次，预算 <= 10 次",
+        )
+        self.assertEqual(context["total_posts"], 10)
+        self.assertIn(self.author1.name, html)
+
+        # 验证循环访问 post 预取属性时 0 额外 SQL
+        with CaptureQueriesContext(connection) as sub_ctx:
+            for post in context["blog_posts"]:
+                _ = post.get_view_count()
+                _ = post.get_reactions()
+                _ = list(post.tags.all())
+                _ = post.url
+        self.assertEqual(
+            len(sub_ctx.captured_queries),
+            0,
+            "遍历作者页 post 属性时产生意外 SQL 查询，N+1 消除不彻底！",
+        )
     @classmethod
     def tearDownClass(cls):
         if getattr(cls, "_orig_root_page", None):

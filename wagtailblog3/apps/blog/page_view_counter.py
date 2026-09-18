@@ -70,81 +70,119 @@ class PageViewCounter:
         return apps.get_model("blog", name)
 
     def record(self, request) -> bool:
-        """在成功响应之后写入；分析故障只能降级为日志，绝不能中断读者访问。"""
+        """在成功响应之后写入；分析故障只能降级为日志，绝不能中断读者访问。
 
+        采用 Fast-Path 原子更新优先策略：
+        对于已存在记录直接执行 UPDATE 操作，消除并发保存点 (SAVEPOINT) 与嵌套事务开销；
+        仅在当日首次访问（影响行数为 0）时回退到创建逻辑。
+        """
         PageView = self._model("PageView")
         PageViewCount = self._model("PageViewCount")
         Traffic = self._model("PageTrafficSourceDaily")
         now = timezone.now()
         key = visitor_key_for_request(request, self.today)
         source_category, referrer_host = source_for_request(request)
-        user = request.user if request.user.is_authenticated else None
+        user = request.user if getattr(request, "user", None) and request.user.is_authenticated else None
 
         try:
-            with transaction.atomic():
+            # 1. PageView 明细记录：先尝试原子更新已有访客的访问计数 (Fast-Path)
+            rows_updated = PageView.objects.filter(
+                page_id=self.page_id,
+                date=self.today,
+                visitor_key=key,
+            ).update(
+                view_count=F("view_count") + 1,
+                last_viewed_at=now,
+            )
+
+            if rows_updated > 0:
+                created = False
+            else:
+                # 当天该访客首访 (Slow-Path)，尝试插入新记录；使用局部 atomic 隔离并发唯一约束冲突
                 try:
                     with transaction.atomic():
-                        page_view, created = PageView.objects.get_or_create(
+                        PageView.objects.create(
                             page_id=self.page_id,
                             date=self.today,
                             visitor_key=key,
-                            defaults={
-                                "user": user,
-                                "ip_address": get_client_ip(request),
-                                "user_agent": request.META.get("HTTP_USER_AGENT", "")[:255],
-                                "view_count": 1,
-                                "first_viewed_at": now,
-                                "last_viewed_at": now,
-                                "source_category": source_category,
-                                "referrer_host": referrer_host,
-                            },
+                            user=user,
+                            ip_address=get_client_ip(request),
+                            user_agent=request.META.get("HTTP_USER_AGENT", "")[:255],
+                            view_count=1,
+                            first_viewed_at=now,
+                            last_viewed_at=now,
+                            source_category=source_category,
+                            referrer_host=referrer_host,
                         )
+                        created = True
                 except IntegrityError:
-                    # 唯一约束处理两个并发首访，第二个事务读取已写入的审计行。
-                    page_view = PageView.objects.get(
-                        page_id=self.page_id, date=self.today, visitor_key=key
-                    )
-                    created = False
-
-                if not created:
-                    PageView.objects.filter(pk=page_view.pk).update(
+                    # 并发首访写入冲突，回退为原子自增
+                    PageView.objects.filter(
+                        page_id=self.page_id,
+                        date=self.today,
+                        visitor_key=key,
+                    ).update(
                         view_count=F("view_count") + 1,
                         last_viewed_at=now,
                     )
+                    created = False
 
+            # 2. PageViewCount 每日聚合：先尝试原子更新 (Fast-Path)
+            update_fields = {"view_count_v2": F("view_count_v2") + 1}
+            if created:
+                update_fields["unique_visitor_count_v2"] = F("unique_visitor_count_v2") + 1
+
+            count_rows_updated = PageViewCount.objects.filter(
+                page_id=self.page_id,
+                date=self.today,
+            ).update(**update_fields)
+
+            if count_rows_updated == 0:
+                # 当天该文章首个聚合行，尝试插入
                 try:
                     with transaction.atomic():
-                        aggregate, _ = PageViewCount.objects.get_or_create(
+                        PageViewCount.objects.create(
                             page_id=self.page_id,
                             date=self.today,
-                            defaults={"v2_started_at": now},
+                            v2_started_at=now,
+                            view_count_v2=1,
+                            unique_visitor_count_v2=1 if created else 0,
                         )
                 except IntegrityError:
-                    aggregate = PageViewCount.objects.get(
-                        page_id=self.page_id, date=self.today
-                    )
-                update = {"view_count_v2": F("view_count_v2") + 1}
-                if created:
-                    update["unique_visitor_count_v2"] = F("unique_visitor_count_v2") + 1
-                PageViewCount.objects.filter(pk=aggregate.pk).update(**update)
+                    PageViewCount.objects.filter(
+                        page_id=self.page_id,
+                        date=self.today,
+                    ).update(**update_fields)
 
+            # 3. PageTrafficSourceDaily 来源聚合：先尝试原子更新 (Fast-Path)
+            traffic_update = {"view_count": F("view_count") + 1}
+            if created:
+                traffic_update["unique_visitor_count"] = F("unique_visitor_count") + 1
+
+            traffic_rows_updated = Traffic.objects.filter(
+                page_id=self.page_id,
+                date=self.today,
+                source_category=source_category,
+            ).update(**traffic_update)
+
+            if traffic_rows_updated == 0:
+                # 当天该来源首访，尝试插入
                 try:
                     with transaction.atomic():
-                        traffic, _ = Traffic.objects.get_or_create(
+                        Traffic.objects.create(
                             page_id=self.page_id,
                             date=self.today,
                             source_category=source_category,
+                            view_count=1,
+                            unique_visitor_count=1 if created else 0,
                         )
                 except IntegrityError:
-                    traffic = Traffic.objects.get(
+                    Traffic.objects.filter(
                         page_id=self.page_id,
                         date=self.today,
                         source_category=source_category,
-                    )
-                traffic_update = {"view_count": F("view_count") + 1}
-                if created:
-                    traffic_update["unique_visitor_count"] = F("unique_visitor_count") + 1
-                Traffic.objects.filter(pk=traffic.pk).update(**traffic_update)
+                    ).update(**traffic_update)
+
             return created
         except Exception:
             logger.warning("page_view_record_failed page_id=%s", self.page_id, exc_info=True)

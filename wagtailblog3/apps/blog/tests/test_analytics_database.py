@@ -1,3 +1,5 @@
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 """内容分析的数据库聚合、幂等和阈值测试。"""
 
 import json
@@ -46,6 +48,28 @@ class AnalyticsDatabaseTests(TestCase):
         request.user = AnonymousUser()
         return request
 
+
+    def test_page_view_counter_fast_path_executes_zero_savepoints_and_three_updates(self):
+        """验证当日重复访问触发 Fast-Path 原子更新，0 保存点 (SAVEPOINT)，仅 3 次直接 UPDATE."""
+        counter = PageViewCounter(self.page.pk)
+        req = self.request()
+        # 首次访问，创建记录
+        self.assertTrue(counter.record(req))
+
+        # 二次访问：Fast-Path
+        with CaptureQueriesContext(connection) as ctx:
+            created = counter.record(req)
+
+        self.assertFalse(created)
+        queries = [q["sql"].upper() for q in ctx.captured_queries]
+
+        # 严格验证无 SAVEPOINT
+        savepoints = [q for q in queries if "SAVEPOINT" in q]
+        self.assertEqual(savepoints, [], "Fast-Path 路径产生了意外的 SAVEPOINT 事务开销！")
+
+        # 严格验证仅有 UPDATE 操作
+        update_queries = [q for q in queries if q.startswith("UPDATE")]
+        self.assertEqual(len(update_queries), 3, f"Fast-Path 必须且仅能执行 3 次原子 UPDATE: 实际 {len(update_queries)}")
     def test_page_view_counter_separates_views_and_unique_visitors(self):
         counter = PageViewCounter(self.page.pk)
         self.assertTrue(counter.record(self.request()))

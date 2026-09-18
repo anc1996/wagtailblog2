@@ -70,6 +70,8 @@ DATABASES = {
 		'PASSWORD': os.environ.get('MYSQL_PASSWORD', ''),
 		'HOST': os.environ.get('MYSQL_HOST', SERVICE_HOST),
 		'PORT': os.environ.get('MYSQL_PORT', '3306'),
+		'CONN_MAX_AGE': _env_int('MYSQL_CONN_MAX_AGE', 60),
+		'CONN_HEALTH_CHECKS': _env_bool('MYSQL_CONN_HEALTH_CHECKS', True),
 		'OPTIONS': {
 			'charset': 'utf8mb4',
 			'collation': 'utf8mb4_general_ci',

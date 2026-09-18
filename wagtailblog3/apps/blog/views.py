@@ -2,7 +2,7 @@ from django.conf import settings
 # 博客应用的接口和作者视图
 from urllib.parse import urlencode, urlsplit
 
-from django.http import JsonResponse
+from django.http import HttpRequest, JsonResponse
 from django.template.loader import render_to_string
 from django.urls import reverse
 from wagtail.models import Page
@@ -448,7 +448,7 @@ def tag_index_results_api(request, pk):
 	return response
 
 
-def get_author_posts_context(*, author, query_params):
+def get_author_posts_context(*, author, query_params, request: HttpRequest | None = None):
 	"""Build the public, paginated author-post context used by HTML and JSON views."""
 	search_query = (query_params.get('q') or '').strip()
 	all_posts = (
@@ -465,6 +465,13 @@ def get_author_posts_context(*, author, query_params):
 
 	paginator = Paginator(posts, AUTHOR_POSTS_PER_PAGE)
 	page_obj = paginator.get_page(query_params.get('page'))
+
+	from blog.services.listing import _batch_prefetch_post_data
+	page_obj.object_list = _batch_prefetch_post_data(
+		list(page_obj.object_list),
+		request=request,
+		as_dto=False,
+	)
 
 	return {
 		'blog_posts': page_obj.object_list,

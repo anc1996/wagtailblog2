@@ -134,6 +134,7 @@ CORS_ALLOWED_ORIGIN_REGEXES = [
     r"^https://www\.qstheory\.cn$",
     r"^https?://theory\.people\.com\.cn$",
     r"^https://www\.12371\.cn$",
+    r"^https?://news\.12371\.cn$",
     r"^https?://opinion\.people\.com\.cn$",
     r"^https?://finance\.people\.com\.cn$",
     r"^https?://society\.people\.com\.cn$",

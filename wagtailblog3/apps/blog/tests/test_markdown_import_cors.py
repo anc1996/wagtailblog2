@@ -37,6 +37,8 @@ class MarkdownImportCorsTests(SimpleTestCase):
             "http://theory.people.com.cn",
             "https://theory.people.com.cn",
             "https://www.12371.cn",
+            "https://news.12371.cn",
+            "http://news.12371.cn",
             "http://opinion.people.com.cn",
             "https://finance.people.com.cn",
             "http://society.people.com.cn",
@@ -183,11 +185,13 @@ class MarkdownImportCorsTests(SimpleTestCase):
             "// @match        *://www.qstheory.cn/*",
             "// @match        *://theory.people.com.cn/*",
             "// @match        *://www.12371.cn/*",
+            "// @match        *://news.12371.cn/*",
         )
         expected_interfaces = (
             '{ "host": "www.qstheory.cn", "el": ".highlight", "cut_str": "" }',
             '{ "host": "theory.people.com.cn", "el": "#rm_txt_zw", "cut_str": " --" }',
             '{ "host": "www.12371.cn", "el": "#font_area", "cut_str": "_" }',
+            '{ "host": "news.12371.cn", "el": "#font_area", "cut_str": "_" }',
         )
 
         for metadata in expected_matches:
@@ -197,6 +201,7 @@ class MarkdownImportCorsTests(SimpleTestCase):
         self.assertNotIn('{ "host": "www.qstheory.cn", "el": "body"', source)
         self.assertNotIn('{ "host": "theory.people.com.cn", "el": "body"', source)
         self.assertNotIn('{ "host": "www.12371.cn", "el": "body"', source)
+        self.assertNotIn('{ "host": "news.12371.cn", "el": "body"', source)
 
     def test_userscript_supports_people_and_media_article_containers(self):
         script_path = Path(__file__).resolve().parents[3] / "static/vendor/Script/downlaod_markdown.js"

@@ -31,6 +31,7 @@
 // @match        *://www.qstheory.cn/*
 // @match        *://theory.people.com.cn/*
 // @match        *://www.12371.cn/*
+// @match        *://news.12371.cn/*
 // @match        *://opinion.people.com.cn/*
 // @match        *://finance.people.com.cn/*
 // @match        *://society.people.com.cn/*
@@ -1237,6 +1238,7 @@ var TurndownService = (function () {
         { "host": "www.qstheory.cn", "el": ".highlight", "cut_str": "" },
         { "host": "theory.people.com.cn", "el": "#rm_txt_zw", "cut_str": " --" },
         { "host": "www.12371.cn", "el": "#font_area", "cut_str": "_" },
+        { "host": "news.12371.cn", "el": "#font_area", "cut_str": "_" },
         { "host": "opinion.people.com.cn", "el": "#rm_txt_zw", "fallback_els": [".rm_txt_con.cf"], "cut_str": " --" },
         { "host": "finance.people.com.cn", "el": "#rm_txt_zw", "cut_str": " --" },
         { "host": "society.people.com.cn", "el": "#rm_txt_zw", "cut_str": " --" },

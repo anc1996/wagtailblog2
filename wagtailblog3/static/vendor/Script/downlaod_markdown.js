@@ -44,6 +44,7 @@
 // @match        *://www.banyuetan.org/*
 // @match        *://www.dangjian.cn/*
 // @match        *://jhsjk.people.cn/article/*
+// @match        *://www.gov.cn/*
 // @license      Apache-2.0
 // @icon         data:image/svg+xml,%3Csvg t='1691941995383' class='icon' viewBox='0 0 1024 1024' version='1.1' xmlns='http://www.w3.org/2000/svg' p-id='1514' width='200' height='200'%3E%3Cpath d='M320 864 320 0l480 0 0 192 0 32L1024 224l0 640L320 864zM928 320l-512 0 0 32 512 0L928 320zM928 448l-512 0 0 32 512 0L928 448zM928 576l-512 0 0 32 512 0L928 576zM928 704l-512 0 0 32 512 0L928 704zM832 0l19.2 0L1024 160 1024 192l-192 0L832 0zM288 896l320 0L704 896l0 128L0 1024 0 160l288 0 0 320-192 0L96 512l192 0 0 96-192 0L96 640l192 0 0 96-192 0L96 768l192 0 0 96-192 0L96 896 288 896z' p-id='1515'%3E%3C/path%3E%3C/svg%3E
 // @grant        GM_getValue
@@ -1250,7 +1251,8 @@ var TurndownService = (function () {
         { "host": "www.rmlt.com.cn", "el": ".article-content", "cut_str": "_" },
         { "host": "www.banyuetan.org", "el": "#detail_content", "cut_str": "-半月谈" },
         { "host": "www.dangjian.cn", "el": "#tex.article", "cut_str": "" },
-        { "host": "jhsjk.people.cn", "el": ".d2txt_con.clearfix", "title_el": ".d2txt > h1", "cut_str": "" }
+        { "host": "jhsjk.people.cn", "el": ".d2txt_con.clearfix", "title_el": ".d2txt > h1", "cut_str": "" },
+        { "host": "www.gov.cn", "el": "#UCAP-CONTENT", "fallback_els": [".pages_content"], "title_el": "#ti", "cut_str": "_" }
 
     ]
 

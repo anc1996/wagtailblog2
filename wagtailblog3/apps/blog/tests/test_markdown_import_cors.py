@@ -50,6 +50,8 @@ class MarkdownImportCorsTests(SimpleTestCase):
             "https://www.rmlt.com.cn",
             "http://www.banyuetan.org",
             "http://www.dangjian.cn",
+            "https://www.gov.cn",
+            "http://www.gov.cn",
         )
 
         for origin in origins:
@@ -220,6 +222,7 @@ class MarkdownImportCorsTests(SimpleTestCase):
             "// @match        *://www.banyuetan.org/*",
             "// @match        *://www.dangjian.cn/*",
             "// @match        *://jhsjk.people.cn/article/*",
+            "// @match        *://www.gov.cn/*",
         )
         expected_interfaces = (
             '{ "host": "opinion.people.com.cn", "el": "#rm_txt_zw", "fallback_els": [".rm_txt_con.cf"], "cut_str": " --" }',
@@ -234,6 +237,7 @@ class MarkdownImportCorsTests(SimpleTestCase):
             '{ "host": "www.banyuetan.org", "el": "#detail_content", "cut_str": "-半月谈" }',
             '{ "host": "www.dangjian.cn", "el": "#tex.article", "cut_str": "" }',
             '{ "host": "jhsjk.people.cn", "el": ".d2txt_con.clearfix", "title_el": ".d2txt > h1", "cut_str": "" }',
+            '{ "host": "www.gov.cn", "el": "#UCAP-CONTENT", "fallback_els": [".pages_content"], "title_el": "#ti", "cut_str": "_" }',
         )
 
         for metadata in expected_matches:
@@ -246,6 +250,7 @@ class MarkdownImportCorsTests(SimpleTestCase):
         self.assertIn(".rm_txt_con.cf", source)
         self.assertIn(".d2txt_con.clearfix", source)
         self.assertIn(".d2txt > h1", source)
+        self.assertNotIn('{ "host": "www.gov.cn", "el": "body"', source)
         self.assertNotIn("el: \"body\"", source)
 
     def test_jhsjk_people_origin_receives_limited_cors_headers(self):

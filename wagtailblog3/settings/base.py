@@ -149,6 +149,8 @@ CORS_ALLOWED_ORIGIN_REGEXES = [
     r"^https://jhsjk\.people\.cn$",
     r"^https?://www\.gov\.cn$",
     r"^https?://gov\.cn$",
+    r"^https?://(?:[a-z0-9-]+\.)?xinhuanet\.com$",
+    r"^https?://(?:[a-z0-9-]+\.)?news\.cn$",
 ]
 
 # 导入认证始终使用显式 Bearer，绝不允许跨源请求附带 Django Cookie。

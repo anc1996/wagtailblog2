@@ -52,6 +52,9 @@ class MarkdownImportCorsTests(SimpleTestCase):
             "http://www.dangjian.cn",
             "https://www.gov.cn",
             "http://www.gov.cn",
+            "https://www.xinhuanet.com",
+            "http://www.xinhuanet.com",
+            "https://news.cn",
         )
 
         for origin in origins:
@@ -163,7 +166,7 @@ class MarkdownImportCorsTests(SimpleTestCase):
         script_path = Path(__file__).resolve().parents[3] / "static/vendor/Script/downlaod_markdown.js"
         source = script_path.read_text(encoding="utf-8")
 
-        self.assertIn("// @version      0.3.20", source)
+        self.assertIn("// @version      0.3.21", source)
         self.assertIn("const blogImportVersion = '0.3.19';", source)
         self.assertIn("#zuihuitao-blog-import form{display:block!important}", source)
 
@@ -223,6 +226,9 @@ class MarkdownImportCorsTests(SimpleTestCase):
             "// @match        *://www.dangjian.cn/*",
             "// @match        *://jhsjk.people.cn/article/*",
             "// @match        *://www.gov.cn/*",
+            "// @match        *://www.xinhuanet.com/*",
+            "// @match        *://*.xinhuanet.com/*",
+            "// @match        *://*.news.cn/*",
         )
         expected_interfaces = (
             '{ "host": "opinion.people.com.cn", "el": "#rm_txt_zw", "fallback_els": [".show_text", ".rm_txt_con.cf"], "title_el": "h1", "cut_str": "--" }',
@@ -238,6 +244,8 @@ class MarkdownImportCorsTests(SimpleTestCase):
             '{ "host": "www.dangjian.cn", "el": "#tex.article", "cut_str": "" }',
             '{ "host": "jhsjk.people.cn", "el": ".d2txt_con.clearfix", "title_el": ".d2txt > h1", "cut_str": "" }',
             '{ "host": "www.gov.cn", "el": "#UCAP-CONTENT", "fallback_els": [".pages_content"], "title_el": "#ti", "cut_str": "_" }',
+            '{ "host": "xinhuanet.com", "el": "#detailContent", "fallback_els": ["#detail", "#content", ".main-content"], "title_el": "h1", "cut_str": "-新华网" }',
+            '{ "host": "news.cn", "el": "#detailContent", "fallback_els": ["#detail", "#content"], "title_el": "h1", "cut_str": "-新华网" }',
         )
 
         for metadata in expected_matches:
@@ -324,3 +332,16 @@ class MarkdownImportCorsTests(SimpleTestCase):
         self.assertIn("function closeComboboxMenu()", app_source)
         self.assertIn("function toggleComboboxMenu()", app_source)
         self.assertIn("comboboxInput.addEventListener('input'", app_source)
+
+    def test_userscript_supports_variant_profiles_and_gm_fallback(self):
+        script_path = Path(__file__).resolve().parents[3] / "static/vendor/Script/downlaod_markdown.js"
+        source = script_path.read_text(encoding="utf-8")
+
+        self.assertIn("const VariantProfiles = {", source)
+        self.assertIn('"theory.people.com.cn": [', source)
+        self.assertIn('"opinion.people.com.cn": [', source)
+        self.assertIn('"xinhuanet.com": [', source)
+        self.assertIn('"news.cn": [', source)
+        self.assertIn("function requestBlogGm(url, options = {}, token)", source)
+        self.assertIn("return await requestBlogGm(target.url, options, token);", source)
+        self.assertIn("Candidate Variant Profiles", source)

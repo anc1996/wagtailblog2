@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         下载文章为 Markdown 并预检导入博客
 // @namespace    https://wagtailblog.local/userscript
-// @version      0.3.20
+// @version      0.3.21
 // @description  将支持网站的正文转换为 Markdown，可预检后创建未发布博客草稿；请尊重原文版权。
 // @author       waahah
 // @match        *://blog.csdn.net/*
@@ -45,6 +45,9 @@
 // @match        *://www.dangjian.cn/*
 // @match        *://jhsjk.people.cn/article/*
 // @match        *://www.gov.cn/*
+// @match        *://www.xinhuanet.com/*
+// @match        *://*.xinhuanet.com/*
+// @match        *://*.news.cn/*
 // @license      Apache-2.0
 // @icon         data:image/svg+xml,%3Csvg t='1691941995383' class='icon' viewBox='0 0 1024 1024' version='1.1' xmlns='http://www.w3.org/2000/svg' p-id='1514' width='200' height='200'%3E%3Cpath d='M320 864 320 0l480 0 0 192 0 32L1024 224l0 640L320 864zM928 320l-512 0 0 32 512 0L928 320zM928 448l-512 0 0 32 512 0L928 448zM928 576l-512 0 0 32 512 0L928 576zM928 704l-512 0 0 32 512 0L928 704zM832 0l19.2 0L1024 160 1024 192l-192 0L832 0zM288 896l320 0L704 896l0 128L0 1024 0 160l288 0 0 320-192 0L96 512l192 0 0 96-192 0L96 640l192 0 0 96-192 0L96 768l192 0 0 96-192 0L96 896 288 896z' p-id='1515'%3E%3C/path%3E%3C/svg%3E
 // @grant        GM_getValue
@@ -1252,9 +1255,36 @@ var TurndownService = (function () {
         { "host": "www.banyuetan.org", "el": "#detail_content", "cut_str": "-半月谈" },
         { "host": "www.dangjian.cn", "el": "#tex.article", "cut_str": "" },
         { "host": "jhsjk.people.cn", "el": ".d2txt_con.clearfix", "title_el": ".d2txt > h1", "cut_str": "" },
-        { "host": "www.gov.cn", "el": "#UCAP-CONTENT", "fallback_els": [".pages_content"], "title_el": "#ti", "cut_str": "_" }
+        { "host": "www.gov.cn", "el": "#UCAP-CONTENT", "fallback_els": [".pages_content"], "title_el": "#ti", "cut_str": "_" },
+        { "host": "xinhuanet.com", "el": "#detailContent", "fallback_els": ["#detail", "#content", ".main-content"], "title_el": "h1", "cut_str": "-新华网" },
+        { "host": "news.cn", "el": "#detailContent", "fallback_els": ["#detail", "#content"], "title_el": "h1", "cut_str": "-新华网" }
+    ];
 
-    ]
+    // 同一域名多版式套件配置 (Variant Profiles)
+    // 解决同一域名下不同频道或不同年代文章正文容器、标题节点与切割符成套联动识别问题
+    const VariantProfiles = {
+        "theory.people.com.cn": [
+            { "name": "理论专栏新版", "el": ".show_text", "title_el": "h1", "cut_str": "--" },
+            { "name": "传统正文版", "el": "#rm_txt_zw", "title_el": "h1", "cut_str": " --" },
+            { "name": "历史旧版", "el": ".rm_txt_con.cf", "title_el": "h1", "cut_str": " --" }
+        ],
+        "opinion.people.com.cn": [
+            { "name": "观点专栏新版", "el": ".show_text", "title_el": "h1", "cut_str": "--" },
+            { "name": "传统正文版", "el": "#rm_txt_zw", "title_el": "h1", "cut_str": " --" },
+            { "name": "历史旧版", "el": ".rm_txt_con.cf", "title_el": "h1", "cut_str": " --" }
+        ],
+        "xinhuanet.com": [
+            { "name": "新华网标准正文", "el": "#detailContent", "title_el": "h1", "cut_str": "-新华网" },
+            { "name": "新华网历史详情", "el": "#detail", "title_el": "h1", "cut_str": "-新华网" },
+            { "name": "新华网宽屏主内容", "el": "#content", "title_el": "h1", "cut_str": "-新华网" },
+            { "name": "新华网专栏版", "el": ".main-content", "title_el": ".title", "cut_str": "-新华网" }
+        ],
+        "news.cn": [
+            { "name": "新华网标准正文", "el": "#detailContent", "title_el": "h1", "cut_str": "-新华网" },
+            { "name": "新华网历史详情", "el": "#detail", "title_el": "h1", "cut_str": "-新华网" },
+            { "name": "新华网宽屏主内容", "el": "#content", "title_el": "h1", "cut_str": "-新华网" }
+        ]
+    };
 
     {
         const blogConfigKey = 'zuihuitao.blogImport.v1';
@@ -1344,6 +1374,48 @@ var TurndownService = (function () {
             });
         }
 
+                function requestBlogGm(url, options = {}, token) {
+            return new Promise((resolve, reject) => {
+                if (typeof GM_xmlhttpRequest !== 'function') {
+                    return reject(new Error('博客接口跨域请求失败，且油猴特权通道不可用'));
+                }
+                const headers = {
+                    Accept: 'application/json',
+                    ...(options.headers || {}),
+                    Authorization: `Bearer ${token}`,
+                };
+                if (options.data && !headers['Content-Type']) {
+                    headers['Content-Type'] = 'application/json';
+                }
+                GM_xmlhttpRequest({
+                    method: options.method || 'GET',
+                    url,
+                    headers,
+                    data: options.data,
+                    timeout: 15000,
+                    withCredentials: false,
+                    onload: (res) => {
+                        let body;
+                        try {
+                            body = JSON.parse(res.responseText);
+                        } catch {
+                            return reject(new Error('博客接口返回了非 JSON 响应'));
+                        }
+                        if (!body || typeof body !== 'object' || Array.isArray(body) || !Object.keys(body).length) {
+                            return reject(new Error('博客接口未返回可解析的 JSON 对象'));
+                        }
+                        if (res.status >= 200 && res.status < 300) {
+                            resolve(body);
+                        } else {
+                            reject(new Error(String(body?.code || `博客接口错误（HTTP ${res.status}）`)));
+                        }
+                    },
+                    onerror: () => reject(new Error('博客接口连接失败，请检查博客地址与网络状态')),
+                    ontimeout: () => reject(new Error('博客接口请求超时')),
+                });
+            });
+        }
+
         async function requestBlog(config, path, options = {}) {
             const target = blogApiUrl(config, path);
             const token = String(config.token || '').trim();
@@ -1375,7 +1447,14 @@ var TurndownService = (function () {
                 return body;
             } catch (error) {
                 if (error?.name === 'AbortError') throw new Error('博客接口请求超时');
-                if (error instanceof TypeError) throw new Error('博客接口跨域请求失败');
+                if (error instanceof TypeError) {
+                    // 当原生 fetch 因浏览器私有网络策略 (PNA) 或非安全上下文限制失败时，自动降级至油猴特权网络通道
+                    try {
+                        return await requestBlogGm(target.url, options, token);
+                    } catch (fallbackError) {
+                        throw fallbackError;
+                    }
+                }
                 throw error;
             } finally {
                 clearTimeout(timeout);
@@ -1420,16 +1499,78 @@ var TurndownService = (function () {
 
         function articleData() {
             const currentHost = location.host;
-            const match = InterfaceList.find((item) => currentHost.endsWith(item.host));
-            if (!match) throw new Error('当前站点暂不支持');
-            // 人民网旧模板没有 #rm_txt_zw，按已核验的正文容器顺序回退，避免退回整页抓取导航和页脚。
+            const matches = InterfaceList.filter((item) => currentHost.endsWith(item.host));
+            if (!matches.length) throw new Error('当前站点暂不支持');
+
+            // 展平当前域名的所有版式套件候选列表 (Candidate Variant Profiles)
+            // 支持同一域名多套件联动：正文容器、标题选择器与切割标识成套绑定，避免跨版式提取错位
+            const candidateProfiles = [];
+            for (const item of matches) {
+                const variants = (typeof VariantProfiles !== 'undefined' && VariantProfiles[item.host]) || item.variants;
+                if (Array.isArray(variants) && variants.length > 0) {
+                    for (const variant of variants) {
+                        candidateProfiles.push({
+                            host: item.host,
+                            el: variant.el,
+                            fallback_els: variant.fallback_els || [],
+                            title_el: variant.title_el || item.title_el,
+                            cut_str: variant.cut_str !== undefined ? variant.cut_str : item.cut_str,
+                            name: variant.name || 'variant',
+                        });
+                    }
+                }
+                // 默认通用套件
+                candidateProfiles.push({
+                    host: item.host,
+                    el: item.el,
+                    fallback_els: item.fallback_els || [],
+                    title_el: item.title_el,
+                    cut_str: item.cut_str,
+                    name: 'default',
+                });
+            }
+
+            // 智能成套识别：逐个探测哪个套件的正文容器在当前 DOM 中真实命中且包含有效文本
+            let match = null;
+            let element = null;
+
+            for (const profile of candidateProfiles) {
+                const selectors = [profile.el, ...(profile.fallback_els || [])].filter(Boolean);
+                for (const selector of selectors) {
+                    const candidateEl = document.querySelector(selector);
+                    if (!candidateEl) continue;
+                    // 有效性检测：排除空白占位 div 或隐形广告容器
+                    const text = (candidateEl.textContent || '').trim();
+                    if (text.length > 20) {
+                        match = profile;
+                        element = candidateEl;
+                        break;
+                    }
+                }
+                if (element) break;
+            }
+
+            // 若严格有效性检测未命中，则回退首个匹配的 DOM 节点
+            if (!element) {
+                for (const profile of candidateProfiles) {
+                    const selectors = [profile.el, ...(profile.fallback_els || [])].filter(Boolean);
+                    element = selectors.map((selector) => document.querySelector(selector)).find(Boolean);
+                    if (element) {
+                        match = profile;
+                        break;
+                    }
+                }
+            }
+
+            if (!element || !match) throw new Error('未找到正文容器，请刷新页面后重试');
+
+            // 声明当前命中套件的选择器清单并成套提取标题（严格联动当前命中版本的专属 title_el 与 cut_str）
             const selectors = [match.el, ...(match.fallback_els || [])].filter(Boolean);
-            const element = selectors.map((selector) => document.querySelector(selector)).find(Boolean);
-            if (!element) throw new Error('未找到正文容器，请刷新页面后重试');
             const titleElement = match.title_el ? document.querySelector(match.title_el) : null;
             const rawTitle = String(titleElement?.textContent || document.title || '').trim();
             const title = match.cut_str ? rawTitle.split(match.cut_str)[0].trim() : rawTitle;
             if (!title) throw new Error('页面标题为空');
+
             return { title, element, sourceUrl: location.href };
         }
 

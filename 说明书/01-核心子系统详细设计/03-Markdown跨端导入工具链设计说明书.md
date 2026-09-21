@@ -104,6 +104,23 @@
 
 ---
 
+### 4.3 浏览器油猴脚本同步与生产导出规范
+
+为了便于开发与编辑人员快速获取最新生产脚本，避免因复制旧版本导致“未找到正文容器”等误报，统一确立以下脚本同步与导出规范：
+
+1. **源码单一事实源**：
+   - 唯一修改与维护入口：`wagtailblog3/static/vendor/Script/downlaod_markdown.js`。
+2. **生产工具便捷导出**：
+   - 每次前端脚本改动、适配新站点或功能更新后，**必须同步导出一份最新副本至 `tools/downlaod_markdown.user.js`（及 `tools/downlaod_markdown.js`）**；
+   - 支持通过 `python tools/sync_production_userscript.py` 一键全量同步；
+   - 便于直接在本地 `tools/` 目录中查看、全选复制或直接拖拽至浏览器油猴扩展中完成更新。
+3. **生产环境发布闭环**：
+   - 生产代码部署更新后，必须执行 `python manage.py collectstatic --noinput`，确保发布至生产托管目录：
+     `wagtailblog3/staticfiles_collected/vendor/Script/downlaod_markdown.js`；
+   - 浏览器可通过生产直链：`http://192.168.20.2:6050/static/vendor/Script/downlaod_markdown.js` 快速校验与复制。
+
+---
+
 ## 5. 核心代码模块与落地清单
 
 | 模块类别 | 文件路径 | 核心职责 |
@@ -113,7 +130,10 @@
 | **媒体探测与下载** | `wagtailblog3/apps/blog/services/markdown_download_service.py` | 异步下载远程媒体资源、防盗链处理与 MinIO 入库 |
 | **REST 接口与鉴权** | `wagtailblog3/apps/blog/api/markdown_import.py` | 接收导入请求、AES-256-GCM 令牌校验与安全拦截 |
 | **令牌模型与后台** | `wagtailblog3/apps/blog/models.py`<br>`wagtailblog3/apps/blog/wagtail_hooks.py` | 定义 `MarkdownImportToken` 模型，提供 Snippet 复制/轮换交互 |
-| **浏览器油猴脚本源码** | `wagtailblog3/static/vendor/Script/downlaod_markdown.js` | 外部网页一键抓取、转换、搜索组合框选择目标页与直连上报前端脚本 |
+| **油猴脚本源码 (开发源)** | `wagtailblog3/static/vendor/Script/downlaod_markdown.js` | 外部网页一键抓取、转换、搜索组合框选择目标页与直连上报前端脚本单一事实源 |
+| **生产工具便捷导出副本** | `tools/downlaod_markdown.user.js`<br>`tools/downlaod_markdown.js` | 供开发与编辑人员直接从 `tools/` 复制覆盖油猴的最新生产版脚本 |
+| **生产静态收集目录** | `wagtailblog3/staticfiles_collected/vendor/Script/downlaod_markdown.js` | 生产服务器 Nginx 直链托管路径（`collectstatic` 产物） |
+| **生产脚本同步工具** | `tools/sync_production_userscript.py` | 一键将静态源码最新版同步至 `tools/` 副本目录 |
 | **测试环境脚本构建器** | `tools/build_userscript_blog_import_test.ps1` | 自动注入测试环境配置与探针并打包生成 `.user.js` 测试副本 |
 | **桌面客户端脚本** | `tools/client/markdown_importer_client.py` | 本地文件批量扫描与上传的客户端实现 |
 

@@ -72,3 +72,8 @@ equirements.txt）、MySQL 8.4、MongoDB (pymongo 4.11)、Redis 5.2、Elasticsea
 - **指挥官 Sol (gpt-5.6-sol)**：核对生产提交 SHA、制定原子发布指令清单与回滚预案；
 - **执行官 Gemini (gemini-3.8-flash-high)**：严格执行 Sol 下达的单步终端命令，如实回传退出码与日志；
 - **红线约束**：未经对话人（用户）明确授权，严禁擅自执行 Git commit/push 或在生产环境触发服务更新。
+
+### 4.4 Markdown 导入油猴脚本维护与导出规范
+- **开发源路径**：`wagtailblog3/static/vendor/Script/downlaod_markdown.js`；
+- **生产工具导出**：每次更新脚本必须同步至 `tools/downlaod_markdown.user.js`（及 `tools/downlaod_markdown.js`），支持 `python tools/sync_production_userscript.py`；
+- **生产托管路径**：`wagtailblog3/staticfiles_collected/vendor/Script/downlaod_markdown.js`（执行 `collectstatic` 产物）。

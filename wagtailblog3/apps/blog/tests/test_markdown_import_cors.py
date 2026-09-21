@@ -163,7 +163,7 @@ class MarkdownImportCorsTests(SimpleTestCase):
         script_path = Path(__file__).resolve().parents[3] / "static/vendor/Script/downlaod_markdown.js"
         source = script_path.read_text(encoding="utf-8")
 
-        self.assertIn("// @version      0.3.19", source)
+        self.assertIn("// @version      0.3.20", source)
         self.assertIn("const blogImportVersion = '0.3.19';", source)
         self.assertIn("#zuihuitao-blog-import form{display:block!important}", source)
 
@@ -191,7 +191,7 @@ class MarkdownImportCorsTests(SimpleTestCase):
         )
         expected_interfaces = (
             '{ "host": "www.qstheory.cn", "el": ".highlight", "cut_str": "" }',
-            '{ "host": "theory.people.com.cn", "el": "#rm_txt_zw", "cut_str": " --" }',
+            '{ "host": "theory.people.com.cn", "el": "#rm_txt_zw", "fallback_els": [".show_text", ".rm_txt_con.cf"], "title_el": "h1", "cut_str": "--" }',
             '{ "host": "www.12371.cn", "el": "#font_area", "cut_str": "_" }',
             '{ "host": "news.12371.cn", "el": "#font_area", "cut_str": "_" }',
         )
@@ -225,11 +225,11 @@ class MarkdownImportCorsTests(SimpleTestCase):
             "// @match        *://www.gov.cn/*",
         )
         expected_interfaces = (
-            '{ "host": "opinion.people.com.cn", "el": "#rm_txt_zw", "fallback_els": [".rm_txt_con.cf"], "cut_str": " --" }',
-            '{ "host": "finance.people.com.cn", "el": "#rm_txt_zw", "cut_str": " --" }',
-            '{ "host": "society.people.com.cn", "el": "#rm_txt_zw", "cut_str": " --" }',
-            '{ "host": "cpc.people.com.cn", "el": "#rm_txt_zw", "cut_str": " --" }',
-            '{ "host": "politics.people.com.cn", "el": "#rm_txt_zw", "cut_str": " --" }',
+            '{ "host": "opinion.people.com.cn", "el": "#rm_txt_zw", "fallback_els": [".show_text", ".rm_txt_con.cf"], "title_el": "h1", "cut_str": "--" }',
+            '{ "host": "finance.people.com.cn", "el": "#rm_txt_zw", "fallback_els": [".show_text", ".rm_txt_con.cf"], "title_el": "h1", "cut_str": "--" }',
+            '{ "host": "society.people.com.cn", "el": "#rm_txt_zw", "fallback_els": [".show_text", ".rm_txt_con.cf"], "title_el": "h1", "cut_str": "--" }',
+            '{ "host": "cpc.people.com.cn", "el": "#rm_txt_zw", "fallback_els": [".show_text", ".rm_txt_con.cf"], "title_el": "h1", "cut_str": "--" }',
+            '{ "host": "politics.people.com.cn", "el": "#rm_txt_zw", "fallback_els": [".show_text", ".rm_txt_con.cf"], "title_el": "h1", "cut_str": "--" }',
             '{ "host": "www.qizhiwang.org.cn", "el": ".w1200.flag-text-con.clearfix", "cut_str": "--旗帜网" }',
             '{ "host": "tougao.12371.cn", "el": "#font_area", "cut_str": "_" }',
             '{ "host": "www.xuexi.cn", "el": ".render-detail-article-content", "title_el": ".render-detail-title", "cut_str": "" }',

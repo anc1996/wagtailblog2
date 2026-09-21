@@ -79,6 +79,11 @@
 - **加载项目专属技能**：关于 Wagtail 8.0 双存储详细契约、Elasticsearch Outbox 异步索引、WSL2 定向测试命令表、Playwright 跨端测试流程及生产 4 大应用服务 Maker-Checker 分步部署，请直接加载项目专属技能：
   - **wagtailblog-dev-workflow**（位于 .codex/skills/wagtailblog-dev-workflow/）。
 
+- **Markdown 导入油猴脚本维护与发布同步流程**：
+  1. **源码单一事实源**：`wagtailblog3/static/vendor/Script/downlaod_markdown.js`；
+  2. **生产工具便捷导出**：任何涉及油猴脚本的更新或站点适配，**必须同步输出一份最新脚本到 `tools/downlaod_markdown.user.js`**，便于用户直接从 `tools/` 复制使用；
+  3. **生产收集与服务更新**：生产发布必须执行 `collectstatic` 将最新脚本收集至 `wagtailblog3/staticfiles_collected/vendor/Script/downlaod_markdown.js` 并重启应用服务。
+
 ## 8. 说明书交付与文档生命周期规范（生产落地后转实现方案）
 
 - **生命周期流转机制**：

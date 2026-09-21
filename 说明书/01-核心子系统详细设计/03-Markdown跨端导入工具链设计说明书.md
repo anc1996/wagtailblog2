@@ -85,11 +85,15 @@
 
 ### 4.1 方式一：浏览器用户脚本直连导入（Tampermonkey / 脚本猫）
 
-- **应用场景**：编辑在浏览掘金、知乎专栏、微信公众号或开源文档时，点击浏览器右上角脚本按钮，直接抓取当前网页正文并转换。
+- **应用场景**：编辑在浏览掘金、知乎专栏、微信公众号、主流党政党建新闻（如求是网 `qstheory.cn`、人民网 `people.com.cn`、共产党员网 `12371.cn` / `news.12371.cn`）或开源文档时，点击浏览器右下角浮动按钮，直接抓取当前网页正文并转换。
 - **技术实现**：
-  - 基于油猴脚本自动提取当前 DOM 主体文本与元信息。
-  - 直连本站 `/blog/api/markdown-import/` 端点完成校验并推送。
-  - 导入成功后，前端弹窗直接附带该页面在 Wagtail 后台的直接编辑链接（`/admin/pages/<page_id>/edit/`），点击即可一键跳转校对。
+  - **站点容器精准提取**：针对各大站点注册专属选择器规则（如共产党员网 `#font_area`），自动提取正文 DOM 主体与元数据，剔除无用边框、版式与脚本干扰。
+  - **目标索引页搜索组合框（Combobox）**：针对全站拥有 50+ 博客索引页的分类场景，UI 重构为支持即时搜索与全量点选的组合框控件：
+    - **未搜索/点击时**：完整展开所有 50+ 博客索引页供滚轮浏览点选，并自动高亮且滚动至当前已选索引页；
+    - **输入搜索时**：按标题或 ID 即时模糊匹配，动态缩减下拉选项，支持回车一键选定首条；
+    - **底层协议兼容**：保持底层原生 `<select>` 状态与 `change` 响应不变，无缝保留草稿预检、同标题幂等防重与 Token 本地记忆能力。
+  - **直连接口与安全放行**：通过严格的 CORS 正则放行指定业务域名，直连本站 `/blog/api/markdown-import/` 端点完成校验并推送。
+  - **编辑流闭环**：导入成功后，前端弹窗直接附带该页面在 Wagtail 后台的直接编辑链接（`/admin/pages/<page_id>/edit/`），点击即可一键跳转校对。
 
 ### 4.2 方式二：Windows 客户端与 CLI 工具
 
@@ -109,7 +113,8 @@
 | **媒体探测与下载** | `wagtailblog3/apps/blog/services/markdown_download_service.py` | 异步下载远程媒体资源、防盗链处理与 MinIO 入库 |
 | **REST 接口与鉴权** | `wagtailblog3/apps/blog/api/markdown_import.py` | 接收导入请求、AES-256-GCM 令牌校验与安全拦截 |
 | **令牌模型与后台** | `wagtailblog3/apps/blog/models.py`<br>`wagtailblog3/apps/blog/wagtail_hooks.py` | 定义 `MarkdownImportToken` 模型，提供 Snippet 复制/轮换交互 |
-| **浏览器油猴脚本** | `tools/userscript/wagtail_markdown_importer.user.js` | 外部网页一键抓取、转换与直连上报的前端脚本 |
+| **浏览器油猴脚本源码** | `wagtailblog3/static/vendor/Script/downlaod_markdown.js` | 外部网页一键抓取、转换、搜索组合框选择目标页与直连上报前端脚本 |
+| **测试环境脚本构建器** | `tools/build_userscript_blog_import_test.ps1` | 自动注入测试环境配置与探针并打包生成 `.user.js` 测试副本 |
 | **桌面客户端脚本** | `tools/client/markdown_importer_client.py` | 本地文件批量扫描与上传的客户端实现 |
 
 ---

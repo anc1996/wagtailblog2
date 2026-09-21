@@ -303,3 +303,19 @@ class MarkdownImportCorsTests(SimpleTestCase):
         self.assertIn("'/blog/api/markdown-import/sessions/'", source)
         self.assertIn("/finalize/", source)
         self.assertIn("正在组装未发布草稿", source)
+
+    def test_userscript_renders_searchable_combobox_for_destinations(self):
+        script_path = Path(__file__).resolve().parents[3] / "static/vendor/Script/downlaod_markdown.js"
+        source = script_path.read_text(encoding="utf-8")
+        start = source.index("async function runModernApp()")
+        app_source = source[start:]
+
+        self.assertIn("className: 'destination-combobox'", app_source)
+        self.assertIn("className: 'destination-combobox-input'", app_source)
+        self.assertIn("className: 'destination-combobox-menu'", app_source)
+        self.assertIn("function syncComboboxFromDestination()", app_source)
+        self.assertIn("function renderComboboxMenu(filterKeyword = '')", app_source)
+        self.assertIn("function openComboboxMenu(filterKeyword = '')", app_source)
+        self.assertIn("function closeComboboxMenu()", app_source)
+        self.assertIn("function toggleComboboxMenu()", app_source)
+        self.assertIn("comboboxInput.addEventListener('input'", app_source)

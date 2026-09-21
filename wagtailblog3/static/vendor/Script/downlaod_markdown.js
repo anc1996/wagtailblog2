@@ -1542,7 +1542,7 @@ var TurndownService = (function () {
         async function runModernApp() {
             const root = createElement('div', { id: 'zuihuitao-blog-import', 'data-version': blogImportVersion }, document.body || document.documentElement);
             const style = createElement('style', {}, document.head || document.documentElement);
-            style.textContent = `#zuihuitao-blog-import{position:fixed;z-index:2147483647;right:16px;bottom:16px;font:14px system-ui,sans-serif}#zuihuitao-blog-import button{min-height:44px;padding:8px 14px;border:1px solid #334155;border-radius:6px;background:#0f172a;color:#fff;cursor:pointer}#zuihuitao-blog-import button:focus-visible{outline:3px solid #2563eb;outline-offset:2px}#zuihuitao-blog-import button:disabled{cursor:not-allowed;opacity:.5}#zuihuitao-blog-import .create-draft{background:#166534}#zuihuitao-blog-import dialog{width:min(560px,calc(100vw - 32px));max-height:90vh;border:1px solid #cbd5e1;border-radius:8px;padding:20px;color:#0f172a;overflow:auto}#zuihuitao-blog-import dialog::backdrop{background:rgba(15,23,42,.45)}#zuihuitao-blog-import form{display:block!important}#zuihuitao-blog-import label{display:block;margin:12px 0 4px;font-weight:600}#zuihuitao-blog-import input:not([type=checkbox]),#zuihuitao-blog-import select,#zuihuitao-blog-import textarea{box-sizing:border-box;width:100%;min-height:40px;padding:8px;border:1px solid #94a3b8;border-radius:4px}#zuihuitao-blog-import input[type=checkbox]{width:18px;height:18px;margin:4px 0;vertical-align:middle}#zuihuitao-blog-import .actions{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;margin-top:16px}#zuihuitao-blog-import [role=status]{min-height:24px;margin-top:12px}#zuihuitao-blog-import [role=alert]{color:#b91c1c;overflow-wrap:anywhere}@media(max-width:600px){#zuihuitao-blog-import{right:8px;bottom:8px}#zuihuitao-blog-import dialog{padding:14px}}`;
+            style.textContent = `#zuihuitao-blog-import{position:fixed;z-index:2147483647;right:16px;bottom:16px;font:14px system-ui,sans-serif}#zuihuitao-blog-import button{min-height:44px;padding:8px 14px;border:1px solid #334155;border-radius:6px;background:#0f172a;color:#fff;cursor:pointer}#zuihuitao-blog-import button:focus-visible{outline:3px solid #2563eb;outline-offset:2px}#zuihuitao-blog-import button:disabled{cursor:not-allowed;opacity:.5}#zuihuitao-blog-import .create-draft{background:#166534}#zuihuitao-blog-import dialog{width:min(560px,calc(100vw - 32px));max-height:90vh;border:1px solid #cbd5e1;border-radius:8px;padding:20px;color:#0f172a;overflow:auto}#zuihuitao-blog-import dialog::backdrop{background:rgba(15,23,42,.45)}#zuihuitao-blog-import form{display:block!important}#zuihuitao-blog-import label{display:block;margin:12px 0 4px;font-weight:600}#zuihuitao-blog-import input:not([type=checkbox]),#zuihuitao-blog-import select,#zuihuitao-blog-import textarea{box-sizing:border-box;width:100%;min-height:40px;padding:8px;border:1px solid #94a3b8;border-radius:4px}#zuihuitao-blog-import input[type=checkbox]{width:18px;height:18px;margin:4px 0;vertical-align:middle}#zuihuitao-blog-import .destination-combobox{position:relative;width:100%}#zuihuitao-blog-import .destination-combobox-wrap{display:flex;position:relative;align-items:center;width:100%}#zuihuitao-blog-import .destination-combobox-input{box-sizing:border-box;width:100%;min-height:40px;padding:8px 36px 8px 10px!important;border:1px solid #94a3b8;border-radius:4px;background:#fff;color:#0f172a;font-size:14px}#zuihuitao-blog-import button.destination-combobox-arrow{position:absolute;right:4px;top:50%;transform:translateY(-50%);width:32px;height:32px;min-height:32px!important;max-height:32px;padding:0!important;border:none!important;border-radius:4px;background:transparent!important;color:#475569!important;font-size:14px;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:2}#zuihuitao-blog-import button.destination-combobox-arrow:hover{background:#f1f5f9!important;color:#0f172a!important}#zuihuitao-blog-import .destination-combobox-menu{position:absolute;top:calc(100% + 4px);left:0;right:0;max-height:220px;overflow-y:auto;background:#fff;border:1px solid #cbd5e1;border-radius:6px;box-shadow:0 10px 15px -3px rgba(0,0,0,0.1),0 4px 6px -4px rgba(0,0,0,0.1);z-index:20}#zuihuitao-blog-import .destination-combobox-item{padding:9px 12px;cursor:pointer;font-size:13px;line-height:1.4;color:#1e293b;border-bottom:1px solid #f8fafc;transition:background .15s}#zuihuitao-blog-import .destination-combobox-item:last-child{border-bottom:none}#zuihuitao-blog-import .destination-combobox-item:hover,#zuihuitao-blog-import .destination-combobox-item.active{background:#f1f5f9;color:#0284c7}#zuihuitao-blog-import .destination-combobox-item.selected{font-weight:600;background:#f0fdf4;color:#15803d}#zuihuitao-blog-import .destination-combobox-empty{padding:12px;color:#64748b;font-size:13px;text-align:center}#zuihuitao-blog-import .actions{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;margin-top:16px}#zuihuitao-blog-import [role=status]{min-height:24px;margin-top:12px}#zuihuitao-blog-import [role=alert]{color:#b91c1c;overflow-wrap:anywhere}@media(max-width:600px){#zuihuitao-blog-import{right:8px;bottom:8px}#zuihuitao-blog-import dialog{padding:14px}}`;
             const openButton = createElement('button', { type: 'button', 'aria-label': '打开博客 Markdown 导入预检' }, root);
             openButton.textContent = '导入博客预检';
             const dialog = createElement('dialog', { 'aria-labelledby': 'zuihuitao-blog-import-title' }, root);
@@ -1552,8 +1552,31 @@ var TurndownService = (function () {
             createElement('label', { for: siteInput.id, text: '博客地址' }, form).before(siteInput);
             const tokenInput = createElement('input', { type: 'password', autocomplete: 'off' }, form);
             createElement('label', { for: tokenInput.id = 'zuihuitao-blog-token', text: 'Markdown 导入 Token' }, form).after(tokenInput);
-            const destination = createElement('select', {}, form);
-            createElement('label', { for: destination.id = 'zuihuitao-blog-destination', text: '目标索引页' }, form).after(destination);
+            const destination = createElement('select', { style: 'display:none!important;' }, form);
+            const destinationLabel = createElement('label', { for: destination.id = 'zuihuitao-blog-destination', text: '目标索引页' }, form);
+            destinationLabel.after(destination);
+            const comboboxWrap = createElement('div', { className: 'destination-combobox' }, form);
+            destination.after(comboboxWrap);
+            const comboboxInputWrap = createElement('div', { className: 'destination-combobox-wrap' }, comboboxWrap);
+            const comboboxInput = createElement('input', {
+                type: 'text',
+                className: 'destination-combobox-input',
+                placeholder: '输入关键词搜索或点击下拉选择…',
+                autocomplete: 'off',
+            }, comboboxInputWrap);
+            const comboboxArrow = createElement('button', {
+                type: 'button',
+                className: 'destination-combobox-arrow',
+                'aria-label': '展开所有索引页',
+                tabindex: '-1',
+            }, comboboxInputWrap);
+            comboboxArrow.textContent = '▾';
+            const comboboxMenu = createElement('div', {
+                className: 'destination-combobox-menu',
+                role: 'listbox',
+                style: 'display:none;',
+            }, comboboxWrap);
+            destinationLabel.addEventListener('click', () => comboboxInput.focus());
             const remoteImages = createElement('input', { type: 'checkbox' }, form);
             remoteImages.id = 'zuihuitao-blog-images';
             createElement('label', { for: remoteImages.id, text: '导入远程图片并上传到博客媒体库' }, form).after(remoteImages);
@@ -1604,6 +1627,7 @@ var TurndownService = (function () {
             let currentMarkdown = '';
             let currentData = null;
             let preparedImport = null;
+            let allDestinations = [];
 
             function setStatus(value) { status.textContent = value; error.textContent = ''; }
             function setError(value) { error.textContent = value; status.textContent = ''; }
@@ -1628,6 +1652,70 @@ var TurndownService = (function () {
                     clearCreatedDraftLink();
                 }
                 setStatus(`预检内容保持有效，将在“${destination.selectedOptions[0]?.textContent || '所选索引页'}”下创建未发布草稿；创建前会复查同标题风险。`);
+            }
+            function syncComboboxFromDestination() {
+                const currentId = destination.value;
+                const found = allDestinations.find((item) => String(item.id) === String(currentId));
+                if (found) {
+                    comboboxInput.value = `${found.title}（ID ${found.id}）`;
+                } else if (destination.selectedOptions[0]?.textContent) {
+                    comboboxInput.value = destination.selectedOptions[0].textContent;
+                } else {
+                    comboboxInput.value = '';
+                }
+            }
+            function closeComboboxMenu() {
+                comboboxMenu.style.display = 'none';
+                comboboxArrow.textContent = '▾';
+            }
+            function renderComboboxMenu(filterKeyword = '') {
+                comboboxMenu.replaceChildren();
+                const keyword = filterKeyword.trim().toLowerCase();
+                const filtered = keyword
+                    ? allDestinations.filter((item) => {
+                        const title = (item.title || '').toLowerCase();
+                        const idStr = String(item.id);
+                        return title.includes(keyword) || idStr.includes(keyword);
+                    })
+                    : allDestinations;
+                if (!filtered.length) {
+                    const empty = createElement('div', { className: 'destination-combobox-empty' }, comboboxMenu);
+                    empty.textContent = keyword ? `未找到匹配“${filterKeyword.trim()}”的索引页` : '暂无可写入的索引页';
+                    return;
+                }
+                filtered.forEach((item) => {
+                    const isSelected = String(item.id) === String(destination.value);
+                    const itemEl = createElement('div', {
+                        className: `destination-combobox-item${isSelected ? ' selected' : ''}`,
+                        'data-id': String(item.id),
+                    }, comboboxMenu);
+                    itemEl.textContent = `${item.title}（ID ${item.id}）`;
+                    itemEl.addEventListener('mousedown', (event) => {
+                        event.preventDefault();
+                        destination.value = String(item.id);
+                        syncComboboxFromDestination();
+                        closeComboboxMenu();
+                        destination.dispatchEvent(new Event('change'));
+                    });
+                });
+            }
+            function openComboboxMenu(filterKeyword = '') {
+                renderComboboxMenu(filterKeyword);
+                comboboxMenu.style.display = 'block';
+                comboboxArrow.textContent = '▴';
+                if (!filterKeyword) {
+                    const selectedEl = comboboxMenu.querySelector('.destination-combobox-item.selected');
+                    if (selectedEl) selectedEl.scrollIntoView({ block: 'nearest' });
+                }
+            }
+            function toggleComboboxMenu() {
+                if (comboboxMenu.style.display === 'block') {
+                    closeComboboxMenu();
+                } else {
+                    comboboxInput.focus();
+                    openComboboxMenu('');
+                    comboboxInput.select();
+                }
             }
             function sessionManifest(prepared) {
                 return {
@@ -1692,11 +1780,13 @@ var TurndownService = (function () {
                 const next = { ...config, siteUrl: normalizeBlogOrigin(siteInput.value), token: tokenInput.value };
                 const response = await requestBlog(next, '/blog/api/markdown-import/destinations/');
                 destination.replaceChildren();
-                response.destinations.forEach((item) => {
+                allDestinations = response.destinations || [];
+                allDestinations.forEach((item) => {
                     const option = createElement('option', { value: String(item.id), text: `${item.title}（ID ${item.id}）` }, destination);
                     if (String(item.id) === String(config.lastDestinationId)) option.selected = true;
                 });
-                if (!response.destinations.length) throw new Error('当前 Token 没有可写入的索引页');
+                if (!allDestinations.length) throw new Error('当前 Token 没有可写入的索引页');
+                syncComboboxFromDestination();
             }
             openButton.addEventListener('click', async () => {
                 openButton.hidden = true;
@@ -1708,6 +1798,7 @@ var TurndownService = (function () {
                 finally { form.removeAttribute('aria-busy'); }
             });
             dialog.addEventListener('close', () => {
+                closeComboboxMenu();
                 openButton.hidden = false;
                 openButton.focus();
             });
@@ -1719,6 +1810,44 @@ var TurndownService = (function () {
                 input.addEventListener('change', clearPreparedImport);
             });
             destination.addEventListener('change', updatePreparedDestination);
+            comboboxInput.addEventListener('focus', () => {
+                openComboboxMenu('');
+                comboboxInput.select();
+            });
+            comboboxInput.addEventListener('input', () => {
+                openComboboxMenu(comboboxInput.value);
+            });
+            comboboxInput.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape') {
+                    closeComboboxMenu();
+                    syncComboboxFromDestination();
+                    return;
+                }
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    const firstItem = comboboxMenu.querySelector('.destination-combobox-item');
+                    if (firstItem && firstItem.dataset && firstItem.dataset.id) {
+                        const targetItem = allDestinations.find((it) => String(it.id) === firstItem.dataset.id);
+                        if (targetItem) {
+                            destination.value = String(targetItem.id);
+                            syncComboboxFromDestination();
+                            closeComboboxMenu();
+                            destination.dispatchEvent(new Event('change'));
+                        }
+                    }
+                }
+            });
+            comboboxInput.addEventListener('blur', () => {
+                setTimeout(() => {
+                    closeComboboxMenu();
+                    syncComboboxFromDestination();
+                }, 150);
+            });
+            comboboxArrow.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                toggleComboboxMenu();
+            });
             prepare.addEventListener('click', async (event) => {
                 event.preventDefault();
                 clearPreparedImport();

@@ -23,7 +23,7 @@
 | `backend` | 后端开发工程师 | Django/Wagtail 模型、业务逻辑、API、Celery 任务及单元测试落地；遇技术阻碍求助架构师，遇业务歧义求助 PM | **`gemini-3.8-flash-high` (高推理)** | `django-wagtail-development`, `context7`, 本地 DB 检查 |
 | `frontend` | 前端开发工程师 | 模板渲染、CSS 布局、交互优化、无障碍与移动端响应式 | **`gemini-3.8-flash-high` (高推理)** | `ui-ux-pro-max`, `playwright` |
 | `qa` | 测试与质量工程师 | 自动化测试用例、端到端集成验证、真实浏览器功能检测 | **`browser-skill` / Playwright + `gemini`** | `playwright`, `django-wagtail-development`, `output/playwright/` |
-| `review` | 代码审查与安全审计 | 方案对照审核、并发竞态排查、敏感数据与回归检查、交付门禁裁决 | **`grok-4.6` (高推理)** | `karpathy-guidelines`, `github` MCP |
+| `review` | 代码审查与安全审计 | 方案对照审核、并发竞态排查、敏感数据与回归检查、交付门禁裁决 | **`grok-4.7` (高推理)** | `karpathy-guidelines`, `github` MCP |
 | `ops` | DevOps / 发布运维工程师 | WSL2 环境构建、Git 分支推送、生产 SSH 灰度同步与服务分级编排 | 常规 `gemini-3.8-flash-high` (高推理)，复杂 `sol` 高 | SSH 插件 / WSL2 终端, `systemctl.md` |
 | `data` | 数据与搜索引擎工程师 | MongoDB/MySQL 结构演进、Elasticsearch 索引生命周期、补偿治理 | **`gpt-5.6-sol` (高/超高推理)** | `google-toolbox`, `django-wagtail-development` |
 ---
@@ -83,7 +83,7 @@
   - 适用：Django/Wagtail 业务代码落地、模板与组件开发、单文件修复、单元测试与集成测试编写及执行。具备超大上下文与高吞吐代码生成能力。
 - **`browser-skill` / Playwright（真实浏览器功能检测）**：
   - 适用：启动真实浏览器进行页面渲染、Wagtail 后台交互、表单提交与响应式体验的动态端到端验收。产物严格存放在 `output/playwright/`。
-- **`grok-4.6`（全流程对照方案审核官，高推理）**：
+- **`grok-4.7`（全流程对照方案审核官，高推理）**：
   - 适用：深度逻辑推演、对抗式审查、安全审计；逐项核对 `说明书/` 方案承诺，审查主程序功能是否完整、是否存在潜在回归，裁决是否达到交付验收标准。
 - **对话人（用户，终审决策与发布唯一授权人）**：
   - 适用：发布与生产准入门禁。未经对话人明确回复同意，严禁提交 Git 或同步生产。
@@ -95,7 +95,7 @@
 2. **方案设计（gpt-5.6-sol high）**：凡 R2 级及以上复杂任务，由 `sol` 在 `说明书/` 形成完整方案。
 3. **代码实施与定向测试（gemini-3.8-flash-high）**：由 `gemini` 精准编码，严格补充中文注释与类型标注，跑通本地定向测试。
 4. **真实功能检测（browser-skill / Playwright）**：启动真实浏览器进行前台、后台与交互路径的跨端回归。
-5. **全流程对照方案审核（grok-4.6 high）**：由 `grok` 严苛审查，逐条对照《说明书》检验功能承诺与主程序健壮性，给出审查报告。
+5. **全流程对照方案审核（grok-4.7 high）**：由 `grok` 严苛审查，逐条对照《说明书》检验功能承诺与主程序健壮性，给出审查报告。
 6. **对话人最终确认门禁（User Gatekeeper）**：汇总方案要点、测试结果、浏览器检查证据与 grok 审核结论向用户呈报，等待用户明确同意。
 7. **Git 提交与双模型分级部署验证（Maker-Checker 四眼门禁）**：
    - **WSL2 提交**：用户同意后，在 WSL2 提交中文 commit（`<类型>(<模块>): <中文动作与改动理由>`）并推送 `origin/main`；

@@ -1,7 +1,7 @@
 ﻿name = "grok-architect"
 description = "系统架构师（Grok驱动，.57/任务）"
 model_provider = "custom"
-model = "grok-4.6"
+model = "grok-4.7"
 model_reasoning_effort = "high"
 nickname_candidates = ["GrokArchitect", "GrokSystemDesigner", "SystemArchitect"]
 

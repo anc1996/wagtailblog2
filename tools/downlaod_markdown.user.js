@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         下载文章为 Markdown 并预检导入博客
 // @namespace    https://wagtailblog.local/userscript
-// @version      0.3.21
+// @version      0.3.22
 // @description  将支持网站的正文转换为 Markdown，可预检后创建未发布博客草稿；请尊重原文版权。
 // @author       waahah
 // @match        *://blog.csdn.net/*
@@ -48,6 +48,8 @@
 // @match        *://www.xinhuanet.com/*
 // @match        *://*.xinhuanet.com/*
 // @match        *://*.news.cn/*
+// @match        *://www.mee.gov.cn/*
+// @match        *://*.mee.gov.cn/*
 // @license      Apache-2.0
 // @icon         data:image/svg+xml,%3Csvg t='1691941995383' class='icon' viewBox='0 0 1024 1024' version='1.1' xmlns='http://www.w3.org/2000/svg' p-id='1514' width='200' height='200'%3E%3Cpath d='M320 864 320 0l480 0 0 192 0 32L1024 224l0 640L320 864zM928 320l-512 0 0 32 512 0L928 320zM928 448l-512 0 0 32 512 0L928 448zM928 576l-512 0 0 32 512 0L928 576zM928 704l-512 0 0 32 512 0L928 704zM832 0l19.2 0L1024 160 1024 192l-192 0L832 0zM288 896l320 0L704 896l0 128L0 1024 0 160l288 0 0 320-192 0L96 512l192 0 0 96-192 0L96 640l192 0 0 96-192 0L96 768l192 0 0 96-192 0L96 896 288 896z' p-id='1515'%3E%3C/path%3E%3C/svg%3E
 // @grant        GM_getValue
@@ -1257,12 +1259,17 @@ var TurndownService = (function () {
         { "host": "jhsjk.people.cn", "el": ".d2txt_con.clearfix", "title_el": ".d2txt > h1", "cut_str": "" },
         { "host": "www.gov.cn", "el": "#UCAP-CONTENT", "fallback_els": [".pages_content"], "title_el": "#ti", "cut_str": "_" },
         { "host": "xinhuanet.com", "el": "#detailContent", "fallback_els": ["#detail", "#content", ".main-content"], "title_el": "h1", "cut_str": "-新华网" },
-        { "host": "news.cn", "el": "#detailContent", "fallback_els": ["#detail", "#content"], "title_el": "h1", "cut_str": "-新华网" }
+        { "host": "news.cn", "el": "#detailContent", "fallback_els": ["#detail", "#content"], "title_el": "h1", "cut_str": "-新华网" },
+        { "host": "www.mee.gov.cn", "el": ".TRS_Editor", "fallback_els": [".neiright_Content"], "title_el": ".neiright_Title", "cut_str": "_中华人民共和国生态环境部" }
     ];
 
     // 同一域名多版式套件配置 (Variant Profiles)
     // 解决同一域名下不同频道或不同年代文章正文容器、标题节点与切割符成套联动识别问题
     const VariantProfiles = {
+        "www.mee.gov.cn": [
+            { "name": "生态环境部标准正文", "el": ".TRS_Editor", "title_el": ".neiright_Title", "cut_str": "_中华人民共和国生态环境部" },
+            { "name": "生态环境部通用正文", "el": ".neiright_Content", "title_el": ".neiright_Title", "cut_str": "_中华人民共和国生态环境部" }
+        ],
         "theory.people.com.cn": [
             { "name": "理论专栏新版", "el": ".show_text", "title_el": "h1", "cut_str": "--" },
             { "name": "传统正文版", "el": "#rm_txt_zw", "title_el": "h1", "cut_str": " --" },

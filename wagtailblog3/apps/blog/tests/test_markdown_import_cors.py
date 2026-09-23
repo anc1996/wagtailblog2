@@ -55,6 +55,8 @@ class MarkdownImportCorsTests(SimpleTestCase):
             "https://www.xinhuanet.com",
             "http://www.xinhuanet.com",
             "https://news.cn",
+            "https://www.mee.gov.cn",
+            "http://www.mee.gov.cn",
         )
 
         for origin in origins:
@@ -166,7 +168,7 @@ class MarkdownImportCorsTests(SimpleTestCase):
         script_path = Path(__file__).resolve().parents[3] / "static/vendor/Script/downlaod_markdown.js"
         source = script_path.read_text(encoding="utf-8")
 
-        self.assertIn("// @version      0.3.21", source)
+        self.assertIn("// @version      0.3.22", source)
         self.assertIn("const blogImportVersion = '0.3.19';", source)
         self.assertIn("#zuihuitao-blog-import form{display:block!important}", source)
 
@@ -229,6 +231,8 @@ class MarkdownImportCorsTests(SimpleTestCase):
             "// @match        *://www.xinhuanet.com/*",
             "// @match        *://*.xinhuanet.com/*",
             "// @match        *://*.news.cn/*",
+            "// @match        *://www.mee.gov.cn/*",
+            "// @match        *://*.mee.gov.cn/*",
         )
         expected_interfaces = (
             '{ "host": "opinion.people.com.cn", "el": "#rm_txt_zw", "fallback_els": [".show_text", ".rm_txt_con.cf"], "title_el": "h1", "cut_str": "--" }',
@@ -246,6 +250,7 @@ class MarkdownImportCorsTests(SimpleTestCase):
             '{ "host": "www.gov.cn", "el": "#UCAP-CONTENT", "fallback_els": [".pages_content"], "title_el": "#ti", "cut_str": "_" }',
             '{ "host": "xinhuanet.com", "el": "#detailContent", "fallback_els": ["#detail", "#content", ".main-content"], "title_el": "h1", "cut_str": "-新华网" }',
             '{ "host": "news.cn", "el": "#detailContent", "fallback_els": ["#detail", "#content"], "title_el": "h1", "cut_str": "-新华网" }',
+            '{ "host": "www.mee.gov.cn", "el": ".TRS_Editor", "fallback_els": [".neiright_Content"], "title_el": ".neiright_Title", "cut_str": "_中华人民共和国生态环境部" }',
         )
 
         for metadata in expected_matches:
@@ -342,6 +347,7 @@ class MarkdownImportCorsTests(SimpleTestCase):
         self.assertIn('"opinion.people.com.cn": [', source)
         self.assertIn('"xinhuanet.com": [', source)
         self.assertIn('"news.cn": [', source)
+        self.assertIn('"www.mee.gov.cn": [', source)
         self.assertIn("function requestBlogGm(url, options = {}, token)", source)
         self.assertIn("return await requestBlogGm(target.url, options, token);", source)
         self.assertIn("Candidate Variant Profiles", source)

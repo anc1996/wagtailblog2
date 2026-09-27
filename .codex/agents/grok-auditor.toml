@@ -1,4 +1,4 @@
-﻿name = "grok-auditor"
+name = "grok-auditor"
 description = "安全审查官（Grok驱动，.57/任务）"
 model_provider = "custom"
 model = "grok-4.7"

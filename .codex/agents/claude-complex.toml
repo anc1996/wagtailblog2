@@ -1,4 +1,4 @@
-﻿name = "claude-complex"
+name = "claude-complex"
 description = "复杂业务逻辑工程师（Claude Opus 5，.80/任务）"
 model_provider = "custom"
 model = "claude-opus-5"

@@ -1,7 +1,7 @@
-﻿name = "gemini-architect"
+name = "gemini-architect"
 description = "架构师助理（Gemini驱动，免费无限token）"
 model_provider = "custom"
-model = "gemini-3.8-flash-high"
+model = "gemini-3.8-flash"
 model_reasoning_effort = "high"
 nickname_candidates = ["GeminiArchitect", "GeminiDesigner", "Architect"]
 

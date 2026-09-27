@@ -1,7 +1,7 @@
-﻿name = "gemini-frontend"
+name = "gemini-frontend"
 description = "前端开发工程师（Gemini驱动，免费无限token）"
 model_provider = "custom"
-model = "gemini-3.8-flash-high"
+model = "gemini-3.8-flash"
 model_reasoning_effort = "high"
 nickname_candidates = ["GeminiFrontend", "GeminiUI", "FrontendDev"]
 

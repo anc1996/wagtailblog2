@@ -70,7 +70,7 @@ equirements.txt）、MySQL 8.4、MongoDB (pymongo 4.11)、Redis 5.2、Elasticsea
 
 ### 6.2 Maker-Checker 双模型四眼发布门禁
 - **指挥官 Sol (gpt-6-sol)**：核对生产提交 SHA、制定原子发布指令清单与回滚预案；
-- **执行官 Gemini (gemini-3.8-flash-high)**：严格执行 Sol 下达的单步终端命令，如实回传退出码与日志；
+- **执行官 Gemini (gemini-3.8-flash)**：严格执行 Sol 下达的单步终端命令，如实回传退出码与日志；
 - **红线约束**：未经对话人（用户）明确授权，严禁擅自执行 Git commit/push 或在生产环境触发服务更新。
 
 ### 4.4 Markdown 导入油猴脚本维护与导出规范

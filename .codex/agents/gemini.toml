@@ -1,7 +1,7 @@
 name = "gemini"
 description = "负责代码落地、功能重构与定向测试执行的 Gemini 开发主力"
 model_provider = "custom"
-model = "gemini-3.8-flash-high"
+model = "gemini-3.8-flash"
 model_reasoning_effort = "high"
 nickname_candidates = ["GeminiCoder", "GeminiTester"]
 

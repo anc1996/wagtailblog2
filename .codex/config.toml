@@ -19,6 +19,16 @@ nickname_candidates = ["GeminiCoder", "GeminiTester"]
 description = "负责全流程对照方案审核与对抗式安全审查的 Grok 审查官"
 config_file = "agents/grok.toml"
 nickname_candidates = ["GrokAuditor", "GrokReviewer"]
+
+[agents.helper]
+description = "轻量辅助杂役与快速工具助手（Gemini驱动，免费无限token）"
+config_file = "agents/gemini-helper.toml"
+nickname_candidates = ["GeminiHelper", "QuickHelper"]
+
+[agents.claude]
+description = "复杂业务逻辑与极端疑难特种攻坚工程师（Claude Opus 5 / 5.5）"
+config_file = "agents/claude-complex.toml"
+nickname_candidates = ["ClaudeComplex", "ClaudeCore"]
 [mcp_servers.playwright]
 type = "stdio"
 command = "D:\\softwarepro\\nodejs\\node.exe"

@@ -1,4 +1,4 @@
-﻿name = "grok-architect"
+name = "grok-architect"
 description = "系统架构师（Grok驱动，.57/任务）"
 model_provider = "custom"
 model = "grok-4.7"

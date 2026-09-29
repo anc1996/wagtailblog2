@@ -21,6 +21,21 @@
           }
         }
       }
+    },
+    "guides.guidepage:v1": {
+      "fingerprint": "08c183e5bd141edab29348e8770ffa26bcbaf30ea7c52e9daf7cb4425c5890b0",
+      "snapshot": {
+        "model_label": "guides.guidepage",
+        "schema_version": 1,
+        "external_fields": {
+          "body": {
+            "field_name": "body",
+            "backend": "mongo",
+            "codec": "streamfield.v1",
+            "codec_schema_version": 1
+          }
+        }
+      }
     }
   }
 }

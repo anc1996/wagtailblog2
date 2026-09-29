@@ -1,4 +1,4 @@
-﻿"""
+"""
 Wagtail Page 正文外置通用协议 - ExternalContentPublicationState 模型定向测试。
 
 验证：

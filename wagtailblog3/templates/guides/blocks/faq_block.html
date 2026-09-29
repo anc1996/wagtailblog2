@@ -1,0 +1,11 @@
+{% load wagtailcore_tags %}
+<details class="guide-faq-card">
+    <summary class="guide-faq-question">
+        <span class="guide-faq-q-badge" aria-hidden="true">Q</span>
+        <span class="guide-faq-title">{{ value.question|default:self.question }}</span>
+    </summary>
+    <div class="guide-faq-answer">
+        <div class="guide-faq-a-badge" aria-hidden="true">A</div>
+        <div class="guide-faq-content rich-text">{{ value.answer|default:self.answer }}</div>
+    </div>
+</details>

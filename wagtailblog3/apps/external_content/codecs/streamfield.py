@@ -1,4 +1,4 @@
-﻿"""
+"""
 Wagtail Page 正文外置通用协议 - StreamField v1 编解码器。
 
 针对 Wagtail StreamField 字段的规范化、结构校验与严格无损往返。

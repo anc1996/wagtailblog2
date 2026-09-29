@@ -1,4 +1,4 @@
-﻿"""
+"""
 Wagtail Page 正文外置通用协议 - MySQL 状态模型定义。
 
 维护页面级不可变 Manifest 快照、正式/草稿/审批指针与单调递增 publication_generation。

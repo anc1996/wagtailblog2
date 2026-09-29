@@ -10,7 +10,9 @@ import logging
 from typing import Any
 
 from django.dispatch import receiver
+from django.db.models.signals import pre_delete
 from wagtail.signals import page_published, page_unpublished
+from external_content.exceptions import ExternalContentOperationBlockedError
 
 from external_content.mixins import ExternalContentPageMixin
 from external_content.publication import ExternalContentPublicationService
@@ -94,3 +96,21 @@ def handle_external_content_page_unpublished(sender: Any, instance: Any, **kwarg
             exc_info=True,
         )
         raise
+
+
+@receiver(pre_delete, dispatch_uid="external_content.block_pre_delete_before_g4")
+def block_external_content_pre_delete(sender: Any, instance: Any, **kwargs: Any) -> None:
+    """
+    G4 前置保护天网防线：在 Django ORM 底层全面阻断正文外置页面的物理删除。
+    无论是直接 delete()、DeletePageAction、QuerySet.delete() 还是父级级联删除，
+    均在此处硬性熔断并抛出异常，杜绝孤儿数据产生。
+    """
+    from external_content.mixins import ExternalContentPageMixin
+
+    if isinstance(instance, ExternalContentPageMixin) or getattr(
+        getattr(instance, "specific_class", None), "content_storage", None
+    ):
+        raise ExternalContentOperationBlockedError(
+            f"页面「{getattr(instance, 'title', instance.pk)}」({instance._meta.label_lower}) "
+            "正文外置通用协议 G4 阶段尚未就绪，物理删除已被底层安全熔断，以防产生孤儿数据。"
+        )

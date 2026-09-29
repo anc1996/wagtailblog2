@@ -1,0 +1,12 @@
+{% load wagtailcore_tags %}
+<aside class="guide-tip-card guide-tip-card--{{ value.tip_type|default:self.tip_type|default:'tip' }}" role="note">
+    <div class="guide-tip-icon" aria-hidden="true">
+        {% if value.tip_type == 'warning' or self.tip_type == 'warning' %}⚠️
+        {% elif value.tip_type == 'info' or self.tip_type == 'info' %}ℹ️
+        {% elif value.tip_type == 'danger' or self.tip_type == 'danger' %}🛑
+        {% else %}💡{% endif %}
+    </div>
+    <div class="guide-tip-content rich-text">
+        {{ value.content|default:self.content }}
+    </div>
+</aside>

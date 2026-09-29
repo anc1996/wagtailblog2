@@ -110,3 +110,7 @@ class RevisionOverwriteForbiddenError(ExternalContentError):
 class DirectSaveForbiddenError(PublicationError):
     """外置正文页面禁止直接调用 save() 持久化正文变更。"""
     code: str = "direct_save_forbidden"
+
+class ExternalContentOperationBlockedError(ExternalContentError):
+    """正文外置通用协议前置阶段（如 G4 落地前）阻断未就绪操作（如复制、别名、删除）。"""
+    code: str = "external_content_operation_blocked"

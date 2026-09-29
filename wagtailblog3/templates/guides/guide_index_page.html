@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% load wagtailcore_tags wagtailimages_tags static %}
+
+{% block title %}{{ page.seo_title|default:page.title }}{% endblock %}
+
+{% block extra_css %}
+    {{ block.super }}
+    <link rel="stylesheet" href="{% static 'guides/css/guides.css' %}">
+{% endblock %}
+
+{% block content %}
+<main class="guides-container" id="main-content">
+    <header class="guides-header">
+        <div class="guides-header-inner">
+            <h1 class="guides-title">{{ page.title }}</h1>
+            {% if page.intro %}
+                <div class="guides-intro">{{ page.intro }}</div>
+            {% endif %}
+        </div>
+    </header>
+
+    <nav class="guides-filter-bar" aria-label="专题指南筛选器">
+        <div class="guides-filter-group">
+            <span class="guides-filter-label">主题：</span>
+            <a href="?{% if current_difficulty %}difficulty={{ current_difficulty }}{% endif %}"
+               class="guides-filter-tag {% if not current_topic %}is-active{% endif %}">全部</a>
+            {% for t in topics %}
+                <a href="?topic={{ t.slug }}{% if current_difficulty %}&difficulty={{ current_difficulty }}{% endif %}"
+                   class="guides-filter-tag {% if current_topic == t.slug %}is-active{% endif %}">
+                    {{ t.name }}
+                </a>
+            {% endfor %}
+        </div>
+
+        <div class="guides-filter-group">
+            <span class="guides-filter-label">难度：</span>
+            <a href="?{% if current_topic %}topic={{ current_topic }}{% endif %}"
+               class="guides-filter-tag {% if not current_difficulty %}is-active{% endif %}">全部</a>
+            {% for code, label in difficulties %}
+                <a href="?difficulty={{ code }}{% if current_topic %}&topic={{ current_topic }}{% endif %}"
+                   class="guides-filter-tag {% if current_difficulty == code %}is-active{% endif %}">
+                    {{ label }}
+                </a>
+            {% endfor %}
+        </div>
+    </nav>
+
+    <section class="guides-grid-section" aria-label="专题指南列表">
+        {% if guides %}
+            <div class="guides-card-grid">
+                {% for guide in guides %}
+                    <article class="guide-card">
+                        {% if guide.cover_image %}
+                            <a href="{% pageurl guide %}" class="guide-card-image-wrap" tabindex="-1" aria-hidden="true">
+                                {% image guide.cover_image fill-600x338 as card_img %}
+                                <img src="{{ card_img.url }}" width="{{ card_img.width }}" height="{{ card_img.height }}" alt="{{ guide.title }}" loading="lazy" class="guide-card-image">
+                            </a>
+                        {% endif %}
+                        <div class="guide-card-body">
+                            <div class="guide-card-meta">
+                                {% if guide.topic %}
+                                    <span class="guide-card-topic">{{ guide.topic.name }}</span>
+                                {% endif %}
+                                <span class="guide-card-difficulty guide-difficulty-{{ guide.difficulty }}">{{ guide.get_difficulty_display }}</span>
+                            </div>
+                            <h2 class="guide-card-title">
+                                <a href="{% pageurl guide %}">{{ guide.title }}</a>
+                            </h2>
+                            {% if guide.summary %}
+                                <p class="guide-card-summary">{{ guide.summary }}</p>
+                            {% endif %}
+                            <footer class="guide-card-footer">
+                                {% if guide.last_reviewed_at %}
+                                    <span class="guide-card-date" title="最近核查日期">{{ guide.last_reviewed_at|date:"Y-m-d" }}</span>
+                                {% elif guide.first_published_at %}
+                                    <span class="guide-card-date">{{ guide.first_published_at|date:"Y-m-d" }}</span>
+                                {% endif %}
+                            </footer>
+                        </div>
+                    </article>
+                {% endfor %}
+            </div>
+
+            {% if guides.has_other_pages %}
+                <nav class="guides-pagination" aria-label="指南分页导航">
+                    {% if guides.has_previous %}
+                        <a href="?page={{ guides.previous_page_number }}{% if current_topic %}&topic={{ current_topic }}{% endif %}{% if current_difficulty %}&difficulty={{ current_difficulty }}{% endif %}" class="guides-page-btn">&laquo; 上一页</a>
+                    {% endif %}
+                    <span class="guides-page-current">第 {{ guides.number }} 页 / 共 {{ guides.paginator.num_pages }} 页</span>
+                    {% if guides.has_next %}
+                        <a href="?page={{ guides.next_page_number }}{% if current_topic %}&topic={{ current_topic }}{% endif %}{% if current_difficulty %}&difficulty={{ current_difficulty }}{% endif %}" class="guides-page-btn">下一页 &raquo;</a>
+                    {% endif %}
+                </nav>
+            {% endif %}
+        {% else %}
+            <div class="guides-empty-state">
+                <div class="guides-empty-icon" aria-hidden="true">📖</div>
+                <h3 class="guides-empty-title">暂无符合条件的专题指南</h3>
+                <p class="guides-empty-text">可以尝试切换不同的主题或难度标签，查看更多技术指南。</p>
+            </div>
+        {% endif %}
+    </section>
+</main>
+{% endblock %}

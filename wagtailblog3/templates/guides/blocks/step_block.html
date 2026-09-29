@@ -1,0 +1,17 @@
+{% load wagtailcore_tags wagtailimages_tags %}
+<div class="guide-step-card">
+    <header class="guide-step-header">
+        <h3 class="guide-step-title">{{ value.title|default:self.title }}</h3>
+    </header>
+    <div class="guide-step-body">
+        <div class="guide-step-description rich-text">
+            {{ value.description|default:self.description }}
+        </div>
+        {% if value.image or self.image %}
+            <figure class="guide-step-figure">
+                {% image value.image|default:self.image max-900x600 as step_img %}
+                <img src="{{ step_img.url }}" width="{{ step_img.width }}" height="{{ step_img.height }}" alt="{{ value.title|default:self.title }}" loading="lazy" class="guide-step-image">
+            </figure>
+        {% endif %}
+    </div>
+</div>

@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% load wagtailcore_tags wagtailimages_tags static %}
+
+{% block title %}{{ page.seo_title|default:page.title }}{% endblock %}
+
+{% block extra_css %}
+    {{ block.super }}
+    <link rel="stylesheet" href="{% static 'guides/css/guides.css' %}">
+    <link rel="stylesheet" href="{% static 'blog/css/rich-text-theme.css' %}">
+    <link rel="stylesheet" href="{% static 'blog/css/markdown-theme.css' %}">
+    {% include "includes/content/code_highlighting_css.html" %}
+{% endblock %}
+
+{% block content %}
+<main class="guide-detail-container" id="main-content">
+    <nav class="guide-breadcrumbs" aria-label="面包屑导航">
+        <ol class="guide-breadcrumb-list">
+            {% with root_page=page.get_site.root_page %}
+                <li><a href="{% if root_page %}{% pageurl root_page %}{% else %}/{% endif %}">{{ root_page.title|default:"首页" }}</a></li>
+            {% endwith %}
+            <li class="guide-breadcrumb-sep" aria-hidden="true">&gt;</li>
+            <li><a href="{% pageurl page.get_parent %}">专题指南</a></li>
+            {% if page.get_parent and page.get_parent.title != "专题指南" %}
+                <li class="guide-breadcrumb-sep" aria-hidden="true">&gt;</li>
+                <li><a href="{% pageurl page.get_parent %}">{{ page.get_parent.title }}</a></li>
+            {% endif %}
+            <li class="guide-breadcrumb-sep" aria-hidden="true">&gt;</li>
+            <li aria-current="page" class="guide-breadcrumb-current">{{ page.title }}</li>
+        </ol>
+    </nav>
+
+    <header class="guide-header">
+        <div class="guide-badges">
+            {% if page.topic %}
+                <span class="guide-topic-badge">{{ page.topic.name }}</span>
+            {% endif %}
+            <span class="guide-difficulty-badge guide-difficulty-{{ page.difficulty }}">{{ page.get_difficulty_display }}</span>
+        </div>
+        <h1 class="guide-title">{{ page.title }}</h1>
+        {% if page.summary %}
+            <p class="guide-summary">{{ page.summary }}</p>
+        {% endif %}
+        <div class="guide-meta-bar">
+            {% if page.last_reviewed_at %}
+                <span class="guide-meta-item">
+                    <span class="guide-meta-label">最新核查：</span>
+                    <time datetime="{{ page.last_reviewed_at|date:'Y-m-d' }}">{{ page.last_reviewed_at|date:"Y-m-d" }}</time>
+                </span>
+            {% elif page.first_published_at %}
+                <span class="guide-meta-item">
+                    <span class="guide-meta-label">发布日期：</span>
+                    <time datetime="{{ page.first_published_at|date:'Y-m-d' }}">{{ page.first_published_at|date:"Y-m-d" }}</time>
+                </span>
+            {% endif %}
+        </div>
+    </header>
+
+    <div class="guide-layout">
+        {% if toc %}
+            <aside class="guide-sidebar" aria-label="文档目录">
+                <nav class="guide-toc" id="guide-toc" aria-label="指南目录导航">
+                    <h3 class="guide-toc-heading">步骤目录</h3>
+                    <ol class="guide-toc-list">
+                        {% for item in toc %}
+                            <li class="guide-toc-item">
+                                <a href="#{{ item.id }}" class="guide-toc-link">
+                                    <span class="guide-toc-num">{{ item.number }}.</span>
+                                    <span class="guide-toc-title">{{ item.title }}</span>
+                                </a>
+                            </li>
+                        {% endfor %}
+                    </ol>
+                </nav>
+            </aside>
+        {% endif %}
+
+        <article class="guide-content-article {% if not toc %}guide-content-full{% endif %}">
+            <div class="guide-body-stream">
+                {% for block in page.body %}
+                    {% if block.block_type == 'step' %}
+                        <section class="guide-step-anchor-wrapper" id="{{ block.anchor_id|default:block.id }}">
+                            {% include_block block %}
+                        </section>
+                    {% else %}
+                        {% include_block block %}
+                    {% endif %}
+                {% endfor %}
+            </div>
+
+            {% if visible_related_pages %}
+                <section class="guide-related-section" aria-label="相关指南推荐">
+                    <h2 class="guide-related-heading">相关阅读</h2>
+                    <div class="guide-related-cards">
+                        {% for rel_page in visible_related_pages %}
+                            <article class="guide-related-card">
+                                <h3 class="guide-related-title">
+                                    <a href="{% pageurl rel_page %}">{{ rel_page.title }}</a>
+                                </h3>
+                                {% if rel_page.specific.summary %}
+                                    <p class="guide-related-summary">{{ rel_page.specific.summary }}</p>
+                                {% endif %}
+                            </article>
+                        {% endfor %}
+                    </div>
+                </section>
+            {% endif %}
+        </article>
+    </div>
+</main>
+{% endblock %}

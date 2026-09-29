@@ -208,6 +208,10 @@ class ExternalContentPublicationService:
                     details={"page_id": page.pk, "revision_id": revision.pk},
                 ) from exc
 
+            # 扩展：页面模型针对锁定 Revision 的业务完整性发布门禁（杜绝 Action 绕过与草稿漂移）
+            if hasattr(page, "validate_publication_revision"):
+                page.validate_publication_revision(revision)
+
             # 更新 State 草稿凭证（仅当尚未记录草稿或目标 Revision 大于等于当前已记录草稿版本时才更新，绝不倒退草稿指针）
             update_fields = ["updated_at"]
             if state.draft_revision_id is None or revision.pk >= state.draft_revision_id:

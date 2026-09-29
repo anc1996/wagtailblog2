@@ -133,29 +133,19 @@ class ManifestProtocolTests(TestCase):
 
     def test_validate_against_page_success_and_identity_mismatches(self) -> None:
         """验证与实际 Page 实例交叉核验：匹配通过，跨页或模型不符阻断。"""
-        class MockGuidePage(Page):
-            class Meta:
-                app_label = "guides"
-
-        manifest_data = dict(self.valid_manifest_data, model_label="guides.mockguidepage")
+        manifest_data = dict(self.valid_manifest_data, model_label="guides.guidepage")
         manifest = ExternalContentManifest.from_dict(manifest_data)
 
-        page = MockGuidePage(title="专题测试")
-        page.pk = 42
+        page = SimpleNamespace(_meta=SimpleNamespace(label_lower="guides.guidepage"), pk=42)
         manifest.validate_against_page(page)
 
         # 跨页 page_id 不符
-        page_other = MockGuidePage(title="另一页面")
-        page_other.pk = 99
+        page_other = SimpleNamespace(_meta=SimpleNamespace(label_lower="guides.guidepage"), pk=99)
         with self.assertRaises(ManifestIdentityMismatchError):
             manifest.validate_against_page(page_other)
 
         # 模型 model_label 不符
-        class MockBlogPage(Page):
-            class Meta:
-                app_label = "blog"
-
-        page_wrong_model = MockBlogPage(title="博客页面")
+        page_wrong_model = SimpleNamespace(_meta=SimpleNamespace(label_lower="blog.blogpage"), pk=42)
         page_wrong_model.pk = 42
         with self.assertRaises(ManifestIdentityMismatchError):
             manifest.validate_against_page(page_wrong_model)

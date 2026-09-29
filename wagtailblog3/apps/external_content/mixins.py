@@ -28,6 +28,7 @@ from django.utils.dateparse import parse_datetime
 
 from external_content.coordinator import ExternalContentCoordinator
 from external_content.exceptions import (
+    ExternalContentOperationBlockedError,
     DirectSaveForbiddenError,
     ManifestError,
     ManifestIdentityMismatchError,
@@ -215,6 +216,12 @@ class ExternalContentPageMixin:
         3. 占位保护：在调用 super().save() 写入数据库前，将外置字段替换为空哨兵，
            并在 finally 中恢复内存真实属性，避免将大段正文持久化到关系数据库中。
         """
+        # G4 前置保护：阻断别名页面与受控外置页面的别名关系保存
+        if getattr(self, "alias_of_id", None) or getattr(self, "alias_of", None):
+            raise ExternalContentOperationBlockedError(
+                f"{self._meta.label_lower} (id={self.pk}): 正文外置通用协议 G4 阶段尚未就绪，别名创建操作已被安全阻断。"
+            )
+
         policy = get_storage_policy_for_model(type(self), allow_record_new=False)
         if not policy or not policy.external_fields:
             return super().save(*args, **kwargs)  # type: ignore[misc]
@@ -402,3 +409,29 @@ class ExternalContentPageMixin:
         if self.live:
             self.load_published_content()
         return super().serve(request, *args, **kwargs)  # type: ignore[misc]
+
+    def copy(self, *args, **kwargs):
+        """G4 前置保护：阻断正文外置页面的直接复制操作。"""
+        raise ExternalContentOperationBlockedError(
+            f"{self._meta.label_lower} (id={self.pk}): 正文外置通用协议 G4 阶段尚未就绪，此操作已被安全阻断。"
+        )
+
+    def create_alias(self, *args, **kwargs):
+        """G4 前置保护：阻断正文外置页面的别名创建操作。"""
+        raise ExternalContentOperationBlockedError(
+            f"{self._meta.label_lower} (id={self.pk}): 正文外置通用协议 G4 阶段尚未就绪，此操作已被安全阻断。"
+        )
+
+    def delete(self, *args, **kwargs):
+        """G4 前置保护：阻断正文外置页面的物理删除操作以防孤儿数据。"""
+        raise ExternalContentOperationBlockedError(
+            f"{self._meta.label_lower} (id={self.pk}): 正文外置通用协议 G4 阶段尚未就绪，此操作已被安全阻断。"
+        )
+
+    def permissions_for_user(self, user: Any) -> Any:
+        """
+        重写页面用户权限检测：G4 前置保护期内，硬性关闭 copy 权限，阻断原生 CopyPageAction。
+        """
+        perms = super().permissions_for_user(user)  # type: ignore[misc]
+        perms.can_copy_to = lambda parent_page=None, recursive=False: False
+        return perms

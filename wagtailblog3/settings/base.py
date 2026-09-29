@@ -61,6 +61,7 @@ INSTALLED_APPS = [
     "base", # 添加基础应用
     "portfolio", # 添加作品集应用
     "external_content.apps.ExternalContentConfig",  # Wagtail Page 正文外置通用协议
+    "guides.apps.GuidesConfig",  # 专题指南应用
     
     # 第三方应用
     "storages",  # 添加 Django Storages

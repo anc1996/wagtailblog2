@@ -101,20 +101,14 @@ class ExternalContentLifecycleTests(TransactionTestCase):
     @classmethod
     def setUpClass(cls) -> None:
         super().setUpClass()
-        # 动态创建测试页面表的底层架构（支持 --keepdb 重复执行与清理）
+        # 动态创建测试页面表的底层架构（支持 --keepdb 重复执行，后续测试级联扫描需要该物理表存在）
         with connection.schema_editor() as editor:
-            if LifecycleTestPage._meta.db_table in connection.introspection.table_names():
-                editor.delete_model(LifecycleTestPage)
-            editor.create_model(LifecycleTestPage)
+            if LifecycleTestPage._meta.db_table not in connection.introspection.table_names():
+                editor.create_model(LifecycleTestPage)
 
     @classmethod
     def tearDownClass(cls) -> None:
-        try:
-            with connection.schema_editor() as editor:
-                if LifecycleTestPage._meta.db_table in connection.introspection.table_names():
-                    editor.delete_model(LifecycleTestPage)
-        except Exception:
-            pass
+        # 保留表结构，避免后续测试执行 Page.delete() 扫描子类表时因缺少物理表抛出异常
         super().tearDownClass()
 
     def setUp(self) -> None:
@@ -150,6 +144,13 @@ class ExternalContentLifecycleTests(TransactionTestCase):
             root = Page.add_root(title="Root", locale=self.locale)
         self.root_page = root
 
+        from django.contrib.contenttypes.models import ContentType
+        ContentType.objects.clear_cache()
+        ct, _ = ContentType.objects.get_or_create(
+            app_label=LifecycleTestPage._meta.app_label,
+            model=LifecycleTestPage._meta.model_name,
+        )
+
         # 创建并挂载测试页面
         self.page = LifecycleTestPage(
             title="生命周期测试页面",
@@ -165,6 +166,7 @@ class ExternalContentLifecycleTests(TransactionTestCase):
                 ("quote", "精选引用内容。"),
             ],
         )
+        self.page.content_type = ct
         self.root_page.add_child(instance=self.page)
 
     def tearDown(self) -> None:

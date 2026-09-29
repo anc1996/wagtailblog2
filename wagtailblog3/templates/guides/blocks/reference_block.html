@@ -1,0 +1,11 @@
+<div class="guide-reference-card">
+    <div class="guide-reference-header">
+        <a href="{{ value.url|default:self.url }}" target="_blank" rel="noopener noreferrer nofollow" class="guide-reference-link">
+            <span class="guide-reference-icon" aria-hidden="true">🔗</span>
+            <span class="guide-reference-title">{{ value.title|default:self.title }}</span>
+        </a>
+        {% if value.source or self.source %}
+            <span class="guide-reference-source">{{ value.source|default:self.source }}</span>
+        {% endif %}
+    </div>
+</div>

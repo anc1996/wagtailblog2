@@ -176,12 +176,14 @@ def generate_menu_items(context, parent_for_children, current_page_from_context)
 	if not parent_for_children:  #
 		return {'menu_items_list': []}  # 如果没有父页面，返回空列表 #
 
-	# 性能优化（P1）：使用通用 Page 查询替代 specific()，避免每个子页面触发多表联查
-	children_of_parent = parent_for_children.get_children().live().in_menu()  # 获取父页面的子页面 #
+	# 性能优化（P1）：使用通用 Page 查询替代 specific()，严格叠加 public() 过滤受限页面
+	children_of_parent = parent_for_children.get_children().live().public().in_menu()
+	if hasattr(parent_for_children, 'locale_id') and parent_for_children.locale_id:
+		children_of_parent = children_of_parent.filter(locale_id=parent_for_children.locale_id)
 
 	for child_page in children_of_parent:  # 遍历每个子页面 #
 		# 性能优化：利用 Wagtail 树结构原生字段 numchild，若为 0 则直接跳过递归探测 SQL
-		has_sub_items = (child_page.numchild > 0) and child_page.get_children().live().in_menu().exists()  #
+		has_sub_items = (child_page.numchild > 0) and child_page.get_children().live().public().in_menu().exists()  #
 
 		is_current = False  #
 		is_ancestor = False  #
@@ -245,3 +247,14 @@ def active_reactions(reactions: list[dict[str, Any]] | None) -> list[dict[str, A
 	if not reactions:
 		return []
 	return [r for r in reactions if (r.get("count") or 0) > 0]
+
+
+@register.simple_tag
+def get_nav_menu_epoch() -> str:
+	"""
+	获取当前全站主导航菜单的缓存代次。
+	当任意页面发布、下架、隐藏、移动或修改权限时，代次自动递增，确保模板缓存全局 O(1) 瞬时收敛。
+	"""
+	from guides.services.nav_cache import get_current_nav_menu_epoch
+
+	return str(get_current_nav_menu_epoch())

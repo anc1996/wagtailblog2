@@ -179,3 +179,26 @@ class ExternalContentCoordinator:
         # 7. 全部字段解码与验证成功后，一次性赋值到页面实例
         for field_name, decoded_value in staged_values.items():
             setattr(page, field_name, decoded_value)
+
+    def validate_manifest_payloads(
+        self,
+        manifest: ExternalContentManifest,
+    ) -> None:
+        """
+        逐字段核对 Manifest 中所有字段版本在 MongoDB 中的存在性、哈希与 6 项身份元数据。
+
+        用于发布候选锁定 (lock_and_validate_revision) 与门禁检查。
+        若任一版本缺失、哈希不匹配或网络异常，抛出异常。
+        """
+        for field_name, entry in manifest.fields.items():
+            self.store.get_version(
+                entry.version_id,
+                expected_identity={
+                    "model_label": manifest.model_label,
+                    "page_id": manifest.page_id,
+                    "field_name": field_name,
+                    "codec": entry.codec,
+                    "schema_version": entry.schema_version,
+                    "payload_sha256": entry.payload_sha256,
+                },
+            )

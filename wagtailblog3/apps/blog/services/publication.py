@@ -311,6 +311,12 @@ def finish_workflow_action(workflow_state: WorkflowState, user=None) -> None:
 		locked_state = WorkflowState.objects.select_for_update().get(pk=workflow_state.pk)
 		content_object = locked_state.content_object
 		page = getattr(content_object, "specific", content_object)
+		from external_content.mixins import ExternalContentPageMixin
+		if isinstance(page, ExternalContentPageMixin):
+			from external_content.publication import ExternalContentPublicationService
+			ExternalContentPublicationService.finish_workflow_action(locked_state, user=user)
+			return
+
 		if not isinstance(page, BlogPage):
 			from wagtail.workflows import publish_workflow_state
 

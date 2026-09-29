@@ -85,6 +85,21 @@ class BaseContentCodec(abc.ABC):
         """
         raise NotImplementedError
 
+    def is_empty(self, value: Any) -> bool:
+        """判断字段值是否为空或空哨兵。"""
+        if value is None:
+            return True
+        if value == self.get_empty_sentinel():
+            return True
+        if hasattr(value, "__len__") and len(value) == 0:
+            return True
+        return False
+
+    @property
+    def empty_sentinel(self) -> Any:
+        """空哨兵属性便捷访问。"""
+        return self.get_empty_sentinel()
+
     @abc.abstractmethod
     def get_empty_sentinel(self) -> Any:
         """

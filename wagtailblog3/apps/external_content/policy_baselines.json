@@ -1,4 +1,26 @@
 {
   "version": 1,
-  "policies": {}
+  "policies": {
+    "external_content.lifecycletestpage:v1": {
+      "fingerprint": "85bbd73ff11c6e5fd13f8d2b980fe9a244a97d948e019807fdc66c67ba673f7d",
+      "snapshot": {
+        "model_label": "external_content.lifecycletestpage",
+        "schema_version": 1,
+        "external_fields": {
+          "primary_body": {
+            "field_name": "primary_body",
+            "backend": "mongo",
+            "codec": "streamfield.v1",
+            "codec_schema_version": 1
+          },
+          "secondary_body": {
+            "field_name": "secondary_body",
+            "backend": "mongo",
+            "codec": "streamfield.v1",
+            "codec_schema_version": 1
+          }
+        }
+      }
+    }
+  }
 }

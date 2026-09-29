@@ -1,4 +1,4 @@
-﻿"""
+"""
 Wagtail Page 正文外置通用协议 - 异常层级定义。
 
 定义 Codec、Manifest、Store、策略配置及生命周期的强类型异常体系，
@@ -81,3 +81,32 @@ class ContentVersionNotFoundError(ContentStoreError):
 class ContentVersionIdentityMismatchError(ContentStoreError):
     """从 MongoDB 读取的文档身份（page_id/field/sha256）与请求指针不匹配。"""
     code: str = "content_version_identity_mismatch"
+
+
+class PublicationError(ExternalContentError):
+    """发布与生命周期协调异常基类。"""
+    code: str = "publication_error"
+
+
+class PublicationRevisionInvalidError(PublicationError):
+    """指定 Revision 缺少可发布正文版本 Manifest 或 Manifest 校验失败。"""
+    code: str = "publication_revision_invalid"
+
+
+class PublicationBodyUnavailableError(PublicationError):
+    """指定 Revision 的 Mongo 正文版本不可读取、哈希校验失败或网络中断。"""
+    code: str = "publication_body_unavailable"
+
+
+class PublicationWorkflowRevisionDriftError(PublicationError):
+    """Workflow 审批通过后页面产生新 Revision 时阻止隐式发布新正文。"""
+    code: str = "publication_workflow_revision_drift"
+
+
+class RevisionOverwriteForbiddenError(ExternalContentError):
+    """指定覆盖的 Revision 已被审批、发布、排期或工作流持久引用，严格禁止覆盖。"""
+    code: str = "revision_overwrite_forbidden"
+
+class DirectSaveForbiddenError(PublicationError):
+    """外置正文页面禁止直接调用 save() 持久化正文变更。"""
+    code: str = "direct_save_forbidden"

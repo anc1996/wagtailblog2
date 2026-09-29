@@ -33,6 +33,24 @@ from external_content.exceptions import (
 logger = logging.getLogger(__name__)
 
 COLLECTION_NAME = "external_content_versions"
+_active_collection_name: Optional[str] = None
+
+
+def set_active_collection_name(name: Optional[str]) -> None:
+    """设置当前活跃的不可变版本集合名（用于测试环境隔离）。"""
+    global _active_collection_name
+    _active_collection_name = name
+
+
+def reset_active_collection_name() -> None:
+    """重置当前活跃的集合名为默认集合。"""
+    global _active_collection_name
+    _active_collection_name = None
+
+
+def get_active_collection_name() -> str:
+    """获取当前生效的集合名。"""
+    return _active_collection_name or COLLECTION_NAME
 _mongo_client: Optional[pymongo.MongoClient] = None
 
 REQUIRED_IDENTITY_KEYS: Tuple[str, ...] = (
@@ -112,7 +130,8 @@ def get_collection(
     wc = write_concern if write_concern is not None else get_write_concern()
     rc = read_concern if read_concern is not None else get_read_concern()
     db = cli[db_name]
-    return db.get_collection(COLLECTION_NAME, write_concern=wc, read_concern=rc)
+    coll_name = get_active_collection_name()
+    return db.get_collection(coll_name, write_concern=wc, read_concern=rc)
 
 
 def ensure_indexes(collection: Optional[Collection] = None) -> None:

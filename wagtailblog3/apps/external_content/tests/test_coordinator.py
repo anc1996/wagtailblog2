@@ -379,15 +379,14 @@ class ExternalContentCoordinatorTests(TestCase):
         self.assertEqual(data["title"], "普通序列化页面")
 
     def test_uncoordinated_save_revision_is_blocked_in_g1(self) -> None:
-        """验证在 G1 协议内核阶段，裸调用 save_revision 被显式阻断，防止保存无 Manifest 的损坏 Revision。"""
+        """验证外置页面未具备持久化主键时，save_revision 被严格阻断，防止生成孤儿版本。"""
         page = MultiFieldTestPage(
             title="阻断保存页",
             native_intro="原生导读",
         )
-        page.pk = 101
-        with self.assertRaises(NotImplementedError) as ctx:
+        with self.assertRaises(RuntimeError) as ctx:
             page.save_revision()
-        self.assertIn("需由 G2 生命周期协调器受控执行", str(ctx.exception))
+        self.assertIn("主键", str(ctx.exception))
     def test_multi_field_load_atomic_failure_leaves_page_intact(self) -> None:
         """测试多字段加载原子性：若第二字段正文损坏，第一字段与整个页面属性绝不被部分修改。"""
         page = MultiFieldTestPage(

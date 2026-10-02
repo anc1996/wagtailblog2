@@ -2,7 +2,7 @@ name = "gemini-research"
 description = "快速调研助理（Gemini驱动，免费无限token）"
 model_provider = "custom"
 model = "gemini-3.8-flash"
-model_reasoning_effort = "medium"
+model_reasoning_effort = "high"
 nickname_candidates = ["GeminiResearch", "GeminiInvestigator", "Researcher"]
 
 developer_instructions = """

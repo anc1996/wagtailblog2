@@ -1,7 +1,7 @@
 name = "claude-complex"
-description = "复杂业务逻辑工程师（Claude Opus 5，.80/任务）"
+description = "复杂业务逻辑工程师（Claude Opus 5.5，.80/任务）"
 model_provider = "custom"
-model = "claude-opus-5"
+model = "claude-sonnet-5-5"
 model_reasoning_effort = "high"
 nickname_candidates = ["ClaudeComplex", "ClaudeCore", "ComplexDev"]
 

@@ -1,8 +1,10 @@
 # 项目级 Codex 配置 (Repository-scoped)
 disable_response_storage = false
+# 自定义模型须先进入本地目录，避免子代理在加载角色配置前被模型校验拦截。
+model_catalog_json = "model-catalog.json"
 
 [agents]
-default_subagent_model = "gpt-6-sol"
+default_subagent_model = "gpt-6.1-sol"
 default_subagent_reasoning_effort = "high"
 
 [agents.sol]
@@ -42,7 +44,7 @@ args = ["C:\\Users\\haryk\\.codemoss\\dependencies\\mcp-adapter.cjs", "D:\\softw
 [mcp_servers.fetch]
 type = "stdio"
 command = "D:\\softwarepro\\nodejs\\node.exe"
-args = ["C:\\Users\\haryk\\.codemoss\\dependencies\\mcp-adapter.cjs", "D:\\softwarepro\\nodejs\\node.exe", "C:\\Users\\haryk\\.codemoss\\dependencies\\fetch-mcp\\node_modules\\@yawlabs\\fetch-mcp\\dist\\index.js"]
+args = ["C:\\Users\\haryk\\.codemoss\\dependencies\\mcp-adapter.cjs", "D:\\softwarepro\\nodejs\\node.exe", "F:\\openclaw\\workspace\\wagtail\\wagtailblog2\\tools\\fetch-mcp\\node_modules\\@yawlabs\\fetch-mcp\\dist\\index.js"]
 
 [mcp_servers.google-toolbox]
 type = "stdio"

@@ -41,3 +41,5 @@ staticfiles_collected/
 /.codemoss/
 /output/
 /.playwright-cli/
+# 项目独立 MCP 依赖可由锁文件重建，不纳入 Git。
+/tools/fetch-mcp/node_modules/

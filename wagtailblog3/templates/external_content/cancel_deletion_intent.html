@@ -1,0 +1,25 @@
+﻿{% extends "wagtailadmin/base.html" %}
+{% load i18n %}
+
+{% block titletag %}取消删除意图{% endblock %}
+{% block content %}
+<header class="header nice-padding">
+    <div class="row row-flush">
+        <h1 class="icon icon-warning">取消删除意图</h1>
+    </div>
+</header>
+<div class="nice-padding">
+    <p>页面：{{ page.title }}（ID: {{ page.pk }}）</p>
+    <p>删除意图：{{ intent.pk }}</p>
+    <p>当前状态：{{ intent.status }}</p>
+    <p>安全期截止：{{ intent.safe_gc_after }}</p>
+    <p>取消后仅解除 MySQL 写入冻结，不会删除或重写 Mongo 正文。</p>
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="page_id" value="{{ page.pk }}">
+        <input type="hidden" name="intent_id" value="{{ intent.pk }}">
+        <input type="hidden" name="request_id" value="{{ request_id }}">
+        <button type="submit" class="button button-primary">确认取消删除意图</button>
+    </form>
+</div>
+{% endblock %}

@@ -26,7 +26,7 @@ from wagtail.models import Orderable, Page
 from wagtail.snippets.models import register_snippet
 
 from external_content.exceptions import PublicationRevisionInvalidError
-from external_content.mixins import ExternalContentPageMixin
+from external_content.mixins import ExternalContentPageMixin, controlled_external_content_save
 from guides.blocks import GuideStreamBlock
 
 
@@ -151,6 +151,16 @@ class GuidePageForm(WagtailAdminPageForm):
     1. 草稿阶段（is_deferred_validation=True）：允许空主题与空步骤块，方便编辑暂存未完成构思；
     2. 发布阶段（is_deferred_validation=False）：强制校验必须指定有效主题且至少包含一个操作步骤。
     """
+
+    def save(self, commit: bool = True) -> Any:
+        """
+        将 Wagtail 后台表单的中间 Page.save() 纳入外置正文受控上下文。
+
+        正文真正落 MongoDB 与 Revision 的步骤仍由 save_revision() 完成；
+        只允许后台标准保存链路通过，不改变普通 ORM 直接 save() 的禁写契约。
+        """
+        with controlled_external_content_save():
+            return super().save(commit=commit)
 
     def clean(self) -> Dict[str, Any]:
         cleaned_data = super().clean()

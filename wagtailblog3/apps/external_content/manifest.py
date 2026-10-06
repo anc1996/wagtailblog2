@@ -26,7 +26,8 @@ PROTOCOL_VERSION: int = 1
 SHA256_HEX_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 MODEL_LABEL_PATTERN = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
 ALLOWED_ROOT_KEYS = frozenset({"protocol_version", "content_storage_schema", "model_label", "page_id", "fields"})
-ALLOWED_ENTRY_KEYS = frozenset({"codec", "schema_version", "version_id", "payload_sha256"})
+REQUIRED_ENTRY_KEYS = frozenset({"codec", "schema_version", "version_id", "payload_sha256"})
+ALLOWED_ENTRY_KEYS = REQUIRED_ENTRY_KEYS | frozenset({"model_label", "page_id", "field_name"})
 
 
 @dataclass(frozen=True)
@@ -157,13 +158,12 @@ class ExternalContentManifest:
 
             # 字段条目严格白名单校验
             actual_entry_keys = set(entry_data.keys())
-            if actual_entry_keys != ALLOWED_ENTRY_KEYS:
-                entry_missing = ALLOWED_ENTRY_KEYS - actual_entry_keys
-                entry_extra = actual_entry_keys - ALLOWED_ENTRY_KEYS
-                if entry_missing:
-                    raise ManifestValidationError(f"字段 '{field_name}' 指针缺少必要属性: {sorted(entry_missing)}")
-                if entry_extra:
-                    raise ManifestValidationError(f"字段 '{field_name}' 指针包含未知的冗余属性: {sorted(entry_extra)}")
+            entry_missing = REQUIRED_ENTRY_KEYS - actual_entry_keys
+            entry_extra = actual_entry_keys - ALLOWED_ENTRY_KEYS
+            if entry_missing:
+                raise ManifestValidationError(f"字段 '{field_name}' 指针缺少必要属性: {sorted(entry_missing)}")
+            if entry_extra:
+                raise ManifestValidationError(f"字段 '{field_name}' 指针包含未知的冗余属性: {sorted(entry_extra)}")
 
             parsed_fields[field_name] = FieldManifestEntry(
                 codec=entry_data["codec"],

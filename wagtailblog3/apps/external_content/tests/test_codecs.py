@@ -5,7 +5,9 @@ Wagtail Page 正文外置通用协议 - Codec 子系统定向测试。
 块 ID 稳定性、强制 field 能力要求与异常链解耦 (from None) 脱敏防护。
 """
 
+import logging
 import math
+import traceback
 from django.test import SimpleTestCase
 from wagtail import blocks
 from wagtail.fields import StreamField
@@ -148,6 +150,196 @@ class StreamFieldV1CodecTests(SimpleTestCase):
         ]
         with self.assertRaises(CodecPayloadError):
             self.codec.decode(corrupted_block, field=self.field)
+
+    def test_roundtrip_rejects_unknown_null_block_attribute(self) -> None:
+        """未知块属性即使为 null 也不能在往返时静默丢失。"""
+        payload = [
+            {"type": "heading", "value": "标题", "id": "id-null", "unknown": None}
+        ]
+        for entrypoint in ("decode", "encode"):
+            with self.subTest(entrypoint=entrypoint):
+                with self.assertRaises(CodecPayloadError):
+                    getattr(self.codec, entrypoint)(payload, field=self.field)
+
+    def test_roundtrip_rejects_nested_unknown_null_struct_attribute(self) -> None:
+        """嵌套结构未知 null 属性不能被宽泛的空值规范化掩盖。"""
+        field = StreamField([
+            ("section", blocks.StructBlock([
+                ("details", blocks.StructBlock([("text", blocks.CharBlock())])),
+            ])),
+        ])
+        payload = [{
+            "type": "section",
+            "id": "id-nested-null",
+            "value": {"details": {"text": "说明", "unknown": None}},
+        }]
+        for entrypoint in ("decode", "encode"):
+            with self.subTest(entrypoint=entrypoint):
+                with self.assertRaises(CodecPayloadError):
+                    getattr(self.codec, entrypoint)(payload, field=field)
+
+    def test_roundtrip_rejects_unknown_null_in_list_and_stream_children(self) -> None:
+        """列表和子 StreamBlock 的结构字段执行同一未知属性门禁。"""
+        struct = blocks.StructBlock([("text", blocks.CharBlock())])
+        field = StreamField([
+            ("list", blocks.ListBlock(struct)),
+            ("stream", blocks.StreamBlock([("details", struct)])),
+        ])
+        for block_type, item_type in (("list", "item"), ("stream", "details")):
+            payload = [{
+                "type": block_type,
+                "id": "id-container",
+                "value": [{
+                    "type": item_type,
+                    "id": "id-child",
+                    "value": {"text": "说明", "unknown": None},
+                }],
+            }]
+            with self.subTest(block_type=block_type):
+                with self.assertRaises(CodecPayloadError):
+                    self.codec.decode(payload, field=field)
+
+    def test_roundtrip_allows_only_declared_default_null_additions(self) -> None:
+        """可选声明字段补默认 null 合法，但原始编码载荷和摘要不得改变。"""
+        details = blocks.StructBlock([
+            ("text", blocks.CharBlock()),
+            ("optional", blocks.IntegerBlock(required=False, default=None)),
+        ])
+        field = StreamField([
+            ("struct", blocks.StructBlock([("details", details)])),
+            ("list", blocks.ListBlock(details)),
+            ("stream", blocks.StreamBlock([("details", details)])),
+        ])
+        payloads = (
+            [{"type": "struct", "id": "id-struct", "value": {"details": {"text": "说明"}}}],
+            [{
+                "type": "list", "id": "id-list",
+                "value": [{"type": "item", "id": "id-item", "value": {"text": "说明"}}],
+            }],
+            [{
+                "type": "stream", "id": "id-stream",
+                "value": [{"type": "details", "id": "id-details", "value": {"text": "说明"}}],
+            }],
+        )
+        for payload in payloads:
+            with self.subTest(block_type=payload[0]["type"]):
+                encoded, digest = self.codec.encode(payload, field=field)
+                self.assertEqual(encoded, payload)
+                self.assertEqual(digest, self.codec.compute_payload_hash(payload))
+                decoded = self.codec.decode(payload, field=field)
+                prepared = field.stream_block.get_prep_value(decoded)
+                if payload[0]["type"] == "struct":
+                    actual = prepared[0]["value"]["details"]
+                else:
+                    actual = prepared[0]["value"][0]["value"]
+                self.assertEqual(actual, {"text": "说明", "optional": None})
+
+    def test_roundtrip_preserves_explicit_declared_null(self) -> None:
+        """已明确存储的 null 保持存在，不将它转换为字段缺失。"""
+        field = StreamField([
+            ("details", blocks.StructBlock([
+                ("optional", blocks.IntegerBlock(required=False, default=None)),
+            ])),
+        ])
+        payload = [{"type": "details", "id": "id-explicit", "value": {"optional": None}}]
+        decoded = self.codec.decode(payload, field=field)
+        self.assertEqual(field.stream_block.get_prep_value(decoded), payload)
+
+    def test_encode_unknown_type_redacts_exception_and_chain(self) -> None:
+        """未知块 type 来自输入，消息、details 和格式化异常链均不得回显。"""
+        marker = "".join(("synthetic-unknown-", "private-type"))
+        caught_error: Exception | None = None
+        try:
+            self.codec.encode(
+                [{"type": marker, "id": "id-private", "value": "说明"}],
+                field=self.field,
+            )
+        except Exception as error:
+            caught_error = error
+        self.assertIsInstance(caught_error, CodecPayloadError)
+        outputs = (
+            str(caught_error),
+            repr(vars(caught_error)),
+            repr(caught_error.args),
+            "".join(traceback.format_exception(caught_error)),
+        )
+        self.assertFalse(
+            any(marker in output for output in outputs),
+            "未知块拒绝异常不得回显输入 type",
+        )
+
+    def _assert_roundtrip_mismatch_is_redacted(self, entrypoint: str) -> None:
+        """真实往返丢失额外字段时拒绝正文，且日志和异常均不得携带载荷。"""
+        body_marker = "".join(("synthetic-roundtrip-", "body-private"))
+        extra_marker = "".join(("synthetic-roundtrip-", "extra-private"))
+        extra_key = "".join(("synthetic_roundtrip_", "extra_key"))
+        block_id = "".join(("synthetic-roundtrip-", "block-id"))
+        corrupted_payload = [
+            {
+                "type": "heading",
+                "value": body_marker,
+                "id": block_id,
+                extra_key: extra_marker,
+            }
+        ]
+        caught_error: Exception | None = None
+        with self.assertLogs("external_content.codecs.streamfield", level="ERROR") as captured:
+            try:
+                getattr(self.codec, entrypoint)(corrupted_payload, field=self.field)
+            except Exception as error:
+                caught_error = error
+
+        # 在异常处理之外仅断言布尔值，避免测试失败回显正文或意外异常链。
+        self.assertTrue(
+            isinstance(caught_error, CodecPayloadError),
+            "往返损坏必须以 CodecPayloadError 失败关闭",
+        )
+        self.assertTrue(
+            "往返编解码" in str(caught_error),
+            "夹具必须触发往返一致性校验而非其他拒绝分支",
+        )
+        sensitive_fragments = (body_marker, extra_marker, extra_key, block_id)
+        exception_output = (
+            str(caught_error),
+            repr(caught_error),
+            repr(caught_error.args),
+            repr(vars(caught_error)),
+            "".join(traceback.format_exception(caught_error)),
+        )
+        self.assertFalse(
+            any(
+                fragment in output
+                for fragment in sensitive_fragments
+                for output in exception_output
+            ),
+            "往返拒绝异常及格式化异常链不得包含正文载荷",
+        )
+        formatter = logging.Formatter()
+        for record in captured.records:
+            log_output = (
+                str(record.msg),
+                repr(record.args),
+                record.getMessage(),
+                formatter.format(record),
+                record.exc_text or "",
+                repr(vars(record)),
+            )
+            self.assertFalse(
+                any(
+                    fragment in output
+                    for fragment in sensitive_fragments
+                    for output in log_output
+                ),
+                "往返拒绝日志消息、参数和异常输出不得包含正文载荷",
+            )
+
+    def test_decode_roundtrip_mismatch_redacts_logs_and_exception(self) -> None:
+        """解码损坏的真实 StreamField 时保持失败关闭并脱敏日志。"""
+        self._assert_roundtrip_mismatch_is_redacted("decode")
+
+    def test_encode_with_field_roundtrip_mismatch_redacts_logs_and_exception(self) -> None:
+        """编码提供目标字段时，同一往返校验入口不得泄露正文。"""
+        self._assert_roundtrip_mismatch_is_redacted("encode")
 
     def test_decode_exception_redaction_and_chain_decoupling(self) -> None:
         """验证底层 to_python 抛出异常时完全脱敏并使用 from None 阻断异常链。"""

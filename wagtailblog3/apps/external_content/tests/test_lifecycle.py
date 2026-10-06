@@ -25,6 +25,7 @@ import tempfile
 import uuid
 from datetime import timedelta
 from typing import Any, Mapping
+from unittest.mock import patch
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -42,6 +43,7 @@ from external_content.coordinator import ExternalContentCoordinator
 from external_content.exceptions import (
     CorruptedContentPayloadError,
     DirectSaveForbiddenError,
+    ExternalContentOperationBlockedError,
     ManifestIdentityMismatchError,
     PublicationBodyUnavailableError,
     PublicationRevisionInvalidError,
@@ -50,11 +52,17 @@ from external_content.exceptions import (
 )
 from external_content.manifest import ExternalContentManifest
 from external_content.mixins import ExternalContentPageMixin
-from external_content.models import ExternalContentPublicationState
+from external_content.models import (
+    DeletionIntentStatus,
+    ExternalContentDeletionIntent,
+    ExternalContentPublicationState,
+)
 from external_content.publication import (
     ExternalContentPublicationService,
+    _controlled_save_context,
     validate_scheduled_revision,
 )
+from external_content.locking import preserve_threadlocal_context
 from external_content.registry import (
     get_storage_policy_for_model,
     reset_active_baseline_file,
@@ -588,6 +596,36 @@ class ExternalContentLifecycleTests(TransactionTestCase):
         with self.assertRaises(DirectSaveForbiddenError):
             self.page.save()
 
+    def test_new_page_multiple_save_before_first_revision_allowed(self) -> None:
+        """测试新建页面在首次 save_revision() 前允许多次 save()（Wagtail 8 admin 创建流程）。"""
+        # 模拟 Wagtail admin 新建流程：add_child 触发首次 save() 获取 pk
+        new_page = LifecycleTestPage(
+            title="新建测试页",
+            slug="test-new-page-multi-save",
+            native_intro="初始化摘要",
+            primary_body=[("heading", "初始正文")],
+            secondary_body=[("quote", "初始引用")],
+        )
+        self.root_page.add_child(instance=new_page)
+        self.assertIsNotNone(new_page.pk)
+
+        # Wagtail 可能在首次 save_revision() 前再次调用 save()，应被允许
+        new_page.title = "标题微调"
+        new_page.save()  # 不应抛出 DirectSaveForbiddenError
+
+        # 再次 save() 也应允许（无 Revision 期间）
+        new_page.primary_body = [("heading", "调整后的正文")]
+        new_page.save()  # 不应抛出 DirectSaveForbiddenError
+
+        # 一旦创建首个 Revision，严格拦截立即生效
+        new_page._test_content_store = self.store
+        new_page.save_revision(user=self.user)
+
+        # 此后直接修改 body 并 save() 必须被拦截
+        new_page.primary_body = [("heading", "非法修改")]
+        with self.assertRaises(DirectSaveForbiddenError):
+            new_page.save()
+
     def test_metadata_save_allowed(self) -> None:
         """测试保存元数据字段（如 title/slug）被正常允许。"""
         self.page._test_content_store = self.store
@@ -653,8 +691,17 @@ class ExternalContentLifecycleTests(TransactionTestCase):
     def test_workflow_approval_future_scheduled_revision_does_not_promote_published_pointer(self) -> None:
         """测试 Workflow 审批排期在未来的 Revision 时，绝不提前推进正式指针与代次。"""
         self.page._test_content_store = self.store
+        alias = self.page.create_alias(
+            parent=self.root_page,
+            update_slug=f"workflow-schedule-alias-{uuid.uuid4().hex[:8]}",
+            user=self.user,
+        )
+        alias_state_before = ExternalContentPublicationState.objects.filter(
+            page_id=alias.pk,
+        ).values("published_revision_id", "published_manifest", "publication_generation").get()
         future_time = timezone.now() + timedelta(days=3)
         rev = self.page.save_revision(user=self.user, approved_go_live_at=future_time)
+        self.assertIsNone(rev.content["go_live_at"])
 
         workflow_ct = ContentType.objects.get_for_model(GroupApprovalTask, for_concrete_model=False)
         task = GroupApprovalTask.objects.create(name="排期审批任务", content_type=workflow_ct)
@@ -674,6 +721,64 @@ class ExternalContentLifecycleTests(TransactionTestCase):
         state = ExternalContentPublicationState.objects.get(page_id=self.page.pk)
         self.assertIsNone(state.published_revision_id)
         self.assertEqual(state.publication_generation, 0)
+        self.assertFalse(Page.objects.get(pk=alias.pk).live)
+        self.assertEqual(
+            ExternalContentPublicationState.objects.filter(page_id=alias.pk).values(
+                "published_revision_id", "published_manifest", "publication_generation",
+            ).get(),
+            alias_state_before,
+        )
+        self.assertEqual(Revision.objects.for_instance(alias).count(), 0)
+        rev.refresh_from_db()
+        self.assertEqual(rev.approved_go_live_at, future_time)
+
+    def test_approved_only_schedule_requires_matching_action_time(self) -> None:
+        """空快照排期必须绑定受控 Action 的有效时间，不凭批准字段放宽来源。"""
+        future_time = timezone.now() + timedelta(days=3)
+        revision = self.page.save_revision(user=self.user, approved_go_live_at=future_time)
+        revision.refresh_from_db()
+        state_before = ExternalContentPublicationState.objects.filter(
+            page_id=self.page.pk,
+        ).values("published_revision_id", "published_manifest", "publication_generation").get()
+        invalid_times = (
+            None,
+            future_time + timedelta(milliseconds=1),
+            future_time.replace(tzinfo=None),
+        )
+        for invalid_time in invalid_times:
+            with self.subTest(action_time_type=type(invalid_time).__name__):
+                self.page.go_live_at = invalid_time
+                with transaction.atomic(), preserve_threadlocal_context(
+                    _controlled_save_context, "in_publication_action", True,
+                ):
+                    with self.assertRaises(PublicationRevisionInvalidError):
+                        self.page._defer_first_scheduled_alias_update(
+                            revision, revision.content,
+                        )
+        self.assertEqual(
+            ExternalContentPublicationState.objects.filter(page_id=self.page.pk).values(
+                "published_revision_id", "published_manifest", "publication_generation",
+            ).get(),
+            state_before,
+        )
+        self.assertFalse(Page.objects.get(pk=self.page.pk).live)
+
+    def test_approved_only_schedule_rejects_changed_revision_approval(self) -> None:
+        """内存 Revision 的批准时间不能冒用锁内 Revision 的有效批准。"""
+        future_time = timezone.now() + timedelta(days=3)
+        revision = self.page.save_revision(user=self.user, approved_go_live_at=future_time)
+        revision.refresh_from_db()
+        self.page.go_live_at = future_time
+        revision.approved_go_live_at = future_time + timedelta(milliseconds=1)
+        with transaction.atomic(), preserve_threadlocal_context(
+            _controlled_save_context, "in_publication_action", True,
+        ):
+            with self.assertRaises(PublicationRevisionInvalidError):
+                self.page._defer_first_scheduled_alias_update(revision, revision.content)
+        state = ExternalContentPublicationState.objects.get(page_id=self.page.pk)
+        self.assertIsNone(state.published_revision_id)
+        self.assertEqual(state.publication_generation, 0)
+        self.assertFalse(Page.objects.get(pk=self.page.pk).live)
 
     def test_scheduled_publishing_via_revision_publish_and_command(self) -> None:
         """测试 Wagtail 实际定时任务入口 (Revision.publish) 执行排期发布及排期状态校验。"""
@@ -759,6 +864,324 @@ class ExternalContentLifecycleTests(TransactionTestCase):
         self.assertTrue(self.page.live)
         self.assertEqual(self.page.live_revision_id, rev.pk)
 
-        # 验证正式指针未被清空
+        # Verify published pointer not cleared
         state = ExternalContentPublicationState.objects.get(page_id=self.page.pk)
         self.assertEqual(state.published_revision_id, rev.pk)
+
+    def test_completed_tombstone_blocks_page_save(self) -> None:
+        """测试存在 COMPLETED 永久墓碑时，禁止 page.save() 并抛出 ExternalContentOperationBlockedError。"""
+        self.page._test_content_store = self.store
+        self.page.save_revision(user=self.user)
+
+        ExternalContentDeletionIntent.objects.create(
+            page_id=self.page.pk,
+            model_label="external_content.lifecycletestpage",
+            status=DeletionIntentStatus.COMPLETED,
+            safe_gc_after=timezone.now() - timedelta(days=1),
+            completed_at=timezone.now(),
+        )
+        self.page.title = "尝试修改标题"
+        with self.assertRaises(ExternalContentOperationBlockedError):
+            self.page.save()
+
+    def test_completed_tombstone_blocks_save_revision(self) -> None:
+        """测试存在 COMPLETED 永久墓碑时，禁止 page.save_revision() 并抛出 ExternalContentOperationBlockedError。"""
+        self.page._test_content_store = self.store
+        self.page.save_revision(user=self.user)
+
+        ExternalContentDeletionIntent.objects.create(
+            page_id=self.page.pk,
+            model_label="external_content.lifecycletestpage",
+            status=DeletionIntentStatus.COMPLETED,
+            safe_gc_after=timezone.now() - timedelta(days=1),
+            completed_at=timezone.now(),
+        )
+        self.page.primary_body = [("heading", "墓碑后尝试生成新草稿")]
+        with self.assertRaises(ExternalContentOperationBlockedError):
+            self.page.save_revision(user=self.user)
+
+    def test_completed_tombstone_blocks_page_publish(self) -> None:
+        """测试存在 COMPLETED 永久墓碑时，禁止 page.publish() 并抛出 ExternalContentOperationBlockedError。"""
+        self.page._test_content_store = self.store
+        rev = self.page.save_revision(user=self.user)
+
+        ExternalContentDeletionIntent.objects.create(
+            page_id=self.page.pk,
+            model_label="external_content.lifecycletestpage",
+            status=DeletionIntentStatus.COMPLETED,
+            safe_gc_after=timezone.now() - timedelta(days=1),
+            completed_at=timezone.now(),
+        )
+        with self.assertRaises(ExternalContentOperationBlockedError):
+            self.page.publish(rev)
+
+    def test_completed_tombstone_blocks_page_unpublish(self) -> None:
+        """测试存在 COMPLETED 永久墓碑时，禁止 page.unpublish() 并抛出 ExternalContentOperationBlockedError。"""
+        self.page._test_content_store = self.store
+        rev = self.page.save_revision(user=self.user)
+        self.page.publish(rev)
+        self.assertTrue(self.page.live)
+
+        ExternalContentDeletionIntent.objects.create(
+            page_id=self.page.pk,
+            model_label="external_content.lifecycletestpage",
+            status=DeletionIntentStatus.COMPLETED,
+            safe_gc_after=timezone.now() - timedelta(days=1),
+            completed_at=timezone.now(),
+        )
+        with self.assertRaises(ExternalContentOperationBlockedError):
+            self.page.unpublish()
+
+    def test_completed_tombstone_blocks_alias_creation(self) -> None:
+        """测试存在 COMPLETED 永久墓碑时，禁止创建别名 (create_alias) 并抛出 ExternalContentOperationBlockedError。"""
+        self.page._test_content_store = self.store
+        self.page.save_revision(user=self.user)
+
+        ExternalContentDeletionIntent.objects.create(
+            page_id=self.page.pk,
+            model_label="external_content.lifecycletestpage",
+            status=DeletionIntentStatus.COMPLETED,
+            safe_gc_after=timezone.now() - timedelta(days=1),
+            completed_at=timezone.now(),
+        )
+        with self.assertRaises(ExternalContentOperationBlockedError):
+            self.page.create_alias(parent=self.root_page)
+
+    def test_publish_action_validates_revision_content_type_and_object_id(self) -> None:
+        """测试发布动作严格校验 Revision 的真实 content_type 和 object_id 是否匹配页面。"""
+        self.page._test_content_store = self.store
+        rev1 = self.page.save_revision(user=self.user)
+
+        other_page = LifecycleTestPage(
+            title="另一个独立页面",
+            slug=f"other-page-{uuid.uuid4().hex[:6]}",
+            native_intro="其他摘要",
+            live=False,
+            primary_body=[("heading", "其他内容")],
+            secondary_body=[("quote", "其他引用")],
+        )
+        self.root_page.add_child(instance=other_page)
+        other_page._test_content_store = self.store
+        other_rev = other_page.save_revision(user=self.user)
+
+        with self.assertRaises(PublicationRevisionInvalidError):
+            ExternalContentPublicationService.lock_and_validate_revision(
+                self.page.pk, other_rev.pk, store=self.store
+            )
+
+        with self.assertRaises(PublicationRevisionInvalidError):
+            self.page.publish(other_rev, user=self.user)
+
+        self.page.refresh_from_db()
+        self.assertFalse(self.page.live, "校验失败时页面绝不得被置为 live")
+
+    def test_workflow_finish_action_validates_revision_content_type_and_object_id(self) -> None:
+        """测试 Workflow 审批结束触发发布时，严格校验 Revision 的真实 content_type 和 object_id 是否匹配页面。"""
+        self.page._test_content_store = self.store
+        rev = self.page.save_revision(user=self.user)
+
+        other_page = LifecycleTestPage(
+            title="审批测试另一页面",
+            slug=f"wf-other-{uuid.uuid4().hex[:6]}",
+            native_intro="其他摘要",
+            live=False,
+            primary_body=[("heading", "其他内容")],
+            secondary_body=[("quote", "其他引用")],
+        )
+        self.root_page.add_child(instance=other_page)
+        other_page._test_content_store = self.store
+        other_rev = other_page.save_revision(user=self.user)
+
+        workflow_ct = ContentType.objects.get_for_model(GroupApprovalTask, for_concrete_model=False)
+        task = GroupApprovalTask.objects.create(name="归属校验审批任务", content_type=workflow_ct)
+        workflow = Workflow.objects.create(name="归属校验工作流")
+        WorkflowTask.objects.create(workflow=workflow, task=task, sort_order=0)
+
+        workflow_state = workflow.start(self.page, self.user)
+        current_task = workflow_state.current_task_state
+        current_task.revision = other_rev
+        current_task.save()
+
+        with self.assertRaises(PublicationRevisionInvalidError):
+            current_task.approve(user=self.user)
+
+    def test_workflow_finish_action_validates_workflow_revision_drift(self) -> None:
+        """测试 Workflow 审批结束触发发布时，严格核验草稿漂移（页面最新 Revision 与审批 Revision 不一致）。"""
+        self.page._test_content_store = self.store
+        rev1 = self.page.save_revision(user=self.user)
+
+        workflow_ct = ContentType.objects.get_for_model(GroupApprovalTask, for_concrete_model=False)
+        task = GroupApprovalTask.objects.create(name="漂移校验审批任务", content_type=workflow_ct)
+        workflow = Workflow.objects.create(name="漂移校验工作流")
+        WorkflowTask.objects.create(workflow=workflow, task=task, sort_order=0)
+
+        workflow_state = workflow.start(self.page, self.user)
+        current_task = workflow_state.current_task_state
+        self.page.primary_body = [("heading", "并发修改的新正文")]
+        rev2 = self.page.save_revision(user=self.user)
+
+        with self.assertRaises(PublicationWorkflowRevisionDriftError):
+            current_task.approve(user=self.user)
+
+    def test_sql_failure_during_save_revision_does_not_cleanup_mongo_leaving_orphan(self) -> None:
+        """测试 save_revision 期间 SQL 事务失败回滚时，严禁同步清理 Mongo，必须保留为延迟孤儿版本供 GC 回收。"""
+        self.page._test_content_store = self.store
+        initial_mongo_count = self.collection.count_documents({"page_id": self.page.pk})
+
+        self.page.primary_body = [("heading", "即将因SQL失败产生孤儿的正文")]
+
+        with patch.object(self.store, "cleanup_unreferenced_version") as mock_cleanup:
+            with patch.object(Revision.objects, "create", side_effect=RuntimeError("模拟SQL执行崩溃")):
+                with self.assertRaises(RuntimeError):
+                    self.page.save_revision(user=self.user)
+
+            mock_cleanup.assert_not_called()
+
+        new_mongo_count = self.collection.count_documents({"page_id": self.page.pk})
+        self.assertGreater(
+            new_mongo_count,
+            initial_mongo_count,
+            "SQL 失败时禁止同步执行 Mongo cleanup，必须保留延迟孤儿等待异步 GC 回收",
+        )
+
+    def test_coordinator_load_strictly_checks_identity_without_alias_copy_exemption(self) -> None:
+        """测试 coordinator.load_external_content_from_manifest 严格校验 Manifest 六键身份，禁止非 alias/copy 豁免。"""
+        self.page._test_content_store = self.store
+        rev = self.page.save_revision(user=self.user)
+
+        coordinator = ExternalContentCoordinator(store=self.store)
+
+        raw_manifest = (
+            rev.content["_external_content_manifest"]
+            if isinstance(rev.content, dict)
+            else json.loads(rev.content)["_external_content_manifest"]
+        )
+        tampered_dict = dict(raw_manifest)
+        tampered_dict["page_id"] = 999999
+        tampered_manifest = ExternalContentManifest.from_dict(tampered_dict)
+
+        with self.assertRaises(ManifestIdentityMismatchError):
+            coordinator.load_external_content_from_manifest(
+                page=self.page,
+                manifest=tampered_manifest,
+            )
+
+    def test_save_and_publish_locks_held_across_mongo_prep_and_sql_commit(self) -> None:
+        """测试 save_revision 与 publish 过程排他锁跨越 Mongo 写入前置准备直至 SQL 原生 Action 事务提交。"""
+        self.page._test_content_store = self.store
+
+        call_sequence: list[str] = []
+        original_save_version = self.store.save_version_with_status
+
+        def audited_save_version(*args: Any, **kwargs: Any) -> Any:
+            self.assertTrue(
+                connection.in_atomic_block,
+                "Mongo save_version_with_status 写入前必须已经开启并处于原子事务中持有排他锁",
+            )
+            call_sequence.append("mongo_save_version")
+            return original_save_version(*args, **kwargs)
+
+        with patch.object(self.store, "save_version_with_status", side_effect=audited_save_version):
+            rev = self.page.save_revision(user=self.user)
+            call_sequence.append("sql_save_revision_done")
+
+        # 测试页面有 2 个外置字段（primary_body 和 secondary_body），所以预期 mongo_save_version 被调用 2 次
+        self.assertEqual(call_sequence, ["mongo_save_version", "mongo_save_version", "sql_save_revision_done"])
+
+
+    def test_wagtail_actions_atomic_wrapped_flags_installed(self) -> None:
+        """断言 Wagtail 原生 5 大核心动作与状态类已安装外置原子包装。"""
+        from wagtail.actions.publish_revision import PublishRevisionAction
+        from wagtail.actions.publish_page_revision import PublishPageRevisionAction
+        from wagtail.actions.unpublish import UnpublishAction
+        from wagtail.actions.unpublish_page import UnpublishPageAction
+        from wagtail.models import WorkflowState
+
+        for target_cls in [
+            PublishRevisionAction,
+            PublishPageRevisionAction,
+            UnpublishAction,
+            UnpublishPageAction,
+            WorkflowState,
+        ]:
+            self.assertTrue(
+                getattr(target_cls, "_external_content_atomic_wrapped", False),
+                f"{target_cls.__name__} 必须被外置内容原子锁包装",
+            )
+
+    def test_unpublish_action_controlled_execution(self) -> None:
+        """直接通过 UnpublishAction(page).execute() 执行原生下架，验证代次递增与发布指针清空。"""
+        from wagtail.actions.unpublish import UnpublishAction
+
+        self.page._test_content_store = self.store
+        rev = self.page.save_revision(user=self.user)
+        self.page.publish(rev)
+
+        state_before = ExternalContentPublicationState.objects.get(page_id=self.page.pk)
+        gen_before = state_before.publication_generation or 0
+        self.assertEqual(state_before.published_revision_id, rev.pk)
+
+        action = UnpublishAction(self.page)
+        action.execute()
+
+        self.page.refresh_from_db()
+        self.assertFalse(self.page.live)
+
+        state_after = ExternalContentPublicationState.objects.get(page_id=self.page.pk)
+        self.assertEqual(state_after.publication_generation, gen_before + 1)
+        self.assertIsNone(state_after.published_revision_id)
+        self.assertIsNone(state_after.published_manifest)
+
+    def test_wagtail_actions_blocked_by_active_deletion_intent(self) -> None:
+        """存在活跃删除意图时，直接调用原生 PublishRevisionAction 与 UnpublishAction 被阻断。"""
+        from wagtail.actions.publish_page_revision import PublishRevisionAction
+        from wagtail.actions.unpublish import UnpublishAction
+
+        self.page._test_content_store = self.store
+        rev = self.page.save_revision(user=self.user)
+
+        intent = ExternalContentDeletionIntent.objects.create(
+            page_id=self.page.pk,
+            model_label="external_content.lifecycletestpage",
+            status=DeletionIntentStatus.PENDING,
+            safe_gc_after=timezone.now() + timedelta(days=7),
+        )
+
+        try:
+            pub_action = PublishRevisionAction(rev)
+            with self.assertRaises(ExternalContentOperationBlockedError):
+                pub_action.execute()
+
+            unpub_action = UnpublishAction(self.page)
+            with self.assertRaises(ExternalContentOperationBlockedError):
+                unpub_action.execute()
+        finally:
+            intent.delete()
+
+    def test_getattribute_corrupted_external_body_fails_closed(self) -> None:
+        """当正文在 MongoDB 缺失或损坏时，访问外置属性抛出异常 (Fail-Closed)。"""
+        self.page._test_content_store = self.store
+        rev = self.page.save_revision(user=self.user)
+        self.page.publish(rev)
+
+        self.collection.delete_many({"page_id": self.page.pk})
+
+        fresh_page = LifecycleTestPage.objects.get(pk=self.page.pk)
+        fresh_page._test_content_store = self.store
+
+        with self.assertRaises((CorruptedContentPayloadError, PublicationBodyUnavailableError)):
+            _ = fresh_page.primary_body
+
+    def test_refresh_from_db_corrupted_external_body_fails_closed(self) -> None:
+        """当正文在 MongoDB 缺失或损坏时，调用 refresh_from_db() 严格抛出异常 (Fail-Closed)。"""
+        self.page._test_content_store = self.store
+        rev = self.page.save_revision(user=self.user)
+        self.page.publish(rev)
+
+        self.collection.delete_many({"page_id": self.page.pk})
+
+        fresh_page = LifecycleTestPage.objects.get(pk=self.page.pk)
+        fresh_page._test_content_store = self.store
+
+        with self.assertRaises((CorruptedContentPayloadError, PublicationBodyUnavailableError)):
+            fresh_page.refresh_from_db()

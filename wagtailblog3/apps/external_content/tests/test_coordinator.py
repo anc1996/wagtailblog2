@@ -17,19 +17,25 @@ Wagtail Page 正文外置通用协议 - ExternalContentCoordinator 多字段协�
 """
 
 import json
+import logging
 import os
 import tempfile
 import uuid
+from types import SimpleNamespace
+from typing import Any
+from unittest.mock import create_autospec, patch
 from django.conf import settings
 from django.db import models
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from wagtail import blocks
 from wagtail.fields import StreamField, StreamValue
 from wagtail.models import Page
 
+from external_content.codecs.streamfield import StreamFieldV1Codec
 from external_content.coordinator import ExternalContentCoordinator
 from external_content.exceptions import (
     CodecPayloadError,
+    ContentStoreError,
     CorruptedContentPayloadError,
     FieldStorageConfigError,
     ManifestIdentityMismatchError,
@@ -39,6 +45,7 @@ from external_content.manifest import ExternalContentManifest, FieldManifestEntr
 from external_content.mixins import ExternalContentPageMixin
 from external_content.registry import (
     ContentStoragePolicy,
+    FieldStorageConfig,
     get_policy_for_version,
     get_storage_policy_for_model,
     reset_active_baseline_file,
@@ -285,9 +292,22 @@ class ExternalContentCoordinatorTests(TestCase):
         # 尝试跨页读取至页面 999
         other_page = MultiFieldTestPage(title="被攻击的目标页面")
         other_page.pk = 999
+        other_page.primary_body = [("heading", "目标页面原正文")]
+        other_page.secondary_body = [("quote", "目标页面原引用")]
 
-        with self.assertRaises(ManifestIdentityMismatchError):
+        with self.assertNumQueries(0), \
+             patch(
+                 "external_content.copying.validate_alias_manifest_source",
+                 side_effect=AssertionError("普通跨页不得尝试解析 Alias 来源"),
+             ), \
+             patch.object(
+                 self.store, "get_version",
+                 side_effect=AssertionError("身份拒绝前不得读取正文"),
+             ), \
+             self.assertRaises(ManifestIdentityMismatchError):
             self.coordinator.load_external_content_from_manifest(other_page, manifest)
+        self.assertEqual(other_page.primary_body[0].value, "目标页面原正文")
+        self.assertEqual(other_page.secondary_body[0].value, "目标页面原引用")
 
     def test_cross_model_pointer_load_rejected(self) -> None:
         """尝试使用其他模型类型的 Manifest 加载正文时抛出 ManifestIdentityMismatchError。"""
@@ -450,3 +470,153 @@ class ExternalContentCoordinatorTests(TestCase):
         # 核心断言：事前防御，零 Mongo 写入
         final_count = self.collection.count_documents({})
         self.assertEqual(initial_count, final_count)
+
+
+class CoordinatorPartialWriteLogSafetyTests(SimpleTestCase):
+    """第二字段失败时保留首字段新版本，但不得通过协调器日志泄露正文或异常。"""
+
+    def setUp(self) -> None:
+        self.sensitive_marker = "COORD_SYNTHETIC_PRIVATE_MARKER_20261006"
+        self.created_version_id = "coord-log-safety-first-version"
+        self.codec = StreamFieldV1Codec()
+        fields = {
+            "primary_body": StreamField([("heading", blocks.CharBlock())]),
+            "secondary_body": StreamField([("quote", blocks.BlockQuoteBlock())]),
+        }
+        self.page = SimpleNamespace(
+            pk=101,
+            _meta=SimpleNamespace(
+                label_lower="external_content_test_coord.multifieldtestpage",
+                get_field=fields.__getitem__,
+            ),
+            primary_body=[
+                {"id": "primary-log-safe", "type": "heading", "value": "首字段正文"},
+            ],
+            secondary_body=[
+                {"id": "secondary-log-safe", "type": "quote", "value": "次字段正文"},
+            ],
+        )
+        self.policy = ContentStoragePolicy(
+            model_label=self.page._meta.label_lower,
+            schema_version=1,
+            external_fields={
+                field_name: FieldStorageConfig(
+                    field_name=field_name,
+                    backend="mongo",
+                    codec=self.codec,
+                )
+                for field_name in fields
+            },
+        )
+        self.store = create_autospec(ContentVersionStore, instance=True)
+        self.coordinator = ExternalContentCoordinator(store=self.store)
+
+    def _assert_partial_write_retained(self, expected_fields: list[str]) -> None:
+        """失败只保留已成功创建的版本账本，禁止同步补偿删除或继续访问仓储。"""
+        self.assertEqual(
+            self.coordinator.last_created_version_ids,
+            [self.created_version_id],
+        )
+        self.assertEqual(
+            [store_call[0] for store_call in self.store.mock_calls],
+            ["save_version_with_status"] * len(expected_fields),
+        )
+        self.assertEqual(
+            [
+                store_call.kwargs["field_name"]
+                for store_call in self.store.save_version_with_status.call_args_list
+            ],
+            expected_fields,
+        )
+        for store_call in self.store.save_version_with_status.call_args_list:
+            self.assertEqual(store_call.kwargs["page_id"], 101)
+            self.assertEqual(store_call.kwargs["model_label"], self.policy.model_label)
+            self.assertEqual(store_call.kwargs["codec"], "streamfield.v1")
+            self.assertEqual(store_call.kwargs["schema_version"], 1)
+            self.assertRegex(store_call.kwargs["payload_sha256"], r"^[0-9a-f]{64}$")
+        self.store.cleanup_unreferenced_version.assert_not_called()
+        self.store.delete_version.assert_not_called()
+
+    def _assert_warning_is_safe(self, captured: Any) -> None:
+        """检查未格式化参数、最终输出及异常渠道，不让正文藏在延迟格式化日志中。"""
+        self.assertEqual(len(captured.records), 1)
+        record = captured.records[0]
+        self.assertEqual(record.levelno, logging.WARNING)
+        formatter = logging.Formatter()
+        surfaces = {
+            "message_template": str(record.msg),
+            "message_args": repr(record.args),
+            "message": record.getMessage(),
+            "formatted": formatter.format(record),
+            "captured_output": "\n".join(captured.output),
+            "exception_info": repr(record.exc_info),
+            "exception_text": record.exc_text or "",
+            "stack_info": record.stack_info or "",
+        }
+        if record.exc_info:
+            surfaces["formatted_exception"] = formatter.formatException(record.exc_info)
+        for surface_name, surface in surfaces.items():
+            with self.subTest(log_surface=surface_name):
+                self.assertFalse(
+                    self.sensitive_marker in surface,
+                    "协调器警告不得包含合成敏感输入",
+                )
+        self.assertIsNone(record.exc_info)
+        self.assertIsNone(record.exc_text)
+        self.assertIsNone(record.stack_info)
+        arguments = record.args.values() if isinstance(record.args, dict) else record.args
+        self.assertFalse(
+            any(isinstance(argument, BaseException) for argument in arguments),
+            "协调器警告不得携带原始异常对象，即使上游已脱敏",
+        )
+
+    def test_second_field_codec_failure_retains_version_without_sensitive_warning(self) -> None:
+        """真实 Codec 拒绝未知块类型后，上抛错误且不返回部分 Manifest、不泄漏输入。"""
+        self.page.secondary_body[0]["type"] = self.sensitive_marker
+        self.store.save_version_with_status.return_value = (
+            self.created_version_id,
+            True,
+        )
+        returned_manifest = None
+
+        with self.assertLogs("external_content.coordinator", level="WARNING") as captured:
+            with self.assertRaises(CodecPayloadError):
+                returned_manifest = self.coordinator.prepare_external_content_for_revision(
+                    self.page,
+                    policy=self.policy,
+                )
+
+        self.assertIsNone(returned_manifest)
+        self._assert_partial_write_retained(["primary_body"])
+        self.assertEqual(
+            self.store.save_version_with_status.call_args.kwargs["payload"],
+            [{"id": "primary-log-safe", "type": "heading", "value": "首字段正文"}],
+        )
+        self._assert_warning_is_safe(captured)
+
+    def test_second_field_store_failure_retains_version_without_sensitive_warning(self) -> None:
+        """存储底层错误即使包含敏感文本，仍原样传播而不进入协调器警告或同步清理。"""
+        store_error = ContentStoreError(
+            f"synthetic store failure: {self.sensitive_marker}",
+        )
+        self.store.save_version_with_status.side_effect = [
+            (self.created_version_id, True),
+            store_error,
+        ]
+        returned_manifest = None
+
+        with self.assertLogs("external_content.coordinator", level="WARNING") as captured:
+            with self.assertRaises(ContentStoreError) as raised:
+                returned_manifest = self.coordinator.prepare_external_content_for_revision(
+                    self.page,
+                    policy=self.policy,
+                )
+
+        self.assertIs(raised.exception, store_error)
+        self.assertIsNone(returned_manifest)
+        self._assert_partial_write_retained(["primary_body", "secondary_body"])
+        self.assertEqual(
+            self.store.save_version_with_status.call_args.kwargs["payload"],
+            [{"id": "secondary-log-safe", "type": "quote", "value": "次字段正文"}],
+        )
+        self._assert_warning_is_safe(captured)

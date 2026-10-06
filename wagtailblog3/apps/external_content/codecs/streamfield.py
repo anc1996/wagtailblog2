@@ -6,14 +6,17 @@ Wagtail Page 正文外置通用协议 - StreamField v1 编解码器。
 异常信息执行全流程脱敏与异常链解耦 (from None)，严禁在异常栈或日志中泄露正文 payload 或用户输入片段。
 """
 
+import logging
 import math
 from typing import Any, Dict, List, Optional
 
-from wagtail.blocks import StreamValue
+from wagtail.blocks import Block, ListBlock, StreamBlock, StreamValue, StructBlock
 from wagtail.fields import StreamField
 
 from external_content.codecs.base import BaseContentCodec
 from external_content.exceptions import CodecPayloadError
+
+logger = logging.getLogger(__name__)
 
 
 def _assert_no_nan_or_inf(data: Any) -> None:
@@ -30,6 +33,59 @@ def _assert_no_nan_or_inf(data: Any) -> None:
             _assert_no_nan_or_inf(item)
 
 
+def _roundtrip_preserves_envelope(
+    child_block: Block, original: Any, prepared: Any
+) -> bool:
+    """块包装层没有默认字段，键集合、类型和稳定 ID 必须完全保留。"""
+    if not isinstance(original, dict) or not isinstance(prepared, dict):
+        return False
+    if set(original) != {"type", "id", "value"} or set(prepared) != set(original):
+        return False
+    if original["type"] != prepared["type"] or original["id"] != prepared["id"]:
+        return False
+    return _roundtrip_preserves_block(child_block, original["value"], prepared["value"])
+
+
+def _roundtrip_preserves_block(block: Block, original: Any, prepared: Any) -> bool:
+    """仅允许 StructBlock 声明字段补默认 null，绝不忽略载荷中的未知或丢失键。"""
+    if isinstance(block, StructBlock):
+        if not isinstance(original, dict) or not isinstance(prepared, dict):
+            return False
+        declared = set(block.child_blocks)
+        if not set(original).issubset(declared) or not set(prepared).issubset(declared):
+            return False
+        if not set(original).issubset(prepared):
+            return False
+        for name, value in prepared.items():
+            child = block.child_blocks[name]
+            if name in original:
+                if not _roundtrip_preserves_block(child, original[name], value):
+                    return False
+            elif value is not None or child.get_prep_value(child.get_default()) is not None:
+                return False
+        return True
+    if isinstance(block, (StreamBlock, ListBlock)):
+        if not isinstance(original, list) or not isinstance(prepared, list):
+            return False
+        if len(original) != len(prepared):
+            return False
+        for original_item, prepared_item in zip(original, prepared):
+            if not isinstance(original_item, dict):
+                return False
+            if isinstance(block, StreamBlock):
+                child = block.child_blocks.get(original_item.get("type"))
+                if child is None:
+                    return False
+            else:
+                if original_item.get("type") != "item":
+                    return False
+                child = block.child_block
+            if not _roundtrip_preserves_envelope(child, original_item, prepared_item):
+                return False
+        return True
+    return type(original) is type(prepared) and original == prepared
+
+
 class StreamFieldV1Codec(BaseContentCodec):
     """
     StreamField 第一版通用编解码器 (streamfield.v1)。
@@ -43,7 +99,7 @@ class StreamFieldV1Codec(BaseContentCodec):
     6. 解码必须强制提供具备完整 StreamField 能力的目标 field 实例，禁止无类型校验的裸解；
     7. 解码时如遇字段未定义的未知块类型或冗余字段，必须失败关闭，严禁 Wagtail 静默丢块；
     8. 解码与重新编码执行无损对称性校验，确保绝无正文丢失；
-    9. 所有底层转换及惰性求值异常使用 from None 阻断异常链，并清除 __context__，防止用户正文泄漏。
+    9. 底层转换及惰性求值异常使用 from None 抑制标准 traceback 的异常链展示；不保证隐藏 __context__ 不存在。
     """
 
     codec_id: str = "streamfield.v1"
@@ -89,8 +145,8 @@ class StreamFieldV1Codec(BaseContentCodec):
                     b_type = block.get("type")
                     if b_type not in known_blocks:
                         raise CodecPayloadError(
-                            f"StreamField 第 {index} 个块类型 '{b_type}' 未在目标字段中定义，拒绝写入以防生成无法解码的孤儿版本",
-                            details={"index": index, "block_type": b_type},
+                            f"StreamField 第 {index} 个块类型未在目标字段中定义，拒绝写入以防生成无法解码的孤儿版本",
+                            details={"index": index},
                         )
             self.decode(raw_list, field=field)
 
@@ -215,8 +271,17 @@ class StreamFieldV1Codec(BaseContentCodec):
             err.__context__ = None
             raise err from None
 
-        re_normalized = self.normalize_payload(re_prepped)
-        if re_normalized != payload:
+        # 仅做基础 validate，避免递归调用 decode
+        self.validate_payload(re_prepped)
+
+        try:
+            preserved = _roundtrip_preserves_block(field.stream_block, payload, re_prepped)
+        except Exception:
+            raise CodecPayloadError("StreamField 默认字段往返校验失败") from None
+
+        if not preserved:
+            # 往返失败只记录固定错误码，避免正文及冗余字段经日志泄露。
+            logger.error("ERR_STREAMFIELD_ROUNDTRIP_MISMATCH")
             raise CodecPayloadError(
                 "StreamField 往返编解码结果不一致（可能含有未定义属性或冗余嵌套字段），拒绝以防数据静默丢失"
             )

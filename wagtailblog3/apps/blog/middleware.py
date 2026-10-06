@@ -29,6 +29,35 @@ class PageViewMiddleware(MiddlewareMixin):
         缺失或损坏快照不能安全恢复，返回 409；Mongo 暂时不可用时返回 503，允许重试。
         """
         from .models import BlogRevisionBodyUnavailableError
+        from external_content.exceptions import PublicationBodyUnavailableError
+
+        if isinstance(exception, PublicationBodyUnavailableError):
+            path_match = self._admin_page_path.match(request.path)
+            is_admin_page = path_match is not None
+            page_id = path_match.group("page_id") if path_match else None
+            status = 409 if is_admin_page else 503
+            logger.warning(
+                "external_publication_body_unavailable path=%s status=%s",
+                request.path,
+                status,
+            )
+            context = {
+                "error_code": "publication_body_unavailable",
+                "is_external_publication": True,
+                "retryable": False,
+            }
+            if page_id is not None:
+                context["history_url"] = reverse("wagtailadmin_pages:history", args=[page_id])
+                context["retry_url"] = request.get_full_path()
+                template_name = "blog/admin/revision_body_unavailable.html"
+            else:
+                template_name = "external_content/publication_body_unavailable.html"
+            return TemplateResponse(
+                request,
+                template_name,
+                context,
+                status=status,
+            )
 
         if not isinstance(exception, BlogRevisionBodyUnavailableError):
             return None

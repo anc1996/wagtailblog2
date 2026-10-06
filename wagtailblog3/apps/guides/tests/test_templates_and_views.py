@@ -24,6 +24,22 @@ from django.test import Client, RequestFactory, TestCase, override_settings
 from wagtail.models import Page, Site
 
 import uuid
+
+
+def _get_test_mongo_db_name() -> str:
+    """获取测试 MongoDB 数据库名：统一读取 settings.MONGO_DB['NAME']，兼容开发环境回退至 MONGO_DB_NAME。"""
+    from external_content.store import get_mongo_settings
+
+    try:
+        mongo_cfg = get_mongo_settings()
+        if isinstance(mongo_cfg, dict) and mongo_cfg.get("NAME"):
+            return str(mongo_cfg["NAME"])
+    except Exception:
+        pass
+    # 兼容旧版开发环境：回退至 MONGO_DB_NAME 或默认值
+    return getattr(settings, "MONGO_DB_NAME", "wagtailblog_test")
+
+
 from external_content.store import (
     ContentVersionStore,
     ensure_indexes,
@@ -50,7 +66,7 @@ class GuideTemplatesAndViewsTestCase(TestCase):
         self.factory = RequestFactory()
         self.coll_name = f"test_guides_tmpl_{uuid.uuid4().hex[:8]}"
         self.mongo_client = get_mongo_client()
-        db_name = getattr(settings, "MONGO_DB_NAME", "wagtailblog_test")
+        db_name = _get_test_mongo_db_name()
         self.collection = self.mongo_client[db_name][self.coll_name]
         ensure_indexes(self.collection)
         set_active_collection_name(self.coll_name)

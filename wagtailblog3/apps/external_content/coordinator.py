@@ -12,7 +12,10 @@ Wagtail Page 正文外置通用协议 - 多字段协调器 (Coordinator) 接口�
    - 普通序列化不产生 Mongo 写副作用。
 """
 
-from typing import Any, Dict, Optional
+import logging
+from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 from wagtail.models import Page
 
@@ -37,6 +40,7 @@ class ExternalContentCoordinator:
 
     def __init__(self, store: Optional[ContentVersionStore] = None) -> None:
         self.store = store or ContentVersionStore()
+        self.last_created_version_ids: List[str] = []
 
     def prepare_external_content_for_revision(
         self,
@@ -62,30 +66,45 @@ class ExternalContentCoordinator:
             raise FieldStorageConfigError(f"模型 {page.__class__.__name__} 未配置任何外置字段策略")
 
         fields_manifest: Dict[str, FieldManifestEntry] = {}
+        created_version_ids: List[str] = []
+        self.last_created_version_ids = created_version_ids
 
-        for field_name, field_cfg in pol.external_fields.items():
-            value = getattr(page, field_name, None)
-            target_field = page._meta.get_field(field_name)
-            # 调用 Codec 进行规范化并计算确定性 SHA-256（传入目标字段实例进行写入前严格校验）
-            normalized_payload, payload_sha256 = field_cfg.codec.encode(value, field=target_field)
+        try:
+            for field_name, field_cfg in pol.external_fields.items():
+                value = getattr(page, field_name, None)
+                target_field = page._meta.get_field(field_name)
+                # 调用 Codec 进行规范化并计算确定性 SHA-256（传入目标字段实例进行写入前严格校验）
+                normalized_payload, payload_sha256 = field_cfg.codec.encode(value, field=target_field)
 
-            # 持久化至不可变正文集合
-            version_id = self.store.save_version(
-                model_label=pol.model_label,
-                page_id=page.pk,
-                field_name=field_name,
-                codec=field_cfg.codec.codec_id,
-                schema_version=field_cfg.codec.schema_version,
-                payload_sha256=payload_sha256,
-                payload=normalized_payload,
-            )
+                # 持久化至不可变正文集合，支持记录新生成版本
+                version_id, is_new = self.store.save_version_with_status(
+                    model_label=pol.model_label,
+                    page_id=page.pk,
+                    field_name=field_name,
+                    codec=field_cfg.codec.codec_id,
+                    schema_version=field_cfg.codec.schema_version,
+                    payload_sha256=payload_sha256,
+                    payload=normalized_payload,
+                )
+                if is_new:
+                    created_version_ids.append(version_id)
 
-            fields_manifest[field_name] = FieldManifestEntry(
-                codec=field_cfg.codec.codec_id,
-                schema_version=field_cfg.codec.schema_version,
-                version_id=version_id,
-                payload_sha256=payload_sha256,
-            )
+                fields_manifest[field_name] = FieldManifestEntry(
+                    codec=field_cfg.codec.codec_id,
+                    schema_version=field_cfg.codec.schema_version,
+                    version_id=version_id,
+                    payload_sha256=payload_sha256,
+                )
+        except Exception:
+            # G4 契约：严禁同步清理外置正文。异常失败时产生未被引用的新版本留待 7 天安全期后的异步 GC 回收。
+            if created_version_ids:
+                safe_page_id = page.pk if type(page.pk) is int else None
+                logger.warning(
+                    "EXTERNAL_CONTENT_PREPARE_FAILED: page_id=%s, created_version_count=%s",
+                    safe_page_id,
+                    len(created_version_ids),
+                )
+            raise
 
         return ExternalContentManifest(
             protocol_version=1,
@@ -105,7 +124,7 @@ class ExternalContentCoordinator:
         依据 Manifest 将外置正文解码还原至页面实例。
 
         严格防跨页与版本身份校验：
-        1. 验证 Manifest 的 page_id 与 model_label 与 page 实例严格一致；
+        1. 验证同页身份；跨页 Alias 必须由数据库来源链和正式快照证明，保留受控 Copy 契约；
         2. 核验 content_storage_schema，按版本解析策略（支持历史版本安全还原）；
         3. 严格核验字段集合完全闭环：若缺少策略声明的外置字段或有多余字段，一律失败关闭；
         4. 严格核验字段 codec 标识与 schema_version 匹配；
@@ -119,8 +138,24 @@ class ExternalContentCoordinator:
         :raises ManifestIdentityMismatchError: 页面身份与 Manifest 不符
         :raises ManifestValidationError: 字段集合不闭环、版本不匹配或字段属性非法
         """
-        # 1. 页面身份交叉核验
-        manifest.validate_against_page(page)
+        # 1. 同页历史快照仍合法；跨页 Alias 必须由数据库链和正式 State 证明。
+        from external_content.mixins import _controlled_copy_context
+        is_copy = getattr(_controlled_copy_context, "in_copy", False)
+        expected_label = getattr(page._meta, "label_lower", "")
+        if manifest.model_label != expected_label:
+            raise ManifestIdentityMismatchError(
+                f"Manifest model_label ('{manifest.model_label}') 与实际页面模型 ('{expected_label}') 不一致"
+            )
+        if manifest.page_id == page.pk:
+            manifest.validate_against_page(page)
+        elif not is_copy:
+            # 普通跨页是身份错误，不能误入要求正式 Revision 的 Alias 来源解析。
+            # 实例上的 alias_of_id 只选择校验路径，不赋予跨页读取资格。
+            if not getattr(page, "alias_of_id", None):
+                manifest.validate_against_page(page)
+            from external_content.copying import validate_alias_manifest_source
+
+            validate_alias_manifest_source(page, manifest)
 
         # 2. 解析策略并核验 content_storage_schema
         pol = policy or get_policy_for_version(type(page), manifest.content_storage_schema)
@@ -163,7 +198,7 @@ class ExternalContentCoordinator:
                 entry.version_id,
                 expected_identity={
                     "model_label": manifest.model_label,
-                    "page_id": page.pk,
+                    "page_id": manifest.page_id,
                     "field_name": field_name,
                     "codec": entry.codec,
                     "schema_version": entry.schema_version,

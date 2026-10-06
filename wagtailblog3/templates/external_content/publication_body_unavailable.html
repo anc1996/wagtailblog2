@@ -1,0 +1,18 @@
+﻿<!doctype html>
+<html lang="zh-hans">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>正文暂时不可用</title>
+</head>
+<body>
+  <main role="main">
+    <h1>正文暂时不可用</h1>
+    <p role="alert">页面的正式正文目前无法通过完整性校验。系统未显示空白正文或草稿副本，请稍后重试或联系管理员核查。</p>
+    {% if is_admin_page %}
+      <p>为保护正式内容，当前请求已停止；请勿通过重新发布或复制页面绕过此状态。</p>
+      {% if history_url %}<p><a href="{{ history_url }}">查看页面历史</a></p>{% endif %}
+    {% endif %}
+  </main>
+</body>
+</html>

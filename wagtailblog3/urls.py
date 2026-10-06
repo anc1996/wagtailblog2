@@ -1,4 +1,4 @@
-# wagtailblog3/urls.py：项目根 URL 配置，负责挂载管理后台、应用路由和 Wagtail 页面服务。
+﻿# wagtailblog3/urls.py：项目根 URL 配置，负责挂载管理后台、应用路由和 Wagtail 页面服务。
 
 from django.conf import settings  # 读取 DEBUG、媒体 URL 等运行环境配置
 from django.conf.urls.i18n import i18n_patterns  # 为面向用户的路由增加语言前缀
@@ -13,6 +13,8 @@ from wagtail.images.views.serve import ServeView  # Wagtail 图片源文件重�
 from blog.views import test_search_backend  # 开发环境搜索后端连通性测试视图
 
 urlpatterns = [
+    # /admin/external-content/：正文外置删除意图的受控取消入口。
+    path("admin/external-content/", include("external_content.urls")),
     # /django-admin/：Django 原生管理后台，供项目基础模型和系统功能管理使用。
     path("django-admin/", admin.site.urls),
     # /admin/：Wagtail 内容编辑、发布、用户和站点配置后台。

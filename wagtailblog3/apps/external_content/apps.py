@@ -56,3 +56,7 @@ class ExternalContentConfig(AppConfig):
 
         from .deletion import wrap_native_page_deletion
         wrap_native_page_deletion()
+
+        # 防重接入只包装单页 Web 入口，启动时不读取缓存或调用业务动作。
+        from .request_bridge import install_request_bridge
+        install_request_bridge()

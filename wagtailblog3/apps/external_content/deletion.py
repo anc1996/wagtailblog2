@@ -1,21 +1,10 @@
 ﻿"""
-Wagtail Page 正文外置通用协议 - 安全删除协议与延迟垃圾回收 (Tombstone GC)。
+Wagtail Page 正文外置通用协议 - 删除意图与禁用中的 Tombstone GC。
 
-架构契约与防护线：
-1. 意图先行 (Intent-First)：
-   在任何页面物理删除前，必须先在 ExternalContentDeletionIntent 中固化并持久化待删版本清单；
-2. 跨库物理隔离 (Physical Isolation)：
-   MySQL 页面及其 Revision 被删除，意图置为 MYSQL_DELETED；
-   MongoDB 中的不可变正文在此刻绝对保留，阻止双向级联物理丢失；
-3. 绝对安全隔离期 (Strict Safe Isolation Period)：
-   强制执行 safe_gc_after 隔离期（默认 7 天），绝对禁止任何参数绕过该安全隔离期；
-4. 分布式围栏租约机制 (Claim Fence)：
-   多 Worker 并发场景下，通过原子状态认领与超时租约围栏，杜绝重复回收与竞态撕裂；
-5. 持久 Tombstone 墓碑与逐版本回收进度：
-   记录 collected_versions 与 failed_versions，细粒度追踪每个不可变版本的回收结果与原因；
-6. 复合引用归零防御 (Zero-Reference Defense)：
-   安全期过后 GC 时，逐版本全量核查全系统活跃状态、Revision 与其他意图跨页引用；
-   唯有确认引用彻底归零，方可在 MongoDB 中安全物理删除该不可变正文字段。
+删除时记录持久意图，SQL 删除不得级联删除 Mongo 不可变正文。
+GC 的最终 token/租约、冻结及完整引用围栏尚未闭合，因此公开回收入口
+无条件拒绝执行；下方保留的旧算法不是可用性或并发安全证明。
+bulk/祖先删除的整批闭包和原生树锁也仍需独立复核与隔离集成验证。
 """
 
 from __future__ import annotations
@@ -23,15 +12,17 @@ from __future__ import annotations
 import datetime
 import logging
 import uuid
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
+from copy import deepcopy
 from functools import wraps
-from typing import Any, Dict, Iterator, List, Optional, Set
+from typing import Any, Dict, Iterator, List, Literal, Optional, Set
 
 from django.db import models, router, transaction
 from django.utils import timezone
 from wagtail.models import Page, Revision
 
-from external_content.exceptions import ExternalContentOperationBlockedError
+from external_content.exceptions import ExternalContentOperationBlockedError, ManifestValidationError
+from external_content.manifest import ExternalContentManifest
 from external_content.models import (
     DeletionIntentStatus,
     ExternalContentDeletionIntent,
@@ -47,6 +38,58 @@ import threading
 
 # 线程局部上下文，用于在删除流程中跳过写入检查（按 page_id 精确豁免）
 _deletion_context = threading.local()
+
+DeletionFailureStage = Literal[
+    "execute", "record-intent", "native-action", "tree-delete", "collector",
+    "pre-delete", "post-delete", "intent-status-save",
+    "transaction-enter", "transaction-exit",
+]
+
+
+def _log_deletion_failure(
+    stage: DeletionFailureStage, diagnostic_logger: Optional[logging.Logger] = None,
+) -> None:
+    """诊断只含固定事件与阶段；日志故障不能替换正在传播的原始业务异常。"""
+    try:
+        (diagnostic_logger if diagnostic_logger is not None else logger).error(
+            "external_content_deletion_failed stage=%s", stage,
+        )
+    except BaseException:
+        # 运行时诊断不是可靠审计；不能为记录失败引入补偿写入或二次异常。
+        pass
+
+
+@contextmanager
+def _deletion_failure_stage(
+    stage: DeletionFailureStage, diagnostic_logger: Optional[logging.Logger] = None,
+) -> Iterator[None]:
+    """记录实际观察到的边界，可有多层记录，不推测底层 SQL 故障或提交结果。"""
+    try:
+        yield
+    except BaseException:
+        _log_deletion_failure(stage, diagnostic_logger)
+        raise
+
+
+@contextmanager
+def _deletion_atomic(using: Optional[str] = None) -> Iterator[None]:
+    """区分事务入口/退出与原业务异常；退出失败中性记录，绝不宣称已回滚。"""
+    entered = False
+    body_error: Optional[BaseException] = None
+    try:
+        with transaction.atomic(using=using):
+            entered = True
+            try:
+                yield
+            except BaseException as error:
+                body_error = error
+                raise
+    except BaseException as error:
+        if not entered:
+            _log_deletion_failure("transaction-enter")
+        elif body_error is None or error is not body_error:
+            _log_deletion_failure("transaction-exit")
+        raise
 
 
 @contextmanager
@@ -70,7 +113,7 @@ def wrap_native_page_deletion() -> None:
         @wraps(original_execute)
         def atomic_execute(self: Any, *args: Any, **kwargs: Any) -> Any:
             using = kwargs.get("using") or router.db_for_write(type(self.page), instance=self.page)
-            with transaction.atomic(using=using):
+            with _deletion_failure_stage("native-action"), _deletion_atomic(using=using):
                 return original_execute(self, *args, **kwargs)
 
         atomic_execute._external_content_deletion_wrapped = True
@@ -83,7 +126,7 @@ def wrap_native_page_deletion() -> None:
         def atomic_queryset_delete(self: Any, *args: Any, **kwargs: Any) -> Any:
             if not issubclass(self.model, Page):
                 return original_queryset_delete(self, *args, **kwargs)
-            with transaction.atomic(using=self.db):
+            with _deletion_failure_stage("tree-delete"), _deletion_atomic(using=self.db):
                 return original_queryset_delete(self, *args, **kwargs)
 
         atomic_queryset_delete._external_content_deletion_wrapped = True
@@ -101,7 +144,7 @@ def wrap_native_page_deletion() -> None:
                 for model, instances in self.data.items()
             ):
                 return original_collector_delete(self, *args, **kwargs)
-            with safe_deletion_scope(set()):
+            with _deletion_failure_stage("collector"), safe_deletion_scope(set()):
                 return original_collector_delete(self, *args, **kwargs)
 
         scoped_collector_delete._external_content_deletion_wrapped = True
@@ -134,6 +177,22 @@ def _validated_pending_deletion_intent(
     return pending_intents[0] if pending_intents else None
 
 
+@contextmanager
+def _restore_fields_on_failure(
+    instance: Any, fields: tuple[str, ...], snapshot: Optional[Dict[str, Any]] = None,
+) -> Iterator[None]:
+    """仅异常时恢复本服务改动的内存字段；不代表数据库提交结果或完整树对象恢复。"""
+    before = deepcopy(snapshot) if snapshot is not None else {
+        field: deepcopy(getattr(instance, field)) for field in fields
+    }
+    try:
+        yield
+    except BaseException:
+        for field, value in before.items():
+            setattr(instance, field, value)
+        raise
+
+
 def record_deletion_intent(
     page: Page,
     actor_id: Optional[str] = None,
@@ -162,7 +221,9 @@ def record_deletion_intent(
             f"安全隔离期不得低于 7 天 ({min_safe_period} 秒)，实际传入 {safe_period_seconds} 秒"
         )
 
-    with transaction.atomic():
+    # 快照封套在 atomic 外退出，才能涵盖保存以及事务退出时抛出的异常。
+    with _deletion_failure_stage("record-intent"), \
+            ExitStack() as failure_state, _deletion_atomic():
         # 使用统一锁原语获取全局单调锁序 (符合 Sol 审查要求)
         from external_content.locking import lock_page_lifecycle_hierarchy
 
@@ -177,32 +238,34 @@ def record_deletion_intent(
 
         version_ids: Set[str] = set()
         version_metadata: List[Dict[str, Any]] = []  # 存储每个版本的完整元数据（列表格式）
-        version_id_set: Set[str] = set()  # 用于去重
+        identities: Dict[str, Dict[str, Any]] = {}
+
+        def collect_manifest(raw_manifest: Any) -> None:
+            """严校验而不读 Mongo；共享不可变指针保留声明身份，不重绑为删除页。"""
+            parsed = ExternalContentManifest.from_dict(raw_manifest)
+            for field_name, pointer in parsed.fields.items():
+                vid = pointer.version_id
+                identity = {
+                    "model_label": parsed.model_label,
+                    "page_id": parsed.page_id,
+                    "field_name": field_name,
+                    "codec": pointer.codec,
+                    "schema_version": pointer.schema_version,
+                    "payload_sha256": pointer.payload_sha256,
+                }
+                if vid in identities:
+                    if identities[vid] != identity:
+                        raise ManifestValidationError("同一正文版本存在冲突身份，拒绝冻结不完整清单")
+                    continue
+                identities[vid] = identity
+                version_ids.add(vid)
+                version_metadata.append({"version_id": vid, "expected_identity": identity})
 
         # 1. 从锁屏障内已取得的 ExternalContentPublicationState 读取正式、审批、草稿 Manifest 中引用的版本
         if state:
             for manifest_dict in [state.published_manifest, state.approved_manifest, state.draft_manifest]:
-                if isinstance(manifest_dict, dict):
-                    fields = manifest_dict.get("fields", {})
-                    if isinstance(fields, dict):
-                        for field_name, field_ptr in fields.items():
-                            if isinstance(field_ptr, dict) and field_ptr.get("version_id"):
-                                vid = str(field_ptr["version_id"])
-                                version_ids.add(vid)
-                                # 收集完整的 6 键身份信息（去重）
-                                if vid not in version_id_set:
-                                    version_id_set.add(vid)
-                                    version_metadata.append({
-                                        "version_id": vid,
-                                        "expected_identity": {
-                                            "model_label": model_label,
-                                            "page_id": page_id,
-                                            "field_name": field_name,
-                                            "codec": field_ptr.get("codec"),
-                                            "schema_version": field_ptr.get("schema_version"),
-                                            "payload_sha256": field_ptr.get("payload_sha256"),
-                                        }
-                                    })
+                if manifest_dict is not None:
+                    collect_manifest(manifest_dict)
 
         # 2. 从锁屏障内已取得的全部历史 Revision 获取序列化数据中的 _external_content_manifest 版本
         revision_ids: List[int] = []
@@ -210,28 +273,9 @@ def record_deletion_intent(
             revision_ids.append(rev.pk)
             content = getattr(rev, "content", ) or {}
             if isinstance(content, dict):
-                raw_manifest = content.get("_external_content_manifest")
-                if isinstance(raw_manifest, dict):
-                    fields = raw_manifest.get("fields", {})
-                    if isinstance(fields, dict):
-                        for field_name, field_ptr in fields.items():
-                            if isinstance(field_ptr, dict) and field_ptr.get("version_id"):
-                                vid = str(field_ptr["version_id"])
-                                version_ids.add(vid)
-                                # 收集完整的 6 键身份信息（去重，如果还没有的话）
-                                if vid not in version_id_set:
-                                    version_id_set.add(vid)
-                                    version_metadata.append({
-                                        "version_id": vid,
-                                        "expected_identity": {
-                                            "model_label": model_label,
-                                            "page_id": page_id,
-                                            "field_name": field_name,
-                                            "codec": field_ptr.get("codec"),
-                                            "schema_version": field_ptr.get("schema_version"),
-                                            "payload_sha256": field_ptr.get("payload_sha256"),
-                                        }
-                                    })
+                # 旧 Revision 可以缺命名空间；显式空值不是缺席，必须失败关闭。
+                if "_external_content_manifest" in content:
+                    collect_manifest(content["_external_content_manifest"])
 
         # 3. 收集别名页面 ID
         alias_ids: List[int] = list(page.aliases.values_list("id", flat=True))
@@ -246,6 +290,9 @@ def record_deletion_intent(
         }
 
         if existing_intent and existing_intent.status == DeletionIntentStatus.PENDING:
+            failure_state.enter_context(_restore_fields_on_failure(
+                existing_intent, ("manifest", "safe_gc_after", "actor_id", "request_id", "updated_at")
+            ))
             existing_intent.manifest = manifest_payload
             # 重复登记时，safe_gc_after 不能被缩短，保持原有的（更晚的）时间
             if safe_gc_after > existing_intent.safe_gc_after:
@@ -310,7 +357,11 @@ def execute_safe_page_deletion(
     page_id = page.pk
     model_label = page._meta.label_lower
 
-    with transaction.atomic():
+    # 仅保住调用者的目标 PK 和本服务意图字段；外围批次失败的其他对象须丢弃重读。
+    # COMMIT 结果未知时，即使内存已恢复，也不得据此自动重试，必须先核对 SQL 权威状态。
+    with _deletion_failure_stage("execute"), \
+            _restore_fields_on_failure(page, (page._meta.pk.attname,)), \
+            ExitStack() as failure_state, _deletion_atomic():
         from external_content.locking import lock_page_lifecycle_hierarchy
 
         locks = lock_page_lifecycle_hierarchy(page_id, revision_ids=None, check_write=False)
@@ -319,6 +370,14 @@ def execute_safe_page_deletion(
         )
         if locks.page.content_type.model_class() is not type(page):
             raise ExternalContentOperationBlockedError("删除页面模型与数据库身份不一致")
+        intent_fields = (
+            "status", "manifest", "safe_gc_after", "actor_id", "request_id", "updated_at",
+        )
+        # 可选分支的嵌套登记会返回 fresh ORM 对象；先保存锁内已有意图的冻结字段，
+        # 再将该快照绑定到实际内部返回对象，不能误用重新登记后的字段作失败基线。
+        existing_snapshot = {
+            field: deepcopy(getattr(locked_intent, field)) for field in intent_fields
+        } if intent is None and locked_intent is not None else None
         if intent is None:
             locked_intent = record_deletion_intent(
                 page, actor_id=actor_id, request_id=request_id
@@ -331,13 +390,17 @@ def execute_safe_page_deletion(
         ):
             raise ExternalContentOperationBlockedError("删除意图与锁内页面身份不一致")
 
+        failure_state.enter_context(_restore_fields_on_failure(
+            locked_intent, intent_fields, snapshot=existing_snapshot,
+        ))
         # Collector 仍核验并补齐版本清单；执行器仅暂时持有精确的本页删除窗口。
         with preserve_threadlocal_context(page, "_controlled_safe_deletion_in_progress", True):
             with safe_deletion_scope({page_id}):
                 page.delete()
         locked_intent.refresh_from_db()
         locked_intent.status = DeletionIntentStatus.MYSQL_DELETED
-        locked_intent.save(update_fields=["status", "updated_at"])
+        with _deletion_failure_stage("intent-status-save"):
+            locked_intent.save(update_fields=["status", "updated_at"])
 
         logger.info(
             "external_content_safe_page_deleted intent_id=%s page_id=%s",
@@ -354,23 +417,22 @@ def perform_garbage_collection(
     batch_size: int = 50,
 ) -> Dict[str, int]:
     """
-    执行外置正文延迟垃圾回收 (Tombstone GC)。
+    拒绝尚未完成最终围栏验证的外置正文回收。
 
-    强制红线：
-    1. 严格遵循 safe_gc_after 安全隔离期，禁止任何参数绕过；
-    2. 使用原子 claim 租约与 claim_expires_at 围栏防止多 Worker 竞态冲突；
-    3. 逐版本记录 collected_versions（持久 tombstone）与 failed_versions；
-    4. 复合引用归零核查通过后，方可物理删除 MongoDB 文档。
+    保留签名兼容旧调用方，但所有参数均不能解除禁用。异常发生在时钟、
+    ORM、认领或 Mongo 操作之前，存量正文及意图不被此入口改动。
+    恢复回收需补齐安全期、token/租约/代次、冻结和完整引用复核，
+    并另行获得验证与执行授权；旧预扫描结果不能代替最终围栏。
 
-    性能优化算法：
-    采用批量内存集合预加载 (Batch Hash Set Indexing)，将全表 SQL LIKE (%vid%) 降为 O(1) 内存哈希比对。
-
-    :param now: 基准当前时间（默认为 timezone.now()）
-    :param worker_id: 执行回收的 Worker 标识（未提供时自动生成）
-    :param claim_duration_seconds: 租约有效时间（秒，默认 300 秒）
-    :param batch_size: 单次回收处理的最大删除意图数（默认 50）
-    :return: 统计字典，格式 {"collected_intents": int, "deleted_versions": int}
+    :raises ExternalContentOperationBlockedError: GC 当前硬禁用。
     """
+    # P-02 审查：旧回收器缺少最终 token/租约复核、全引用闭包与 F 阶段围栏。
+    # 无论调用方参数如何，先拒绝且不扫描/认领/触碰 Mongo；保留意图与存量。
+    # 恢复执行须另行补齐协议并获得验证/授权，不提供配置绕过开关。
+    raise ExternalContentOperationBlockedError(
+        "GC 已禁用：最终 token/freeze/references 围栏未闭合，禁止认领或物理删除正文"
+    )
+
     current_time = now or timezone.now()
 
     # 未来时钟校验：禁止传入未来时间

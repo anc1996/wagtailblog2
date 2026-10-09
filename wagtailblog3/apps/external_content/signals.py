@@ -130,13 +130,15 @@ def handle_external_content_pre_delete(sender: Any, instance: Any, **kwargs: Any
     if not instance.pk:
         return
 
-    from external_content.deletion import record_deletion_intent
+    from external_content.deletion import _deletion_failure_stage, record_deletion_intent
 
-    record_deletion_intent(instance)
-    # 意图登记和状态核验成功后才逐页授权，Collector 退出负责整批精确恢复。
-    if not hasattr(_deletion_context, "deleting_page_ids"):
-        raise ExternalContentOperationBlockedError("删除缺少隔离的 Collector 授权窗口")
-    _deletion_context.deleting_page_ids.add(instance.pk)
+    with _deletion_failure_stage("pre-delete", logger):
+        # 缺少 Collector 隔离窗口时必须先拒绝，不能独立提交 PENDING 后再报错。
+        if not hasattr(_deletion_context, "deleting_page_ids"):
+            raise ExternalContentOperationBlockedError("删除缺少隔离的 Collector 授权窗口")
+        record_deletion_intent(instance)
+        # 意图登记和状态核验成功后才逐页授权，Collector 退出负责整批精确恢复。
+        _deletion_context.deleting_page_ids.add(instance.pk)
 
 
 @receiver(post_delete, dispatch_uid="external_content.post_delete_status_update")
@@ -164,7 +166,10 @@ def handle_external_content_post_delete(sender: Any, instance: Any, **kwargs: An
     if getattr(instance, "_controlled_safe_deletion_in_progress", False):
         return
 
-    try:
+    from external_content.deletion import _deletion_failure_stage
+
+    # 异常诊断只记固定阶段，不能带入正文、身份、原异常或 traceback。
+    with _deletion_failure_stage("post-delete", logger):
         # ❌ 不删除 PublicationState！它是审计日志，必须保留。
         # ExternalContentPublicationState.objects.filter(page_id=instance.pk).delete()
 
@@ -176,8 +181,6 @@ def handle_external_content_post_delete(sender: Any, instance: Any, **kwargs: An
         if intent is None:
             raise ExternalContentOperationBlockedError("后删除缺少已核验的 PENDING 意图")
         intent.status = DeletionIntentStatus.MYSQL_DELETED
-        intent.save(update_fields=["status", "updated_at"])
+        with _deletion_failure_stage("intent-status-save", logger):
+            intent.save(update_fields=["status", "updated_at"])
         logger.info("external_content_auto_deletion_intent_mysql_deleted intent_id=%s page_id=%s", intent.pk, instance.pk)
-    except Exception as exc:
-        logger.error("external_content_post_delete_hook_failed page_id=%s error=%s", instance.pk, exc, exc_info=True)
-        raise

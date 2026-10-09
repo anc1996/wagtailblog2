@@ -50,7 +50,7 @@ class ExternalContentCoordinator:
         """
         显式为当前页面准备不可变 Revision 正文版本。
 
-        按策略收集所有外置字段，调用 Codec 编码并存入 MongoDB，构建整页 Manifest。
+        先完成所有字段的编码与来源核验，再存入 MongoDB，构建整页 Manifest。
         只有此显式入口会产生 MongoDB 写入副作用，普通 serializable_data 绝不写入。
 
         :param page: 已持久化具备 pk 的 Wagtail Page 实例
@@ -58,6 +58,9 @@ class ExternalContentCoordinator:
         :return: 包含全部外置字段指针的 ExternalContentManifest
         :raises FieldStorageConfigError: 模型未配置有效策略或 page 尚未保存
         """
+        # RB-01：身份/策略拒绝也属于新的零写入尝试，不能沿用上次的孤儿诊断。
+        created_version_ids: List[str] = []
+        self.last_created_version_ids = created_version_ids
         if not page.pk:
             raise FieldStorageConfigError("页面尚未持久化生成主键 ID，无法准备不可变正文版本")
 
@@ -66,17 +69,71 @@ class ExternalContentCoordinator:
             raise FieldStorageConfigError(f"模型 {page.__class__.__name__} 未配置任何外置字段策略")
 
         fields_manifest: Dict[str, FieldManifestEntry] = {}
-        created_version_ids: List[str] = []
-        self.last_created_version_ids = created_version_ids
+        staged_payloads: Dict[str, tuple[Any, str]] = {}
 
         try:
+            # RB-01：全部前置校验通过前不写版本；后字段非法不能产生前字段孤儿。
             for field_name, field_cfg in pol.external_fields.items():
+                state_getter = getattr(page, "get_external_field_state", None)
+                field_state = state_getter(field_name) if callable(state_getter) else None
+                if field_state is not None and field_state.status == "UNLOADED":
+                    # 校验完整来源但不物化字段；空 SQL 占位绝不是可复用的正文。
+                    page._load_external_field_source(field_name, materialize=False)
+                    field_state = state_getter(field_name)
+                    source = field_state.manifest
+                    entry = source.fields[field_name]
+                    if (
+                        source.model_label == pol.model_label and source.page_id == page.pk
+                        and source.content_storage_schema == pol.schema_version
+                        and entry.codec == field_cfg.codec.codec_id
+                        and entry.schema_version == field_cfg.codec.schema_version
+                    ):
+                        # 来源加载已经完整校验过，仍在复用点核对该不可变引用。
+                        self.store.get_version(entry.version_id, expected_identity={
+                            "model_label": pol.model_label, "page_id": page.pk,
+                            "field_name": field_name, "codec": entry.codec,
+                            "schema_version": entry.schema_version, "payload_sha256": entry.payload_sha256,
+                        })
+                        fields_manifest[field_name] = entry
+                        continue
                 value = getattr(page, field_name, None)
                 target_field = page._meta.get_field(field_name)
                 # 调用 Codec 进行规范化并计算确定性 SHA-256（传入目标字段实例进行写入前严格校验）
                 normalized_payload, payload_sha256 = field_cfg.codec.encode(value, field=target_field)
 
-                # 持久化至不可变正文集合，支持记录新生成版本
+                field_state = state_getter(field_name) if callable(state_getter) else None
+                source_manifest = field_state.manifest if field_state is not None else None
+                entry = source_manifest.fields.get(field_name) if source_manifest is not None else None
+                if (
+                    entry is not None
+                    and source_manifest.model_label == pol.model_label
+                    and source_manifest.page_id == page.pk
+                    and source_manifest.content_storage_schema == pol.schema_version
+                    and entry.codec == field_cfg.codec.codec_id
+                    and entry.schema_version == field_cfg.codec.schema_version
+                    and entry.payload_sha256 == payload_sha256
+                ):
+                    # 未改变字段复用引用前仍校验仓储存在性/哈希/身份；不靠内存摘要放行。
+                    self.store.get_version(entry.version_id, expected_identity={
+                        "model_label": pol.model_label, "page_id": page.pk,
+                        "field_name": field_name, "codec": entry.codec,
+                        "schema_version": entry.schema_version, "payload_sha256": payload_sha256,
+                    })
+                    fields_manifest[field_name] = entry
+                    continue
+                if field_state is not None and field_state.status == "LOADED":
+                    # StreamValue 原地修改绕过 __setattr__，必须在重新编码处捕获。
+                    from dataclasses import replace
+                    page._external_content_field_states[field_name] = replace(
+                        field_state, status="CLEARED" if not normalized_payload else "DIRTY",
+                        source="NEW" if field_state.source == "NEW" else "EDIT",
+                    )
+
+                staged_payloads[field_name] = (normalized_payload, payload_sha256)
+
+            # RB-02：存储阶段仍可能部分成功；只记录确认 ID，未知 ACK 不重试、不删除。
+            for field_name, (normalized_payload, payload_sha256) in staged_payloads.items():
+                field_cfg = pol.external_fields[field_name]
                 version_id, is_new = self.store.save_version_with_status(
                     model_label=pol.model_label,
                     page_id=page.pk,
@@ -96,7 +153,7 @@ class ExternalContentCoordinator:
                     payload_sha256=payload_sha256,
                 )
         except Exception:
-            # G4 契约：严禁同步清理外置正文。异常失败时产生未被引用的新版本留待 7 天安全期后的异步 GC 回收。
+            # G4/RB-02：保留不可变孤儿供只读对账；GC 当前硬禁用，严禁删除补偿。
             if created_version_ids:
                 safe_page_id = page.pk if type(page.pk) is int else None
                 logger.warning(
@@ -111,7 +168,7 @@ class ExternalContentCoordinator:
             content_storage_schema=pol.schema_version,
             model_label=pol.model_label,
             page_id=page.pk,
-            fields=fields_manifest,
+            fields={name: fields_manifest[name] for name in pol.external_fields},
         )
 
     def load_external_content_from_manifest(
@@ -119,6 +176,11 @@ class ExternalContentCoordinator:
         page: Page,
         manifest: ExternalContentManifest,
         policy: Optional[ContentStoragePolicy] = None,
+        *,
+        source: str = "REVISION",
+        revision_id: Optional[int] = None,
+        preserve_edits: bool = False,
+        fields: Optional[set[str]] = None,
     ) -> None:
         """
         依据 Manifest 将外置正文解码还原至页面实例。
@@ -139,8 +201,6 @@ class ExternalContentCoordinator:
         :raises ManifestValidationError: 字段集合不闭环、版本不匹配或字段属性非法
         """
         # 1. 同页历史快照仍合法；跨页 Alias 必须由数据库链和正式 State 证明。
-        from external_content.mixins import _controlled_copy_context
-        is_copy = getattr(_controlled_copy_context, "in_copy", False)
         expected_label = getattr(page._meta, "label_lower", "")
         if manifest.model_label != expected_label:
             raise ManifestIdentityMismatchError(
@@ -148,7 +208,7 @@ class ExternalContentCoordinator:
             )
         if manifest.page_id == page.pk:
             manifest.validate_against_page(page)
-        elif not is_copy:
+        else:
             # 普通跨页是身份错误，不能误入要求正式 Revision 的 Alias 来源解析。
             # 实例上的 alias_of_id 只选择校验路径，不赋予跨页读取资格。
             if not getattr(page, "alias_of_id", None):
@@ -178,6 +238,8 @@ class ExternalContentCoordinator:
                 raise ManifestValidationError(
                     f"Manifest 包含策略未登记的多余字段指针: {sorted(extra)}"
                 )
+        if fields is not None and not fields.issubset(expected_fields):
+            raise ManifestValidationError("定向加载包含未登记的外置字段")
 
         # 4. 核验字段 codec 与 schema_version，并拉取不可变文档
         # 4. 阶段 1：校验并解码所有字段至暂存字典，确保原子性（失败关闭，绝不部分修改实例）
@@ -212,8 +274,25 @@ class ExternalContentCoordinator:
             staged_values[field_name] = decoded_value
 
         # 7. 全部字段解码与验证成功后，一次性赋值到页面实例
+        binder = getattr(page, "_bind_external_field_source", None)
+        if callable(binder):
+            for field_name in manifest.fields:
+                binder(field_name, manifest, source=source, revision_id=revision_id)
         for field_name, decoded_value in staged_values.items():
-            setattr(page, field_name, decoded_value)
+            if fields is not None and field_name not in fields:
+                continue
+            state_getter = getattr(page, "get_external_field_state", None)
+            if (
+                preserve_edits and callable(state_getter)
+                and state_getter(field_name).status != "UNLOADED"
+            ):
+                # 也保留已物化字段，避免另一个字段懒加载覆盖尚未识别的原地修改。
+                continue
+            setter = getattr(page, "_set_external_field_loaded", None)
+            if callable(setter):
+                setter(field_name, decoded_value, manifest, source=source, revision_id=revision_id)
+            else:
+                setattr(page, field_name, decoded_value)
 
     def validate_manifest_payloads(
         self,

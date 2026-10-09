@@ -14,8 +14,9 @@ from __future__ import annotations
 
 import json
 import logging
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional
+from typing import TYPE_CHECKING, Any, Callable, Iterator, Mapping, Optional
 
 from django.db import transaction
 from django.utils import timezone
@@ -23,6 +24,7 @@ from django.utils import timezone
 from external_content.coordinator import ExternalContentCoordinator
 from external_content.locking import (
     check_page_write_not_blocked,
+    lock_alias_lifecycle_closure,
     lock_page_lifecycle_hierarchy,
     preserve_threadlocal_context,
 )
@@ -50,6 +52,37 @@ _controlled_save_context = threading.local()
 
 if TYPE_CHECKING:
     from wagtail.models import Page, Revision, WorkflowState
+
+
+@contextmanager
+def _restore_failed_publication_memory(page: Any) -> Iterator[None]:
+    """只恢复业务体失败的发布元数据，不刷新 SQL 或覆盖用户未提交的正文。
+
+    必须置于最外层 atomic 内侧：最终 COMMIT 未知或提交后回调失败时，
+    不能把恢复旧内存伪装成数据库已回滚；调用者应丢弃该实例并只读核对。
+    """
+    missing = object()
+    names = (
+        "live", "live_revision_id", "go_live_at", "has_unpublished_changes",
+        "expired", "first_published_at", "last_published_at",
+    )
+    before = {name: page.__dict__.get(name, missing) for name in names}
+    cache = getattr(getattr(page, "_state", None), "fields_cache", None)
+    live_revision = cache.get("live_revision", missing) if cache is not None else missing
+    try:
+        yield
+    except BaseException:
+        for name, value in before.items():
+            if value is missing:
+                page.__dict__.pop(name, None)
+            else:
+                page.__dict__[name] = value
+        if cache is not None:
+            if live_revision is missing:
+                cache.pop("live_revision", None)
+            else:
+                cache["live_revision"] = live_revision
+        raise
 
 
 @dataclass(frozen=True)
@@ -146,13 +179,22 @@ class ExternalContentPublicationService:
             raise ValueError(f"非法的 page_id: {page_id}")
         if not isinstance(revision_id, int) or isinstance(revision_id, bool) or revision_id < 1:
             raise ValueError(f"非法的 revision_id: {revision_id}")
+        if approved_revision_id is not None and (
+            type(approved_revision_id) is not int
+            or approved_revision_id != revision_id
+        ):
+            raise PublicationRevisionInvalidError("审批指针必须指向本次已校验的指定 Revision")
 
         with transaction.atomic():
-            from wagtail.models import Page, Revision
-
-            # 全局单调统一锁序 Level 1~4
-            locks = lock_page_lifecycle_hierarchy(page_id, [revision_id], check_write=True)
+            # 发布会同步下游 Alias；必须在任何正文读取前锁定整个来源/目标闭包。
+            locks = lock_alias_lifecycle_closure(page_id).pages[page_id]
             page_base = locks.page
+            revision = next((row for row in locks.revisions if row.pk == revision_id), None)
+            if revision is None:
+                # 不允许在 Intent 层之后补锁任意 Revision，包括属于其他页面的版本。
+                raise PublicationRevisionInvalidError(
+                    f"指定 Revision {revision_id} 不在页面 {page_id} 的锁集合中"
+                )
             page = page_base.specific
             expected_model_label = page._meta.label_lower
 
@@ -164,13 +206,6 @@ class ExternalContentPublicationService:
                 )
 
             # Revision 真实归属严格校验 (content_type 与 object_id)
-            try:
-                revision = Revision.objects.select_for_update().get(pk=revision_id)
-            except Revision.DoesNotExist as exc:
-                raise PublicationRevisionInvalidError(
-                    f"未找到属于页面 {page.pk} 的 Revision: revision_id={revision_id}"
-                ) from exc
-
             base_ct = page_base.get_base_content_type()
             if revision.base_content_type_id != base_ct.id or str(revision.object_id) != str(page_base.pk):
                 raise PublicationRevisionInvalidError(
@@ -188,6 +223,8 @@ class ExternalContentPublicationService:
                 raise ManifestIdentityMismatchError(
                     f"Manifest model_label ({manifest.model_label}) 与页面实际模型 ({expected_model_label}) 不匹配"
                 )
+            manifest.validate_against_page(page)
+            manifest.validate_against_revision(revision)
 
             # 校验 Mongo 版本与哈希
             coordinator = ExternalContentCoordinator(store=store)
@@ -230,8 +267,6 @@ class ExternalContentPublicationService:
                 update_fields.extend(["draft_revision_id", "draft_manifest"])
 
             if approved_revision_id is not None:
-                if not isinstance(approved_revision_id, int) or isinstance(approved_revision_id, bool):
-                    raise ValueError(f"非法的 approved_revision_id: {approved_revision_id}")
                 state.approved_revision_id = approved_revision_id
                 state.approved_manifest = manifest.to_dict()
                 update_fields.extend(["approved_revision_id", "approved_manifest"])
@@ -291,6 +326,9 @@ class ExternalContentPublicationService:
         with transaction.atomic():
             candidate = cls.lock_and_validate_revision(page_id, revision_id, store=store)
             state = candidate.state
+            # 本入口只补齐原生发布已落地的指定版本；不能把保存/排期变成正式发布。
+            if not candidate.page.live or candidate.page.live_revision_id != revision_id:
+                return state
 
             # 幂等性判断：已发布相同 Revision 且 Manifest 匹配时直接返回
             if (
@@ -320,7 +358,7 @@ class ExternalContentPublicationService:
         """
         with transaction.atomic():
             # 统一单调全级锁序与写入冻结核验
-            locks = lock_page_lifecycle_hierarchy(page_id, revision_ids=None, check_write=True)
+            locks = lock_alias_lifecycle_closure(page_id).pages[page_id]
             page_base = locks.page
             model_label = (
                 page_base.specific_class._meta.label_lower
@@ -362,7 +400,7 @@ class ExternalContentPublicationService:
     def clear_published_pointer(cls, page_id: int) -> None:
         """在下架完成时清空正式发布指针（严格在持有全级锁的事务内执行，P0-2 闭环）。"""
         with transaction.atomic():
-            locks = lock_page_lifecycle_hierarchy(page_id, revision_ids=None, check_write=True)
+            locks = lock_alias_lifecycle_closure(page_id).pages[page_id]
             state = locks.state
             if state:
                 state.published_revision_id = None
@@ -383,6 +421,8 @@ class ExternalContentPublicationService:
         cls,
         page_id: int,
         unpublish_callable: Callable[[], Any],
+        *,
+        executing_page: Any,
     ) -> Any:
         """统一受控下架协调器（Page.unpublish 与 UnpublishAction 共享，P0-3 闭环）。"""
         with transaction.atomic():
@@ -390,7 +430,11 @@ class ExternalContentPublicationService:
             from external_content.deletion import _deletion_context
             deleting_ids = getattr(_deletion_context, 'deleting_page_ids', None)
             in_safe_deletion = deleting_ids is not None and page_id in deleting_ids
-            locks = lock_page_lifecycle_hierarchy(page_id, revision_ids=None, check_write=(not in_safe_deletion))
+            # 删除上下文沿用已授权批次的锁；普通下架先围栏全部 Alias 再进入原生代码。
+            locks = (
+                lock_page_lifecycle_hierarchy(page_id, revision_ids=None, check_write=False)
+                if in_safe_deletion else lock_alias_lifecycle_closure(page_id).pages[page_id]
+            )
             page_base = locks.page
             model_label = (
                 page_base.specific_class._meta.label_lower
@@ -398,19 +442,45 @@ class ExternalContentPublicationService:
                 else page_base._meta.label_lower
             )
 
+            alias_source_id = getattr(page_base, "alias_of_id", None)
+            # 原生下架会 full save 执行对象；锁内授权不能使 caller 的空关系
+            # 绕过保存校验，或借用外层授权把普通页写成 Alias。漂移即退出整操作。
+            if (
+                getattr(executing_page, "pk", None) != page_id
+                or getattr(executing_page, "alias_of_id", None) != alias_source_id
+            ):
+                raise ExternalContentOperationBlockedError(
+                    "受控下架执行对象与锁内页面或 Alias 来源关系不一致，拒绝执行"
+                )
+
+            # 原生下架会保存 Alias 元数据；来源授权只取锁内关系，不信任
+            # 调用者可变的 alias_of_id，也不向后续动作泄漏嵌套授权。
+            from external_content.mixins import _controlled_alias_context
+
+            with ExitStack() as authorization, preserve_threadlocal_context(
+                _controlled_save_context, "in_controlled_save", True,
+            ):
+                # 非 Alias 同样覆盖为无授权，防止继承外层来源；退出精确恢复。
+                authorization.enter_context(preserve_threadlocal_context(
+                    _controlled_alias_context, "in_alias", alias_source_id is not None,
+                ))
+                authorization.enter_context(preserve_threadlocal_context(
+                    _controlled_alias_context, "alias_update_source_page_id", alias_source_id,
+                ))
+                result = unpublish_callable()
+
+            # 若处于非提交模式（commit=False），禁止提前推进代次与清空指针
+            if getattr(_controlled_save_context, "commit_false", False):
+                return result
+
+            # 非提交动作不得额外初始化外置 State；原生递归子 Alias 的
+            # commit=True 仍独立落地，不能因为父动作非提交而跳过其原生回调。
             state = locks.state
             if state is None:
                 state, _ = ExternalContentPublicationState.objects.select_for_update().get_or_create(
                     page_id=page_id,
                     defaults={"model_label": model_label, "publication_generation": 0},
                 )
-
-            with preserve_threadlocal_context(_controlled_save_context, "in_controlled_save", True):
-                result = unpublish_callable()
-
-            # 若处于非提交模式（commit=False），禁止提前推进代次与清空指针
-            if getattr(_controlled_save_context, "commit_false", False):
-                return result
 
             if state.published_revision_id is not None or state.published_manifest is not None:
                 state.publication_generation = (state.publication_generation or 0) + 1
@@ -448,10 +518,15 @@ class ExternalContentPublicationService:
             raise PublicationWorkflowRevisionDriftError("无法从 WorkflowState 提取有效的 page_id")
 
         with transaction.atomic():
-            locks = lock_page_lifecycle_hierarchy(int(page_id), revision_ids=None, check_write=True)
+            locks = lock_alias_lifecycle_closure(int(page_id)).pages[int(page_id)]
             page = locks.page.specific
 
             locked_state = WorkflowState.objects.select_for_update().get(pk=workflow_state.pk)
+            if (
+                locked_state.status != WorkflowState.STATUS_APPROVED
+                or locked_state.get_next_task() is not None
+            ):
+                raise PublicationWorkflowRevisionDriftError("Workflow 尚未完整批准，禁止调用完成发布入口")
             approved_task = (
                 locked_state.task_states.filter(
                     status__in=(TaskState.STATUS_APPROVED, TaskState.STATUS_SKIPPED),
@@ -464,7 +539,20 @@ class ExternalContentPublicationService:
             if not approved_task or not approved_task.revision:
                 raise PublicationWorkflowRevisionDriftError("未找到 Workflow 绑定的审批 Revision")
 
-            approved_rev = approved_task.revision
+            if user is not None and not any(
+                action[0] == "approve"
+                for action in approved_task.task.specific.get_actions(page, user)
+            ):
+                from django.core.exceptions import PermissionDenied
+
+                raise PermissionDenied("Workflow 完成发布需要当前审批任务的审核权限")
+
+            approved_rev = next(
+                (revision for revision in locks.revisions
+                 if revision.pk == approved_task.revision.pk), None
+            )
+            if approved_rev is None:
+                raise PublicationRevisionInvalidError("Workflow 审批 Revision 不在目标页面锁集合中")
 
             # 1. 严格优先校验 Revision 真实归属 (content_type 与 object_id)
             base_ct = page.get_base_content_type()
@@ -473,12 +561,7 @@ class ExternalContentPublicationService:
                     f"Workflow 批准的 Revision (ID: {approved_rev.pk}) 的 content_type 或 object_id 与目标页面 (ID: {page.pk}) 不匹配"
                 )
 
-            # 2. 检查页面最新 Revision 是否发生草稿漂移
-            latest_rev = page.get_latest_revision()
-            if latest_rev and latest_rev.pk != approved_rev.pk:
-                raise PublicationWorkflowRevisionDriftError(
-                    f"Workflow 批准的 Revision ({approved_rev.pk}) 与页面最新修订 ({latest_rev.pk}) 不一致，禁止隐式发布未审核草稿"
-                )
+            # 新草稿不改变审批输入；发布审批版本 A，保留更晚草稿 B，不隐式换成 latest。
 
             test_store = getattr(page, "_test_content_store", None)
             cls.lock_and_validate_revision(
@@ -488,7 +571,8 @@ class ExternalContentPublicationService:
                 store=test_store,
             )
             # 严格委托 page.publish 处理排期与立即发布分流，禁止提前无条件推进正式指针
-            page.publish(approved_rev, user=user)
+            # 审批权不等于页面发布权；仅已完成且有审核权的内部入口跳过重复发布权限检查。
+            page.publish(approved_rev, user=user, skip_permission_checks=True)
 
 
 def is_external_content_target(obj: Any) -> bool:
@@ -498,7 +582,10 @@ def is_external_content_target(obj: Any) -> bool:
     """
     if obj is None:
         return False
-    target_cls = obj if isinstance(obj, type) else type(getattr(obj, "specific", obj))
+    # 识别阶段不能访问 specific：自定义模型的 hydration 可能直接读 Mongo。
+    target_cls = obj if isinstance(obj, type) else (getattr(obj, "specific_class", None) or type(obj))
+    if not isinstance(obj, type) and getattr(obj, "content_storage", None):
+        return True
     if hasattr(target_cls, "content_storage") and getattr(target_cls, "content_storage"):
         return True
     try:
@@ -514,8 +601,104 @@ def is_external_content_target(obj: Any) -> bool:
     return False
 
 
+def _lock_publication_action_revisions(
+    page_id: int, revision_id: int, previous_revision_id: Optional[int],
+) -> tuple[Any, Any]:
+    """从完整 Alias 围栏中选定版本，校验后回绑锁内 Page，不补查/补锁。"""
+    from wagtail.models import Revision
+    from external_content.registry import get_storage_policy_for_model
+
+    locks = lock_alias_lifecycle_closure(page_id).pages[page_id]
+    specific_cls = locks.page.specific_class
+    try:
+        policy = get_storage_policy_for_model(specific_cls, allow_record_new=False)
+    except Exception as exc:
+        raise ExternalContentOperationBlockedError("解析外置存储策略失败，拒绝发布") from exc
+    if (
+        not policy
+        or not getattr(policy, "external_fields", None)
+        or (getattr(policy, "model_class", None) is not None
+            and policy.model_class != specific_cls)
+        or (getattr(policy, "model_label", None)
+            and policy.model_label != specific_cls._meta.label_lower)
+    ):
+        raise ExternalContentOperationBlockedError("外置存储策略无效或模型不匹配，拒绝发布")
+
+    def select_revision(selected_id: int) -> Any:
+        revision = next((row for row in locks.revisions if row.pk == selected_id), None)
+        if revision is None:
+            raise PublicationRevisionInvalidError(
+                f"Revision {selected_id} 不在页面 {page_id} 的锁集合中，禁止发布"
+            )
+        base_ct = locks.page.get_base_content_type()
+        if (
+            revision.base_content_type_id != base_ct.id
+            or str(revision.object_id) != str(page_id)
+            or revision.content_type_id != locks.page.content_type_id
+        ):
+            raise PublicationRevisionInvalidError(
+                f"Revision {selected_id} 的页面或模型归属与锁内目标不匹配"
+            )
+        # 必须先校验身份，才允许原生 as_object 通过 P01 还原读取不可变正文。
+        manifest = _extract_manifest_from_revision(revision)
+        # 围栏返回基础 Page；其 _meta 是 wagtailcore.page，不是具体外置模型。
+        # 此处用锁内 content_type 解析出的类核对，不为校验而抢先 specific。
+        if manifest.page_id != page_id or manifest.model_label != specific_cls._meta.label_lower:
+            raise ManifestIdentityMismatchError("发布 Manifest 与锁内页面/具体模型不匹配")
+        manifest.validate_against_revision(revision)
+        return revision
+
+    revision = select_revision(revision_id)
+    previous = select_revision(previous_revision_id) if previous_revision_id is not None else None
+    page = locks.page.specific
+    # GenericForeignKey 的缓存 API 不修改 Revision 身份列。显式覆盖缓存，防止
+    # 原生构造器/previous_revision.as_object 使用调用者持有的陈旧 content_object。
+    for selected in (revision, previous):
+        if selected is not None:
+            Revision.content_object.set_cached_value(selected, page)
+    return revision, previous
+
+
+def _wrap_publish_action_constructor(cls: type) -> None:
+    """原生构造期已会还原正文；首次 as_object 必须在冻结围栏之后。"""
+    if getattr(cls, "_external_content_constructor_wrapped", False):
+        return
+    original_init = cls.__init__
+
+    def controlled_init(
+        self: Any, revision: Any, user: Any = None, changed: bool = True,
+        log_action: bool = True, previous_revision: Any = None,
+    ) -> None:
+        # 只解析 ContentType 的模型类，不访问 content_object/specific 或正文。
+        model = revision.content_type.model_class()
+        self.__dict__.pop("_external_content_publication_identity", None)
+        if not is_external_content_target(model):
+            original_init(self, revision, user=user, changed=changed,
+                          log_action=log_action, previous_revision=previous_revision)
+            return
+        try:
+            page_id, revision_id = int(revision.object_id), int(revision.pk)
+            previous_id = int(previous_revision.pk) if previous_revision is not None else None
+        except (TypeError, ValueError) as exc:
+            raise PublicationRevisionInvalidError("发布需要持久化 Page/Revision 身份") from exc
+        if page_id <= 0 or revision_id <= 0 or (previous_id is not None and previous_id <= 0):
+            raise PublicationRevisionInvalidError("发布需要有效 Page/Revision 主键")
+        with transaction.atomic():
+            locked_revision, locked_previous = _lock_publication_action_revisions(
+                page_id, revision_id, previous_id,
+            )
+            original_init(self, locked_revision, user=user, changed=changed,
+                          log_action=log_action, previous_revision=locked_previous)
+            # 构造与 execute 可以不在同一事务：只保存指定身份，不延续锁的假象。
+            # execute 必须再次取围栏并重新还原；不信任可变的 self.object/revision。
+            self._external_content_publication_identity = (page_id, revision_id, previous_id)
+
+    cls.__init__ = controlled_init
+    cls._external_content_constructor_wrapped = True
+
+
 def _wrap_single_publish_action(cls: type) -> None:
-    """对具体的发布动作类执行安全包装与原子生命周期锁嵌入。"""
+    """执行期重新锁定指定版本并还原；保留原生权限检查与参数语义。"""
     if getattr(cls, "_external_content_atomic_wrapped", False):
         return
 
@@ -525,68 +708,34 @@ def _wrap_single_publish_action(cls: type) -> None:
         with transaction.atomic():
             obj = getattr(self, "object", None)
             rev = getattr(self, "revision", None)
+            identity = getattr(self, "_external_content_publication_identity", None)
 
             # 判断是否涉及外置正文受控模型
-            is_target = is_external_content_target(obj)
+            is_target = identity is not None or is_external_content_target(obj)
             if not is_target and rev:
                 rev_obj = getattr(rev, "content_object", None)
                 if is_external_content_target(rev_obj):
                     is_target = True
 
             if is_target:
-                if obj is None or not getattr(obj, "pk", None):
+                if identity is None and (obj is None or not getattr(obj, "pk", None)):
                     raise ExternalContentOperationBlockedError(
                         f"受控外置页面对象缺失或尚未持久化主键，拒绝执行发布: {obj}"
                     )
-                if rev is None or not getattr(rev, "pk", None):
+                if identity is None and (rev is None or not getattr(rev, "pk", None)):
                     raise ExternalContentOperationBlockedError(
                         f"受控外置页面待发布 Revision 缺失或尚未持久化主键，拒绝执行发布: {rev}"
                     )
 
-                specific_obj = getattr(obj, "specific", obj)
-                try:
-                    from external_content.registry import get_storage_policy_for_model
-                    policy = get_storage_policy_for_model(type(specific_obj), allow_record_new=False)
-                except Exception as exc:
-                    raise ExternalContentOperationBlockedError(
-                        f"解析对象 {specific_obj} 的外置存储策略失败，拒绝执行发布: {exc}"
-                    ) from exc
-
-                policy_cls = getattr(policy, "model_class", None)
-                obj_meta = getattr(specific_obj, "_meta", None)
-                expected_label = getattr(obj_meta, "label_lower", None) or (
-                    f"{getattr(obj_meta, 'app_label', '')}.{getattr(obj_meta, 'model_name', '')}".strip(".")
-                    if obj_meta else None
-                )
-                mismatch = False
-                if policy_cls is not None and policy_cls != type(specific_obj):
-                    mismatch = True
-                elif getattr(policy, "model_label", None) and expected_label and policy.model_label != expected_label:
-                    mismatch = True
-
-                if not policy or not getattr(policy, "external_fields", None) or mismatch:
-                    raise ExternalContentOperationBlockedError(
-                        f"外置受控对象 {specific_obj} 的存储策略无效、缺失外置字段或模型不匹配，严格阻断发布"
-                    )
-
-                page_id = int(specific_obj.pk)
-                # 统一单调全级锁序与写入冻结核验
-                locks = lock_page_lifecycle_hierarchy(page_id, [rev.pk], check_write=True)
-                locked_rev = next((r for r in locks.revisions if r.pk == rev.pk), None)
-                if not locked_rev:
-                    raise PublicationRevisionInvalidError(
-                        f"待发布 Revision (ID: {rev.pk}) 未在目标页面 (ID: {page_id}) 的锁集合中命中，禁止发布跨页面或不存在的 Revision"
-                    )
-
-                # 强验 Revision 的实际归属
-                base_ct = specific_obj.get_base_content_type() if hasattr(specific_obj, "get_base_content_type") else None
-                if base_ct:
-                    if getattr(locked_rev, "base_content_type_id", None) != base_ct.id or str(getattr(locked_rev, "object_id", "")) != str(page_id):
-                        raise PublicationRevisionInvalidError(
-                            f"待发布 Revision (ID: {locked_rev.pk}) 的 content_type 或 object_id 与目标页面 (ID: {page_id}) 不匹配"
-                        )
-
-                self.revision = locked_rev
+                if identity is None:
+                    previous = getattr(self, "previous_revision", None)
+                    identity = (int(obj.pk), int(rev.pk),
+                                int(previous.pk) if previous is not None else None)
+                self.revision, self.previous_revision = _lock_publication_action_revisions(*identity)
+                self.object = self.revision.as_object()
+                self.instance = self.object
+                from wagtail.permissions import policy_registry
+                self.permission_policy = policy_registry.get(self.object)
 
                 # 若 revision 设置了未来发布时间，同步至 self.object.go_live_at，确保 Wagtail 严格维持 live=False
                 rev_approved_at = getattr(self.revision, "approved_go_live_at", None)
@@ -620,37 +769,44 @@ def _wrap_single_unpublish_action(cls: type) -> None:
                     f"受控外置页面对象缺失或尚未持久化主键，拒绝执行下架: {obj}"
                 )
 
-            specific_obj = getattr(obj, "specific", obj)
+            specific_cls = getattr(obj, "specific_class", None) or type(obj)
             try:
                 from external_content.registry import get_storage_policy_for_model
-                policy = get_storage_policy_for_model(type(specific_obj), allow_record_new=False)
+                policy = get_storage_policy_for_model(specific_cls, allow_record_new=False)
             except Exception as exc:
                 raise ExternalContentOperationBlockedError(
-                    f"解析对象 {specific_obj} 的外置存储策略失败，拒绝执行下架: {exc}"
+                    "解析外置存储策略失败，拒绝执行下架"
                 ) from exc
 
             policy_cls = getattr(policy, "model_class", None)
-            obj_meta = getattr(specific_obj, "_meta", None)
+            obj_meta = getattr(specific_cls, "_meta", None)
             expected_label = getattr(obj_meta, "label_lower", None) or (
                 f"{getattr(obj_meta, 'app_label', '')}.{getattr(obj_meta, 'model_name', '')}".strip(".")
                 if obj_meta else None
             )
             mismatch = False
-            if policy_cls is not None and policy_cls != type(specific_obj):
+            if policy_cls is not None and policy_cls != specific_cls:
                 mismatch = True
             elif getattr(policy, "model_label", None) and expected_label and policy.model_label != expected_label:
                 mismatch = True
 
             if not policy or not getattr(policy, "external_fields", None) or mismatch:
                 raise ExternalContentOperationBlockedError(
-                    f"外置受控对象 {specific_obj} 的存储策略无效、缺失外置字段或模型不匹配，严格阻断下架"
+                    "外置存储策略无效、缺失外置字段或模型不匹配，严格阻断下架"
                 )
 
-            page_id = int(specific_obj.pk)
-            return ExternalContentPublicationService.execute_controlled_unpublish(
-                page_id=page_id,
-                unpublish_callable=lambda: original_execute(self, skip_permission_checks=skip_permission_checks),
-            )
+            page_id = int(obj.pk)
+            # 防重边界按本 Action 的 commit 设置；嵌套 Alias 的 commit=True
+            # 必须独立生效，不能继承父动作的非提交标记而留下正式指针。
+            with transaction.atomic(), _restore_failed_publication_memory(obj):
+                with preserve_threadlocal_context(
+                    _controlled_save_context, "commit_false", not getattr(self, "commit", True),
+                ):
+                    return ExternalContentPublicationService.execute_controlled_unpublish(
+                        page_id=page_id,
+                        unpublish_callable=lambda: original_execute(self, skip_permission_checks=skip_permission_checks),
+                        executing_page=obj,
+                    )
 
         with transaction.atomic():
             return original_execute(self, skip_permission_checks=skip_permission_checks)
@@ -678,6 +834,7 @@ def wrap_publish_page_revision_action() -> None:
         raise RuntimeError("无法导入 wagtail.actions.publish_page_revision.PublishPageRevisionAction，外置正文生命周期保护无法建立") from exc
 
     for cls in classes_to_wrap:
+        _wrap_publish_action_constructor(cls)
         _wrap_single_publish_action(cls)
 
 
@@ -727,7 +884,7 @@ def wrap_workflow_state_finish() -> None:
         if is_target and page_id:
             with transaction.atomic():
                 # 按照全局单调锁序：先持有 Page 全级生命周期锁 (Level 1~4)
-                lock_page_lifecycle_hierarchy(int(page_id), revision_ids=None, check_write=True)
+                lock_alias_lifecycle_closure(int(page_id))
                 # 再进入原生 finish()，修改 WorkflowState 状态 (Level 5) 并触发 on_finish
                 return original_finish(self, user=user)
 

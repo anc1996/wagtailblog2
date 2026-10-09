@@ -9,6 +9,7 @@ import json
 import logging
 import threading
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import datetime, timezone as datetime_timezone
 from typing import Any, ClassVar, Dict, Iterator, Optional
 
@@ -32,6 +33,7 @@ from external_content.models import ExternalContentPublicationState
 from external_content.publication import (
     ExternalContentPublicationService,
     _controlled_save_context,
+    _restore_failed_publication_memory,
     validate_scheduled_revision,
 )
 from external_content.locking import (
@@ -39,7 +41,8 @@ from external_content.locking import (
     lock_page_lifecycle_hierarchy,
     preserve_threadlocal_context,
 )
-from external_content.registry import get_storage_policy_for_model
+from external_content.registry import ExternalFieldState, get_storage_policy_for_model
+from external_content.forms import ExternalContentPageForm, install_external_content_create_bridge
 from external_content.store import ContentVersionStore
 
 logger = logging.getLogger(__name__)
@@ -77,6 +80,166 @@ class ExternalContentPageMixin:
 
     content_storage: ClassVar[Optional[Dict[str, str]]] = None
     content_storage_schema: ClassVar[int] = 1
+    base_form_class = ExternalContentPageForm
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        # CreateView.dispatch 在 POST 前构造 page，确保首次创建也在外层 SQL 事务内。
+        install_external_content_create_bridge()
+        # Django 初始化/ORM 构造不是用户清空；from_db 随后建立来源。
+        object.__setattr__(self, "_external_content_internal_assignment", True)
+        try:
+            super().__init__(*args, **kwargs)
+        finally:
+            object.__setattr__(self, "_external_content_internal_assignment", False)
+        states = {}
+        for name, backend in (self.content_storage or {}).items():
+            if backend == "mongo":
+                value = self.__dict__.get(name)
+                explicit = name in kwargs
+                states[name] = ExternalFieldState(
+                    status=self._external_value_status(value) if explicit else "LOADED",
+                    source="NEW",
+                )
+        object.__setattr__(self, "_external_content_field_states", states)
+
+    @staticmethod
+    def _external_value_status(value: Any) -> str:
+        """None 是非法/未知正文，不作为显式空的替代品。"""
+        return "CLEARED" if value is not None and hasattr(value, "__len__") and len(value) == 0 else "DIRTY"
+
+    @classmethod
+    def from_db(cls, db: str, field_names: Any, values: Any) -> Any:
+        obj = super().from_db(db, field_names, values)
+        source = "LIVE" if obj.__dict__.get("live", False) else "REVISION"
+        revision_id = obj.__dict__.get(
+            "live_revision_id" if source == "LIVE" else "latest_revision_id"
+        )
+        obj._external_content_field_states = {
+            name: ExternalFieldState("UNLOADED", source, revision_id=revision_id)
+            for name, backend in (cls.content_storage or {}).items() if backend == "mongo"
+        }
+        return obj
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        super().__setattr__(name, value)
+        data = object.__getattribute__(self, "__dict__")
+        if (
+            (getattr(type(self), "content_storage", None) or {}).get(name) != "mongo"
+            or data.get("_external_content_internal_assignment", False)
+            or getattr(_external_content_access_context, "suppress_autoload", False)
+        ):
+            return
+        states = data.setdefault("_external_content_field_states", {})
+        previous = states.get(name, ExternalFieldState("UNLOADED", "NEW"))
+        states[name] = replace(
+            previous, status=self._external_value_status(value),
+            source="NEW" if previous.source == "NEW" else "EDIT",
+        )
+
+    def get_external_field_state(self, name: str) -> ExternalFieldState:
+        """只查看状态，不触发 SQL deferred 读取或加载正文。"""
+        if (self.content_storage or {}).get(name) != "mongo":
+            raise KeyError(name)
+        states = self.__dict__.setdefault("_external_content_field_states", {})
+        if name not in states:
+            states[name] = ExternalFieldState("UNLOADED", "LIVE" if self.__dict__.get("live") else "REVISION")
+        return states[name]
+
+    @contextmanager
+    def _external_internal_assignment(self) -> Iterator[None]:
+        """仅本实例加载/占位赋值免于标记业务编辑；异常与嵌套退出均恢复。"""
+        previous = self.__dict__.get("_external_content_internal_assignment", False)
+        object.__setattr__(self, "_external_content_internal_assignment", True)
+        try:
+            yield
+        finally:
+            object.__setattr__(self, "_external_content_internal_assignment", previous)
+
+    def _set_external_field_loaded(
+        self, name: str, value: Any, manifest: ExternalContentManifest,
+        *, source: str, revision_id: Optional[int] = None,
+    ) -> None:
+        """协调器全部验证成功后调用；不得用于未提交 NEW 正文的伪基线。"""
+        with self._external_internal_assignment():
+            setattr(self, name, value)
+        entry = manifest.fields[name]
+        self.__dict__.setdefault("_external_content_field_states", {})[name] = ExternalFieldState(
+            "LOADED", source, revision_id, entry.payload_sha256, manifest,
+        )
+        self.__dict__.setdefault("_external_content_loaded_hashes", {})[name] = entry.payload_sha256
+
+    def _bind_external_field_source(
+        self, name: str, manifest: ExternalContentManifest,
+        *, source: str, revision_id: Optional[int] = None,
+    ) -> None:
+        """完整校验后固定同源 UNLOADED 指针；不物化、不改已编辑/历史字段。"""
+        previous = self.get_external_field_state(name)
+        if previous.status == "UNLOADED" and previous.source == source and previous.manifest is None:
+            self._external_content_field_states[name] = replace(
+                previous, manifest=manifest, revision_id=revision_id,
+            )
+
+    def _load_external_field_source(self, name: str, *, materialize: bool = True) -> None:
+        """从已固定 Manifest 读取，或第一次解析来源后固定同源所有字段。"""
+        field_state = self.get_external_field_state(name)
+        if field_state.manifest is None and (
+            "live" not in self.__dict__
+            or (
+                field_state.revision_id is None
+                and ("live_revision_id" if field_state.source == "LIVE" else "latest_revision_id")
+                not in self.__dict__
+            )
+        ):
+            # only()/defer() 可能连来源元数据也延迟；只读取原生身份/来源列，
+            # 绝不读取外置 SQL 占位，也不能凭缺失 live 默认为草稿。
+            source = "LIVE" if self.live else "REVISION"
+            revision_id = getattr(
+                self, "live_revision_id" if source == "LIVE" else "latest_revision_id"
+            )
+            for field_name, previous in self._external_content_field_states.items():
+                if previous.status == "UNLOADED" and previous.manifest is None:
+                    self._external_content_field_states[field_name] = replace(
+                        previous, source=source, revision_id=revision_id,
+                    )
+            field_state = self.get_external_field_state(name)
+        selected = {name} if materialize else set()
+        if field_state.manifest is not None:
+            ExternalContentCoordinator(store=getattr(self, "_test_content_store", None)).load_external_content_from_manifest(
+                self, field_state.manifest, source=field_state.source,
+                revision_id=field_state.revision_id, preserve_edits=True, fields=selected,
+            )
+            return
+        if field_state.source == "LIVE":
+            self.load_published_content(preserve_edits=True, fields=selected)
+            if self.get_external_field_state(name).manifest is None:
+                raise PublicationBodyUnavailableError("外置字段缺少有效的正式 Manifest 来源")
+            return
+        state = ExternalContentPublicationState.objects.filter(page_id=self.pk).first()
+        revision_id = field_state.revision_id
+        raw_manifest = None
+        if state and state.draft_manifest and (
+            revision_id is None or state.draft_revision_id == revision_id
+        ):
+            raw_manifest = state.draft_manifest
+            revision_id = state.draft_revision_id
+        elif revision_id:
+            # 有明确 Revision 来源时不能改读较新的 draft/live。
+            from wagtail.models import Revision
+            revision = Revision.objects.filter(
+                pk=revision_id, object_id=str(self.pk), content_type_id=self.content_type_id,
+            ).first()
+            if revision is not None:
+                content = revision.content
+                if isinstance(content, str):
+                    content = json.loads(content)
+                raw_manifest = content.get("_external_content_manifest")
+        if not raw_manifest:
+            raise PublicationRevisionInvalidError("外置字段缺少明确的 Revision Manifest 来源")
+        manifest = ExternalContentManifest.from_dict(raw_manifest)
+        ExternalContentCoordinator(store=getattr(self, "_test_content_store", None)).load_external_content_from_manifest(
+            self, manifest, source="REVISION", revision_id=revision_id,
+            preserve_edits=True, fields=selected,
+        )
 
     def __getattribute__(self, name: str) -> Any:
         external_fields = getattr(type(self), "content_storage", None) or {}
@@ -85,16 +248,14 @@ class ExternalContentPageMixin:
             name in external_fields
             and external_fields.get(name) == "mongo"
             and not getattr(_external_content_access_context, "suppress_autoload", False)
-            and not getattr(_controlled_copy_context, "in_copy", False)
             and not getattr(_controlled_alias_context, "in_alias", False)
-            and instance_state.get("live", False)
-            and instance_state.get("live_revision_id")
             and not instance_state.get("_external_content_loading", False)
-            and not instance_state.get("_external_content_loaded_hashes")
+            and not instance_state.get("_external_content_internal_assignment", False)
+            and object.__getattribute__(self, "get_external_field_state")(name).status == "UNLOADED"
         ):
             object.__setattr__(self, "_external_content_loading", True)
             try:
-                object.__getattribute__(self, "load_published_content")()
+                object.__getattribute__(self, "_load_external_field_source")(name)
             finally:
                 object.__setattr__(self, "_external_content_loading", False)
         return super().__getattribute__(name)
@@ -149,8 +310,7 @@ class ExternalContentPageMixin:
                     f"Manifest 模型身份 {manifest.model_label} 与目标模型 {expected_model_label} 不匹配"
                 )
             expected_page_id = obj.pk or data.get("id") or data.get("pk")
-            in_controlled_copy = getattr(_controlled_copy_context, "in_copy", False)
-            if expected_page_id and manifest.page_id != expected_page_id and not in_controlled_copy:
+            if expected_page_id and manifest.page_id != expected_page_id:
                 raise ManifestIdentityMismatchError(
                     f"Manifest 页面身份 {manifest.page_id} 与目标页面 {expected_page_id} 不匹配"
                 )
@@ -163,6 +323,66 @@ class ExternalContentPageMixin:
             }
 
         return obj
+
+    def with_content_json(self, content: Dict[str, Any]) -> Any:
+        """原生回绑身份之前校验目标归属；历史来源不受 live/latest_revision 覆盖。
+
+        原生 API 仅传快照而未传 Revision ID，不能把当前 latest_revision_id
+        伪装成所选历史版本。跨页 Alias 仍需既有数据库来源证明，不新增豁免。
+        """
+        policy = get_storage_policy_for_model(type(self), allow_record_new=False)
+        if policy and policy.external_fields:
+            raw_manifest = content.get("_external_content_manifest")
+            if not isinstance(raw_manifest, dict) or not raw_manifest:
+                raise PublicationRevisionInvalidError("Revision 快照缺少有效 Manifest")
+            manifest = ExternalContentManifest.from_dict(raw_manifest)
+            if manifest.page_id == self.pk or not getattr(self, "alias_of_id", None):
+                manifest.validate_against_page(self)
+            else:
+                from external_content.copying import validate_alias_manifest_source
+
+                validate_alias_manifest_source(self, manifest)
+        return super().with_content_json(content)
+
+    @contextmanager
+    def _restore_failed_revision_memory(self) -> Iterator[None]:
+        """仅恢复保存体异常污染的绑定；不推断 atomic 退出时的提交结果。
+
+        SQL 回滚不会恢复 Python。快照只取原始内存，避免 deferred/正文读取；
+        外置值保留用户输入对象，状态字典浅拷贝（字段状态为不可变对象）。
+        外层事务稍后回滚、COMMIT 未知或提交后回调失败时仍须丢弃并核对实例。
+        """
+        data = self.__dict__
+        missing = object()
+        names = (
+            "latest_revision_id", "latest_revision_created_at",
+            "draft_title", "has_unpublished_changes",
+            "_external_content_field_states", "_external_content_loaded_hashes",
+        )
+        external_names = tuple(
+            name for name, backend in (self.content_storage or {}).items()
+            if backend == "mongo"
+        )
+        previous = {name: data.get(name, missing) for name in names + external_names}
+        for name in ("_external_content_field_states", "_external_content_loaded_hashes"):
+            if isinstance(previous[name], dict):
+                previous[name] = previous[name].copy()
+        relation_cache = self._state.fields_cache
+        previous_revision = relation_cache.get("latest_revision", missing)
+        try:
+            yield
+        except BaseException:
+            # 直接恢复原始值/缺省状态，不触发赋值协议、SQL 回写或旧 live 回填。
+            for name, value in previous.items():
+                if value is missing:
+                    data.pop(name, None)
+                else:
+                    data[name] = value
+            if previous_revision is missing:
+                relation_cache.pop("latest_revision", None)
+            else:
+                relation_cache["latest_revision"] = previous_revision
+            raise
 
     def save_revision(
         self,
@@ -177,7 +397,8 @@ class ExternalContentPageMixin:
             overwrite_revision = None
 
         check_page_write_not_blocked(self.pk, for_update=False)
-        with transaction.atomic():
+        # 恢复作用域先退出，随后 atomic 处理体异常；其退出/COMMIT 异常不在捕获范围。
+        with transaction.atomic(), self._restore_failed_revision_memory():
             lock_page_lifecycle_hierarchy(self.pk, revision_ids=None, check_write=True)
             coordinator = ExternalContentCoordinator(store=getattr(self, "_test_content_store", None))
             manifest = coordinator.prepare_external_content_for_revision(self)
@@ -196,9 +417,17 @@ class ExternalContentPageMixin:
                 state.draft_manifest = manifest.to_dict()
                 update_fields.extend(["draft_revision_id", "draft_manifest"])
             state.save(update_fields=update_fields)
-            self._external_content_loaded_hashes = {
-                name: entry.payload_sha256 for name, entry in manifest.fields.items()
-            }
+            for name in manifest.fields:
+                if self.get_external_field_state(name).status == "UNLOADED":
+                    # 已验证引用直接绑定真实 Revision，不为中间状态提交物化正文。
+                    self._external_content_field_states[name] = ExternalFieldState(
+                        "UNLOADED", "REVISION", revision.pk,
+                        manifest.fields[name].payload_sha256, manifest,
+                    )
+                else:
+                    self._set_external_field_loaded(
+                        name, getattr(self, name), manifest, source="REVISION", revision_id=revision.pk,
+                    )
             return revision
 
     def save(self, *args: Any, **kwargs: Any) -> Any:
@@ -230,13 +459,6 @@ class ExternalContentPageMixin:
         in_controlled_save = getattr(_controlled_save_context, "in_controlled_save", False)
         in_publication_action = getattr(_controlled_save_context, "in_publication_action", False)
         is_initial_insert = bool(getattr(self, "_state", None) and self._state.adding) or not self.pk
-        has_no_revision = False
-        if self.pk:
-            from wagtail.models import Revision
-            has_no_revision = not Revision.objects.filter(
-                object_id=self.pk, content_type__model=self._meta.model_name
-            ).exists()
-        is_initial_insert = is_initial_insert or has_no_revision
 
         # Alias 暂用源 Revision；仅当前同步源的直属 Alias 交由专用流程校验。
         if (
@@ -251,31 +473,25 @@ class ExternalContentPageMixin:
                 self.live_revision_id,
             )
 
-        # ORM 空哨兵不是正文基线；正式内容加载后才能判断是否发生非法直写。
-        if (
-            not is_initial_insert
-            and not in_controlled_save
-            and not in_publication_action
-            and not update_fields
-            and getattr(self, "live", False)
-            and getattr(self, "live_revision_id", None)
-            and not (getattr(self, "_external_content_loaded_hashes", {}) or {})
-        ):
-            self.load_published_content()
-
         if not is_initial_insert and not in_controlled_save and not in_publication_action:
             loaded_hashes = getattr(self, "_external_content_loaded_hashes", {}) or {}
             for field_name, field_cfg in policy.external_fields.items():
                 if update_fields is None or field_name in update_fields:
+                    field_state = self.get_external_field_state(field_name)
+                    baseline_hash = field_state.baseline_hash or loaded_hashes.get(field_name)
+                    if field_state.status in {"DIRTY", "CLEARED"} and baseline_hash is None:
+                        raise DirectSaveForbiddenError(
+                            f"字段 {field_name} 有未提交正文；请调用 save_revision()"
+                        )
                     current_val = getattr(self, field_name, None)
-                    try:
-                        _, current_hash = field_cfg.codec.encode(current_val)
-                    except Exception:
-                        current_hash = None
-                    if field_name not in loaded_hashes:
-                        # 未加载的草稿字段以 SQL 空哨兵为基线，不推断缺失正文。
-                        _, loaded_hashes[field_name] = field_cfg.codec.encode(field_cfg.codec.get_empty_sentinel())
-                    if current_hash != loaded_hashes.get(field_name):
+                    _, current_hash = field_cfg.codec.encode(current_val, field=self._meta.get_field(field_name))
+                    baseline_hash = self.get_external_field_state(field_name).baseline_hash or baseline_hash
+                    if current_hash != baseline_hash:
+                        previous = self.get_external_field_state(field_name)
+                        self._external_content_field_states[field_name] = replace(
+                            previous, status=self._external_value_status(current_val),
+                            source="NEW" if previous.source == "NEW" else "EDIT",
+                        )
                         raise DirectSaveForbiddenError(
                             f"外置正文页面 (page_id={self.pk}) 的字段 {field_name} 被直接修改，禁止调用 save()。"
                             f"正文修改必须通过 save_revision() 创建不可变版本并写入 MongoDB。"
@@ -283,27 +499,22 @@ class ExternalContentPageMixin:
 
         # SQL 仅持久化空哨兵，真实正文必须在异常退出时同样恢复到内存。
         staged_backup: Dict[str, Any] = {}
+        missing = object()
         try:
-            for field_name, field_cfg in policy.external_fields.items():
-                if update_fields is None or field_name in update_fields:
-                    current_val = getattr(self, field_name, None)
-                    staged_backup[field_name] = current_val
-                    setattr(self, field_name, field_cfg.codec.get_empty_sentinel())
-
-            return super().save(*args, **kwargs)  # type: ignore[misc]
-        finally:
-            for field_name, original_val in staged_backup.items():
-                setattr(self, field_name, original_val)
-            if is_initial_insert:
-                initial_hashes = getattr(self, "_external_content_loaded_hashes", {}) or {}
+            with self._external_internal_assignment(), _suppress_external_content_autoload():
                 for field_name, field_cfg in policy.external_fields.items():
-                    val = getattr(self, field_name, None)
-                    try:
-                        _, val_hash = field_cfg.codec.encode(val)
-                        initial_hashes[field_name] = val_hash
-                    except Exception:
-                        pass
-                self._external_content_loaded_hashes = initial_hashes
+                    if update_fields is None or field_name in update_fields:
+                        # 不为中间 SQL 保存物化 deferred 字段，保留原始内存/缺省状态。
+                        staged_backup[field_name] = self.__dict__.get(field_name, missing)
+                        setattr(self, field_name, field_cfg.codec.get_empty_sentinel())
+                return super().save(*args, **kwargs)  # type: ignore[misc]
+        finally:
+            with self._external_internal_assignment():
+                for field_name, original_val in staged_backup.items():
+                    if original_val is missing:
+                        self.__dict__.pop(field_name, None)
+                    else:
+                        setattr(self, field_name, original_val)
 
     def publish(self, revision: Any, *args: Any, **kwargs: Any) -> Any:
         """
@@ -313,22 +524,24 @@ class ExternalContentPageMixin:
         if revision is None or getattr(revision, "pk", None) is None:
             raise ValueError("发布时必须提供有效的 Revision 实例")
 
-        # 到期发布仍须校验排期凭证，不能跳过正式发布门禁。
         is_scheduled_execution = kwargs.get("log_action") == "wagtail.publish.scheduled"
-        if is_scheduled_execution:
-            validate_scheduled_revision(revision)
 
-        with transaction.atomic():
+        with transaction.atomic(), _restore_failed_publication_memory(self):
             candidate = ExternalContentPublicationService.lock_and_validate_revision(
                 self.pk,
                 revision.pk,
                 store=getattr(self, "_test_content_store", None),
             )
+            # 排期与正式指针必须使用同一锁内指定版本；调用者的排期/页面
+            # 内存可能陈旧，不能使原生动作与外置正式指针走向不同分支。
+            revision = candidate.revision
+            if is_scheduled_execution:
+                validate_scheduled_revision(revision)
 
             # 严格解析排期时间
             raw_content = revision.content if isinstance(revision.content, dict) else json.loads(revision.content)
             approved_go_live_at = getattr(revision, "approved_go_live_at", None)
-            page_go_live_at = getattr(self, "go_live_at", None) or raw_content.get("go_live_at")
+            page_go_live_at = raw_content.get("go_live_at")
             target_go_live = approved_go_live_at or page_go_live_at
 
             is_future_schedule = False
@@ -369,23 +582,11 @@ class ExternalContentPageMixin:
         在事务内取消发布并清除正式正文指针。commit=False 时不推进公开代次，
         避免预览或未提交操作改变读者可见状态。
         """
-        if not getattr(self, "live", False) and self.pk and commit:
-            db_live = type(self).objects.filter(pk=self.pk).values_list("live", flat=True).first()
-            if db_live:
-                self.live = True
-
-        previous_state = None
-        if not commit and self.pk:
-            previous_state = ExternalContentPublicationState.objects.filter(
-                page_id=self.pk,
-            ).values(
-                "published_revision_id",
-                "published_manifest",
-                "published_at",
-                "publication_generation",
-            ).first()
-
-        with transaction.atomic():
+        with transaction.atomic(), _restore_failed_publication_memory(self):
+            if not getattr(self, "live", False) and self.pk and commit:
+                db_live = type(self).objects.filter(pk=self.pk).values_list("live", flat=True).first()
+                if db_live:
+                    self.live = True
             with preserve_threadlocal_context(_controlled_save_context, "in_controlled_save", True):
                 result = super().unpublish(*args, commit=commit, **kwargs)  # type: ignore[misc]
 
@@ -395,25 +596,12 @@ class ExternalContentPageMixin:
                 ExternalContentPublicationService.advance_unpublish_generation(self.pk)
                 ExternalContentPublicationService.clear_published_pointer(self.pk)
                 logger.info("external_content_page_unpublished page_id=%s", self.pk)
-            elif previous_state is not None:
-                state = ExternalContentPublicationState.objects.select_for_update().get(page_id=self.pk)
-                state.published_revision_id = previous_state["published_revision_id"]
-                state.published_manifest = previous_state["published_manifest"]
-                state.published_at = previous_state["published_at"]
-                state.publication_generation = previous_state["publication_generation"]
-                state.save(
-                    update_fields=[
-                        "published_revision_id",
-                        "published_manifest",
-                        "published_at",
-                        "publication_generation",
-                        "updated_at",
-                    ]
-                )
 
             return result
 
-    def load_published_content(self) -> None:
+    def load_published_content(
+        self, *, preserve_edits: bool = False, fields: Optional[set[str]] = None,
+    ) -> None:
         """
         依据正式 Manifest 将不可变正文恢复到页面实例。
         已发布页面缺少状态、版本或身份校验失败时拒绝返回空正文。
@@ -448,14 +636,14 @@ class ExternalContentPageMixin:
 
         coordinator = ExternalContentCoordinator(store=getattr(self, "_test_content_store", None))
         try:
-            coordinator.load_external_content_from_manifest(self, manifest)
+            coordinator.load_external_content_from_manifest(
+                self, manifest, source="LIVE", revision_id=state.published_revision_id,
+                preserve_edits=preserve_edits, fields=fields,
+            )
         except ContentStoreError as exc:
             raise PublicationBodyUnavailableError(
                 f"已发布页面 (page_id={self.pk}) 的外置正文不可用: {exc}"
             ) from exc
-        self._external_content_loaded_hashes = {
-            field_name: field_ptr.payload_sha256 for field_name, field_ptr in manifest.fields.items()
-        }
 
     def update_aliases(
         self,
@@ -585,10 +773,24 @@ class ExternalContentPageMixin:
         return True
 
     def refresh_from_db(self, *args: Any, **kwargs: Any) -> Any:
-        with _suppress_external_content_autoload():
+        fields = kwargs.get("fields", args[1] if len(args) > 1 else None)
+        external = {name for name, backend in (self.content_storage or {}).items() if backend == "mongo"}
+        selected = external if fields is None else external.intersection(fields)
+        with self._external_internal_assignment(), _suppress_external_content_autoload():
             result = super().refresh_from_db(*args, **kwargs)
-        if getattr(self, "live", False):
+        source = "LIVE" if getattr(self, "live", False) else "REVISION"
+        for name in selected:
+            self._external_content_field_states[name] = ExternalFieldState(
+                "UNLOADED", source, revision_id=self.__dict__.get(
+                    "live_revision_id" if source == "LIVE" else "latest_revision_id"
+                ),
+            )
+            self.__dict__.get("_external_content_loaded_hashes", {}).pop(name, None)
+        if fields is None and getattr(self, "live", False):
             self.load_published_content()
+        elif selected:
+            for name in selected:
+                self._load_external_field_source(name)
         return result
 
     def serve(self, request: Any, *args: Any, **kwargs: Any) -> Any:
@@ -600,24 +802,8 @@ class ExternalContentPageMixin:
         return super().serve(request, *args, **kwargs)  # type: ignore[misc]
 
     def copy(self, *args: Any, **kwargs: Any) -> Any:
-        """锁定源页面并加载正文后复制，目标指针由专用协调器重绑定。"""
-        from external_content.copying import duplicate_external_content_for_copy
-
-        with transaction.atomic():
-            lock_page_lifecycle_hierarchy(self.pk, revision_ids=None, check_write=True)
-            if getattr(self, "live", False):
-                self.load_published_content()
-            with preserve_threadlocal_context(_controlled_copy_context, "in_copy", True):
-                with _suppress_external_content_autoload():
-                    target_page = super().copy(*args, **kwargs)
-            duplicate_external_content_for_copy(
-                source_page=self,
-                target_page=target_page,
-                keep_live=kwargs.get("keep_live", False),
-                copy_revisions=kwargs.get("copy_revisions", True),
-                user=kwargs.get("user"),
-            )
-            return target_page
+        """所有复制入口由 Action 逐节点围栏；不在外围授予跨页读取权限。"""
+        return super().copy(*args, **kwargs)
 
     def create_alias(self, *args: Any, **kwargs: Any) -> Any:
         """Alias Action 统一负责围栏和各递归层初始化，禁止外围宽授权窗口。"""

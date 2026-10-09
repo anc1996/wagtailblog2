@@ -9,7 +9,7 @@ Wagtail Page 正文外置通用协议 - 页面复制 (Copy)、别名 (Alias) 与
      的 _external_content_manifest 必须彻底重绑定为 target_page.pk，版本记录独立派生；
    - 存储优化与复用缓存：在派生历史版本时，建立 source_to_target_vid_map 内存映射，
      相同正文版本在目标页面复用同一个目标版本 ID，在 MongoDB 中仅持久化一份，杜绝存储膨胀；
-   - 异常反向原子补偿：派生过程中若抛出异常，彻底物理清理本次生成的目标版本，防止残留孤儿数据；
+   - 失败时整树 SQL 回滚；Mongo 准备版本保留为孤儿，等待独立 GC，不在请求中物理删除；
    - 修改复制后的副本绝不影响源页面；
 2. 别名页面（Alias）托管关系：
    - 别名页面记录 source_page_id，不伪造本地 Revision；
@@ -22,10 +22,15 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 from copy import deepcopy
-from typing import Any, Dict, List, Optional
+from contextlib import contextmanager
+from dataclasses import replace
+from types import MappingProxyType
+from typing import Any, Dict, Iterator, List, Optional
 
 from django.db import connection, transaction
+from django.utils import timezone
 from wagtail.models import Page, Revision
 
 from external_content.coordinator import ExternalContentCoordinator
@@ -34,6 +39,7 @@ from external_content.exceptions import (
     ContentVersionNotFoundError,
     CorruptedContentPayloadError,
     ExternalContentError,
+    ExternalContentOperationBlockedError,
     ManifestError,
     ManifestValidationError,
     PublicationRevisionInvalidError,
@@ -41,9 +47,18 @@ from external_content.exceptions import (
 from external_content.manifest import ExternalContentManifest
 from external_content.locking import (
     AliasLifecycleLocks,
+    _nowait_lock_errors,
     lock_alias_lifecycle_closure,
+    lock_alias_lifecycle_closures,
+    lock_lifecycle_closure,
+    lock_translation_lifecycle_closure,
+    lock_page_lifecycle_hierarchy,
     preserve_threadlocal_context,
     read_alias_source_chain,
+    PageLifecycleLocks,
+    translation_lifecycle_context,
+    translation_member,
+    _discover_alias_closure,
 )
 from external_content.models import ExternalContentPublicationState
 from external_content.publication import ExternalContentPublicationService
@@ -51,6 +66,195 @@ from external_content.registry import get_policy_for_version, get_storage_policy
 from external_content.store import ContentVersionStore
 
 logger = logging.getLogger(__name__)
+
+
+def _translation_topology(action: Any) -> Dict[int, Page]:
+    """非锁定完整 census；不是当前读，也不保证多语句或复核后拓扑稳定。"""
+    manager = Page.objects
+    source = manager.get(pk=action.page.pk)
+    sources = (
+        list(manager.filter(path__startswith=source.path).order_by("pk"))
+        if action.include_subtree else [source]
+    )
+    discovered = {page.pk: page for page in sources}
+    for page in sources:
+        parent = manager.get(path=page.path[:-Page.steplen]) if page.depth > 1 else None
+        while parent is not None:
+            discovered[parent.pk] = parent
+            if not parent.is_root():
+                for translated in manager.filter(
+                    translation_key=parent.translation_key, locale_id=action.locale.pk,
+                ):
+                    discovered[translated.pk] = translated
+            if parent.is_root():
+                break
+            parent = manager.get(path=parent.path[:-Page.steplen])
+    # 策略探测也必须覆盖 Alias 根源，不允许普通类型的混合来源漏入原生分支。
+    frontier = set(discovered)
+    while frontier:
+        extra: Dict[int, Page] = {}
+        for pk in sorted(frontier):
+            _, closure, _ = _discover_alias_closure(pk)
+            extra.update(closure)
+        frontier = set(extra) - set(discovered)
+        discovered.update(extra)
+    # treebeard 的父 INSERT 锁和 Alias 来源/目标都纳入同一 Page 层。
+    return discovered
+
+
+def _lock_translation_sources(action: Any) -> Dict[str, Any]:
+    """全局分层围栏完成后才允许 execute 首次还原草稿。"""
+    discovered = _translation_topology(action)
+
+    def fingerprint(page: Page) -> tuple[Any, ...]:
+        return (
+            page.path, page.depth, page.content_type_id, page.alias_of_id,
+            page.translation_key, page.locale_id,
+        )
+
+    # 值快照不持有可变 Page；后续点锁或夹具共享实例变化不能改写 expected。
+    expected = MappingProxyType({pk: fingerprint(page) for pk, page in discovered.items()})
+
+    def validate(pages: Any) -> None:
+        for pk, value in expected.items():
+            if fingerprint(pages[pk]) != value:
+                raise ExternalContentOperationBlockedError("翻译获锁期间页面拓扑发生变化")
+        # 锁定当前版本来自已知 PK 点锁。未知成员只能通过完整非锁定 census
+        # 被观察并拒绝，绝不先锁后比较，也不把复核限制成 K 的投影。
+        current = _translation_topology(action)
+        if {pk: fingerprint(page) for pk, page in current.items()} != expected:
+            raise ExternalContentOperationBlockedError("翻译获锁期间源树或目标父页发生变化")
+
+    locks, aliases = lock_translation_lifecycle_closure(sorted(expected), validate_pages=validate)
+    return {"locks": locks, "alias_locks": aliases, "created_ids": set()}
+
+
+@contextmanager
+def _translation_insert_scope() -> Iterator[None]:
+    """仅 Copy/Alias 节点持久化窗口可申请无 PK 新身份，不扩大既存闭包。"""
+    frame = getattr(translation_lifecycle_context, "frame", None)
+    if frame is None:
+        yield
+        return
+    with preserve_threadlocal_context(translation_lifecycle_context, "insert_frame", frame):
+        yield
+
+
+def wrap_copy_page_for_translation_action() -> None:
+    """保留原生翻译参数、权限、walk 和父 Alias，只扩展整操作事务边界。"""
+    from django.db.models.signals import post_save, pre_save
+    from wagtail.actions.copy_for_translation import CopyPageForTranslationAction
+
+    if getattr(CopyPageForTranslationAction, "_external_content_wrapped", False):
+        return
+    original_execute = CopyPageForTranslationAction.execute
+    original_node = CopyPageForTranslationAction._copy_for_translation
+    original_walk = CopyPageForTranslationAction.walk
+
+    def controlled_walk(self: Any, current_page: Page) -> None:
+        """保持 8.0 原生 walk 顺序，仅在子页草稿还原之前检查成员身份。"""
+        if getattr(translation_lifecycle_context, "frame", None) is None:
+            return original_walk(self, current_page)
+        from wagtail.signals import copy_for_translation_done
+        for child_page in current_page.get_children():
+            translation_member(child_page.pk)
+            translated_page = self._copy_for_translation(
+                child_page if child_page.live else child_page.get_latest_revision_as_object(),
+                self.locale, self.copy_parents, self.alias, self.exclude_fields,
+            )
+            copy_for_translation_done.send(
+                sender=self.__class__, source_obj=child_page.specific,
+                target_obj=translated_page,
+            )
+            self.walk(child_page)
+
+    def controlled_node(self: Any, page: Page, *args: Any, **kwargs: Any) -> Page:
+        frame = getattr(translation_lifecycle_context, "frame", None)
+        if frame is not None:
+            translation_member(page.pk)
+        return original_node(self, page, *args, **kwargs)
+
+    def controlled_execute(self: Any, skip_permission_checks: bool = False) -> Page:
+        self.check(skip_permission_checks=skip_permission_checks)
+        existing = getattr(translation_lifecycle_context, "frame", None)
+        if existing is not None:
+            translation_member(self.page.pk)
+            return original_execute(self, skip_permission_checks=skip_permission_checks)
+        # 仅加固本次调用的事务封套，可能嵌套为 savepoint，并不拥有最外层事务。
+        # RR 快照、非合作 writer 与无外置分流幻影尚未证明消除；不是完整 R3 修复。
+        with transaction.atomic():
+            discovered = _translation_topology(self)
+            has_external = any(
+                (policy := get_storage_policy_for_model(
+                    page.specific_class, allow_record_new=False,
+                )) and policy.external_fields for page in discovered.values()
+            )
+            # 普通页面保留原生成功/错误语义，不强制外置围栏或 frame 登记。
+            if not has_external:
+                return original_execute(self, skip_permission_checks=skip_permission_checks)
+            frame = _lock_translation_sources(self)
+            pending: Dict[int, Page] = {}
+
+            def before_insert(sender: Any, instance: Any, raw: bool = False, **kw: Any) -> None:
+                """SQL 前校验基础 PK/全部 MTI 父链；leaf created 不能证明基础 INSERT。"""
+                if (getattr(translation_lifecycle_context, "frame", None) is not frame
+                        or not isinstance(instance, Page)):
+                    return
+                # 只读实例已有字段，避免 deferred 属性为身份校验发起额外 SQL。
+                identities = [
+                    instance.__dict__.get(field.attname)
+                    for field in instance._meta.concrete_fields
+                    if field.primary_key or (
+                        field.is_relation and getattr(field.remote_field, "parent_link", False)
+                    )
+                ]
+                pk = instance.__dict__.get(instance._meta.pk.attname)
+                if (not raw and not instance._state.adding and pk in frame["locks"]
+                        and all(value is None or value == pk for value in identities)):
+                    return
+                if (raw or not instance._state.adding
+                        or any(value is not None for value in identities)
+                        or getattr(translation_lifecycle_context, "insert_frame", None) is not frame):
+                    raise ExternalContentOperationBlockedError("翻译拒绝未知既存或非受控新建身份")
+                pending[id(instance)] = instance
+
+            def after_insert(sender: Any, instance: Any, created: bool = False,
+                             raw: bool = False, **kw: Any) -> None:
+                # 新 Alias 的 State 在 INSERT 后初始化；后续递归只读本事务记录，
+                # 不为刷新上下文重新获取任何既存 Page 锁。
+                if (getattr(translation_lifecycle_context, "frame", None) is frame
+                        and sender is ExternalContentPublicationState and not raw
+                        and instance.page_id in frame["created_ids"]):
+                    member = frame["locks"][instance.page_id]
+                    frame["locks"][instance.page_id] = replace(member, state=instance)
+                    return
+                if (getattr(translation_lifecycle_context, "frame", None) is not frame
+                        or not isinstance(instance, Page) or raw
+                        or pending.pop(id(instance), None) is not instance):
+                    return
+                if not created or instance.pk is None or instance.pk in frame["locks"]:
+                    raise ExternalContentOperationBlockedError("翻译新增身份与既存闭包冲突")
+                frame["created_ids"].add(instance.pk)
+                frame["locks"][instance.pk] = PageLifecycleLocks(
+                    page=instance, state=None, revisions=[], intents=[],
+                )
+
+            original_page = self.page
+            pre_save.connect(before_insert, weak=False)
+            post_save.connect(after_insert, weak=False)
+            try:
+                with preserve_threadlocal_context(translation_lifecycle_context, "frame", frame):
+                    self.page = frame["locks"][self.page.pk].page
+                    return original_execute(self, skip_permission_checks=skip_permission_checks)
+            finally:
+                self.page = original_page
+                pre_save.disconnect(before_insert)
+                post_save.disconnect(after_insert)
+
+    CopyPageForTranslationAction.execute = controlled_execute
+    CopyPageForTranslationAction._copy_for_translation = controlled_node
+    CopyPageForTranslationAction.walk = controlled_walk
+    CopyPageForTranslationAction._external_content_wrapped = True
 
 
 def _derive_manifest_for_target(
@@ -73,21 +277,24 @@ def _derive_manifest_for_target(
     for field_name, source_entry in source_manifest.fields.items():
         if field_name not in policy.external_fields:
             continue
-        dedup_key = f"{field_name}:{source_entry.payload_sha256}"
+        source_doc = store.get_version(
+            source_entry.version_id,
+            expected_identity={
+                "model_label": source_manifest.model_label,
+                "page_id": source_manifest.page_id,
+                "field_name": field_name,
+                "codec": source_entry.codec,
+                "schema_version": source_entry.schema_version,
+                "payload_sha256": source_entry.payload_sha256,
+            },
+        )
+        dedup_key = (
+            f"{field_name}:{source_entry.codec}:{source_entry.schema_version}:"
+            f"{source_entry.payload_sha256}"
+        )
         if dedup_key in source_to_target_vid_map:
             new_vid = source_to_target_vid_map[dedup_key]
         else:
-            source_doc = store.get_version(
-                source_entry.version_id,
-                expected_identity={
-                    "model_label": source_manifest.model_label,
-                    "page_id": source_manifest.page_id,
-                    "field_name": field_name,
-                    "codec": source_entry.codec,
-                    "schema_version": source_entry.schema_version,
-                    "payload_sha256": source_entry.payload_sha256,
-                },
-            )
             new_vid, is_new = store.save_version_with_status(
                 model_label=target_page._meta.label_lower,
                 page_id=target_page.pk,
@@ -143,20 +350,28 @@ def _validate_published_pointer(
     page: Page,
     state: ExternalContentPublicationState,
     store: ContentVersionStore,
+    *,
+    revisions: List[Revision],
 ) -> tuple[Revision, ExternalContentManifest]:
-    """External-content lifecycle validation helper."""
-    if not state.published_revision_id or not state.published_manifest:
+    """只验证完整围栏内的正式 Revision，不在 Intent 层后另行补锁。"""
+    if (
+        not page.live
+        or page.live_revision_id != state.published_revision_id
+        or not state.published_revision_id
+        or not state.published_manifest
+    ):
         raise PublicationRevisionInvalidError(
             f"External content lifecycle validation failed",
             details={"page_id": page.pk, "error_category": "published_pointer_missing"},
         )
-    try:
-        revision = Revision.objects.select_for_update().get(pk=state.published_revision_id)
-    except Revision.DoesNotExist as exc:
+    revision = next(
+        (row for row in revisions if row.pk == state.published_revision_id), None
+    )
+    if revision is None:
         raise PublicationRevisionInvalidError(
             f"External content lifecycle validation failed",
             details={"page_id": page.pk, "error_category": "revision_not_found"},
-        ) from exc
+        )
     manifest = ExternalContentManifest.from_dict(state.published_manifest)
     _validate_revision_manifest(page, revision, manifest, store)
     return revision, manifest
@@ -453,7 +668,7 @@ def prepare_alias_update(
 def duplicate_external_content_for_copy(
     source_page: Page,
     target_page: Page,
-    keep_live: bool = False,
+    keep_live: bool = True,
     copy_revisions: bool = True,
     user: Any = None,
 ) -> None:
@@ -468,7 +683,7 @@ def duplicate_external_content_for_copy(
        _external_content_manifest 重绑定为 target_page.pk 与独立派生版本；
        引入 source_to_target_vid_map 缓存，同一源版本内容在目标页面复用相同目标版本 ID，
        减少 MongoDB 存储空间占用；
-    5. 若过程中抛出异常，执行反向原子补偿物理清理已创建的目标版本；
+    5. SQL 失败不撤销 Mongo 准备版本，保留孤儿等待独立对账，不做物理补偿删除；
     6. 更新目标页面的 ExternalContentPublicationState；
     7. 若 keep_live=True，同步更新 published_manifest 并推进发布世代；若 keep_live=False，仅保留 draft_manifest。
 
@@ -477,6 +692,9 @@ def duplicate_external_content_for_copy(
     :param keep_live: 是否保持已发布状态
     :param copy_revisions: 是否复制并重绑定历史版本快照
     :param user: 操作用户
+
+    此遗留辅助入口未由当前 CopyPageAction 使用；其锁前读取、逐页取锁和
+    Revision 推断尚未满足 D3 闭包契约，不应作为新增复制/翻译入口调用。
     """
     if not target_page.pk:
         raise ExternalContentError("复制正文外置失败：目标页面尚未取得持久化主键 ID")
@@ -496,19 +714,18 @@ def duplicate_external_content_for_copy(
     coordinator = ExternalContentCoordinator()
     store = coordinator.store
 
-    # 维护本次复制流程中创建的所有新版本 ID，用于异常时原子清理回滚
+    # 记录准备版本供故障对账；SQL 回滚不会撤销 Mongo，不能据此物理删除。
     created_version_ids: List[str] = []
     # 源版本 ID 到目标版本 ID 的内存映射缓存，用于减少存储膨胀
     source_to_target_vid_map: Dict[str, str] = {}
 
     try:
-        # 使用统一锁原语获取全局单调锁序（符合 Sol 架构审查要求）
+        # 遗留单页锁路径不构成 D3 全闭包分层顺序，需另行替换与验证。
         from external_content.locking import lock_page_lifecycle_hierarchy
         from django.db import transaction
 
         with transaction.atomic():
-            # 按 page_id 升序锁定，防止死锁（Sol 审查要求）
-            # 统一使用写锁，简化逻辑并避免读写锁冲突（Sol 二次审查优化）
+            # page_id 排序仍是逐页全层锁，不能作为跨页无死锁证明。
             first_id, second_id = sorted([source_page.pk, target_page.pk])
             first_locks = lock_page_lifecycle_hierarchy(
                 first_id, revision_ids=None, check_write=True
@@ -533,7 +750,9 @@ def duplicate_external_content_for_copy(
                         f"Source page has an invalid or missing published pointer",
                         details={"page_id": source_specific.pk, "error_category": "published_pointer_missing"},
                     )
-                source_published_revision, _ = _validate_published_pointer(source_specific, source_state, store)
+                source_published_revision, _ = _validate_published_pointer(
+                    source_specific, source_state, store, revisions=source_locks.revisions
+                )
             source_effective_manifest = None
             if source_state:
                 source_effective_manifest = source_state.published_manifest or source_state.draft_manifest
@@ -729,6 +948,11 @@ def duplicate_external_content_for_copy(
                     _validate_revision_manifest(target_locks.page.specific, published_revision, published_manifest, store, validate_business=True)
                     state.published_manifest = published_manifest.to_dict()
                     state.published_revision_id = published_revision.pk
+                    # 原生复制把最新草稿设为 live_revision；正式指针必须与已校验的发布快照同事务对齐。
+                    Page.objects.filter(pk=target_page.pk).update(
+                        live_revision_id=published_revision.pk,
+                    )
+                    target_page.live_revision = published_revision
                 else:
                     raise PublicationRevisionInvalidError(
                         f"Target page has no matching published revision",
@@ -878,49 +1102,370 @@ def sync_external_content_aliases(
     return updated_alias_ids
 
 
+def _lock_copy_sources(action: Any) -> Dict[str, Any]:
+    """Mongo 读取前 NOWAIT 围栏源树及目标父页，用当前锁定读复核树位置。"""
+    source = Page.objects.get(pk=action.page.pk)
+    sources = (
+        list(source.get_descendants(inclusive=True).order_by("pk"))
+        if action.recursive else [source]
+    )
+    parent_id = action.to.pk if action.to is not None else source.get_parent().pk
+    discovered = {page.pk: page for page in sources}
+    discovered[parent_id] = Page.objects.get(pk=parent_id)
+    def validate_pages(pages: Any) -> None:
+        """仅在 Page 层当前读复核，不在 State/Intent 后发现并增补源节点。"""
+        for page_id, expected in discovered.items():
+            actual = pages[page_id]
+            if (
+                actual.path, actual.depth, actual.content_type_id, actual.alias_of_id
+            ) != (
+                expected.path, expected.depth, expected.content_type_id, expected.alias_of_id
+            ):
+                raise ExternalContentOperationBlockedError("复制获锁期间页面拓扑发生变化")
+        if action.recursive:
+            current_ids = set(
+                Page.objects.select_for_update(nowait=True)
+                .filter(path__startswith=source.path)
+                .values_list("pk", flat=True)
+            )
+            if current_ids != {page.pk for page in sources}:
+                raise ExternalContentOperationBlockedError("复制获锁期间源子树发生变化")
+    external_ids = []
+    for page in sources:
+        policy = get_storage_policy_for_model(page.specific_class, allow_record_new=False)
+        if policy and policy.external_fields:
+            external_ids.append(page.pk)
+    locks, alias_locks = lock_alias_lifecycle_closures(
+        external_ids, additional_page_ids=sorted(discovered),
+        validate_pages=validate_pages,
+    )
+    return {"locks": locks, "alias_locks": alias_locks}
+
+
+def _copy_node_revisions(
+    source: Page, frame: Dict[str, Any], store: ContentVersionStore, *, keep_live: bool
+) -> tuple[List[Revision], Revision, Optional[Revision]]:
+    """只用锁定的真实 Revision 主键选择 A/B，Alias 仅物化 canonical 正式快照。"""
+    locks = frame["locks"][source.pk]
+    if source.alias_of_id:
+        _, _, revision, manifest = _canonical_alias_source(
+            source.pk, locks=frame["alias_locks"][source.pk]
+        )
+        if revision is None or manifest is None:
+            raise PublicationRevisionInvalidError("Alias 复制缺少正式正文快照")
+        ExternalContentCoordinator(store=store).validate_manifest_payloads(manifest)
+        return [revision], revision, revision if keep_live and source.live else None
+    state = locks.state
+    if (
+        state is None
+        or state.model_label != source._meta.label_lower
+        or state.source_page_id is not None
+        or state.source_revision_id is not None
+        or state.draft_revision_id != source.latest_revision_id
+        or not state.draft_manifest
+    ):
+        raise PublicationRevisionInvalidError("复制源草稿 Page/State 身份或指针不一致")
+    revisions = locks.revisions
+    latest = next(
+        (revision for revision in revisions if revision.pk == state.draft_revision_id), None
+    )
+    if latest is None:
+        raise PublicationRevisionInvalidError("复制源最新 Revision 缺失")
+    _alias_revision_manifest(source, latest, state.draft_manifest)
+    published = None
+    if source.live:
+        published, _ = _validate_published_pointer(
+            source, state, store, revisions=locks.revisions
+        )
+        _alias_revision_manifest(source, published, state.published_manifest)
+    return revisions, latest, published if keep_live else None
+
+
+def _clone_copy_revision(
+    action: Any,
+    source: Page,
+    target: Page,
+    revision: Revision,
+    *,
+    child_map: Dict[Any, Any],
+    excluded: List[str],
+    target_data: Dict[str, Any],
+    overrides: Dict[str, Any],
+    policy: Any,
+    store: ContentVersionStore,
+    version_map: Dict[str, str],
+    created_versions: List[str],
+) -> Revision:
+    """先派生目标 Manifest 再保存历史快照；绝不走 save_revision 重写历史正文。"""
+    from modelcluster.models import get_all_child_relations
+
+    content = deepcopy(_alias_content_dict(revision.content))
+    manifest = _alias_revision_manifest(
+        source, revision, content["_external_content_manifest"]
+    )
+    content["_external_content_manifest"] = _derive_manifest_for_target(
+        manifest.to_dict(), target, policy, store, version_map, created_versions
+    )
+    content["pk"] = target.pk
+    for relation in get_all_child_relations(source):
+        accessor = relation.get_accessor_name()
+        for child in content.get(accessor, []):
+            child[relation.field.name] = target.pk
+            copied_child = child_map.get((relation, child["pk"]))
+            child["pk"] = copied_child.pk if copied_child else None
+            if action.reset_translation_key and "translation_key" in child:
+                child["translation_key"] = action.generate_translation_key(child["translation_key"])
+    for field_name in excluded:
+        if field_name in content:
+            content[field_name] = target_data.get(field_name)
+    for field_name in overrides:
+        model_field = target._meta.get_field(field_name)
+        if not model_field.many_to_many:
+            serialized_name = model_field.name
+            content[serialized_name] = target_data.get(serialized_name)
+    clone = deepcopy(revision)
+    clone.pk = None
+    clone._state.adding = True
+    clone.object_id = str(target.pk)
+    clone.approved_go_live_at = None
+    clone.content = content
+    clone.save(force_insert=True)
+    return clone
+
+
+def _copy_external_node(
+    action: Any,
+    source: Page,
+    *,
+    to: Optional[Page],
+    update_attrs: Optional[Dict[str, Any]],
+    exclude_fields: Optional[List[str]],
+    mpnode_attrs: Any,
+    frame: Dict[str, Any],
+) -> Page:
+    """接入 Wagtail 8.0 节点复制边界，信号前完成正文、A/B 指针和业务门禁。"""
+    from wagtail.log_actions import log
+    from wagtail.models import PageViewRestriction
+    from wagtail.models.copying import _copy, _copy_m2m_relations
+    from wagtail.models.i18n import TranslatableMixin
+    from wagtail.signals import page_published
+    from external_content.mixins import _suppress_external_content_autoload
+
+    policy = get_storage_policy_for_model(type(source), allow_record_new=False)
+    excluded = (
+        source.default_exclude_fields_in_copy
+        + source.exclude_fields_in_copy
+        + (exclude_fields or [])
+    )
+    overrides = update_attrs or {}
+    protected = set(policy.external_fields) | {
+        "pk", "id", "path", "depth", "numchild", "alias_of", "alias_of_id",
+        "live", "live_revision", "live_revision_id", "latest_revision", "latest_revision_id",
+    }
+    if set(overrides) & protected or set(excluded) & set(policy.external_fields):
+        raise ExternalContentError("外置复制禁止覆盖正文、生命周期身份或排除正文")
+    if to is not None and to.pk not in frame["locks"]:
+        # 现有父页必须属于入口发现的闭包；变化只能退出整个 Action 事务。
+        raise ExternalContentOperationBlockedError("复制目标父页不在原有生命周期闭包中")
+    store = ContentVersionStore()
+    revisions, latest, published = _copy_node_revisions(
+        source, frame, store, keep_live=action.keep_live
+    )
+    base_attrs = {"alias_of": None, **overrides}
+    if action.user:
+        base_attrs["owner"] = action.user
+    if action.reset_translation_key:
+        base_attrs["translation_key"] = uuid.uuid4()
+    with _suppress_external_content_autoload():
+        target, child_map = _copy(source, exclude_fields=excluded, update_attrs=base_attrs)
+        target.alias_of_id = None
+        target.live = False
+        target.live_revision_id = None
+        target.latest_revision_id = None
+        target.first_published_at = None
+        target.last_published_at = None
+        for field_name, config in policy.external_fields.items():
+            setattr(target, field_name, config.codec.get_empty_sentinel())
+        for (relation, _), child in child_map.items():
+            if action.process_child_object:
+                action.process_child_object(source, target, relation, child)
+            if action.reset_translation_key and isinstance(child, TranslatableMixin):
+                child.translation_key = action.generate_translation_key(child.translation_key)
+        if mpnode_attrs:
+            target.path, target.depth = mpnode_attrs
+            target.save(clean=False)
+        elif to is not None:
+            target = to.add_child(instance=target)
+        else:
+            target = source.add_sibling(instance=target)
+        mpnode_attrs = (target.path, target.depth)
+        frame["locks"][target.pk] = lock_page_lifecycle_hierarchy(
+            target.pk, revision_ids=None, check_write=True, nowait=True
+        )
+        _copy_m2m_relations(source, target, exclude_fields=excluded, update_attrs=base_attrs)
+        target_data = target.serializable_data()
+    selected = revisions if action.copy_revisions and not source.alias_of_id else [
+        revision for revision in revisions
+        if revision.pk in {latest.pk, published.pk if published else None}
+    ]
+    canonical_source = (
+        frame["alias_locks"][source.pk].pages[
+            frame["alias_locks"][source.pk].source_chain[-1]
+        ].page.specific_deferred
+        if source.alias_of_id else source
+    )
+    revision_map: Dict[int, Revision] = {}
+    version_map: Dict[str, str] = {}
+    created_versions: List[str] = []
+    for revision in selected:
+        clone = _clone_copy_revision(
+            action, canonical_source, target, revision, child_map=child_map,
+            excluded=excluded, target_data=target_data,
+            overrides=overrides if revision.pk == latest.pk else {},
+            policy=policy, store=store, version_map=version_map,
+            created_versions=created_versions,
+        )
+        revision_map[revision.pk] = clone
+    draft = revision_map[latest.pk]
+    live_revision = revision_map[published.pk] if published else None
+    draft_manifest = _manifest_from_revision(draft)
+    live_manifest = _manifest_from_revision(live_revision) if live_revision else None
+    now = timezone.now()
+    ExternalContentPublicationState.objects.create(
+        page_id=target.pk, model_label=target._meta.label_lower,
+        draft_revision_id=draft.pk, draft_manifest=draft_manifest.to_dict(),
+        published_revision_id=live_revision.pk if live_revision else None,
+        published_manifest=live_manifest.to_dict() if live_manifest else None,
+        publication_generation=1 if live_revision else 0,
+        published_at=now if live_revision else None,
+    )
+    target.latest_revision = draft
+    target.live_revision = live_revision
+    target.live = live_revision is not None
+    target.draft_title = draft.content.get("title", target.title)
+    target.has_unpublished_changes = live_revision is None or draft.pk != live_revision.pk
+    target.first_published_at = now if live_revision else None
+    target.last_published_at = now if live_revision else None
+    target.save(clean=False, update_fields=[
+        "latest_revision", "live_revision", "live", "draft_title",
+        "has_unpublished_changes",
+        "first_published_at", "last_published_at",
+    ])
+    effective_manifest = live_manifest or draft_manifest
+    ExternalContentCoordinator(store=store).load_external_content_from_manifest(
+        target, effective_manifest
+    )
+    target._external_content_loaded_hashes = {
+        name: entry.payload_sha256 for name, entry in effective_manifest.fields.items()
+    }
+    if live_revision:
+        _validate_revision_manifest(
+            target, live_revision, live_manifest, store, validate_business=True
+        )
+        page_published.send(
+            sender=target.specific_class, instance=target, revision=live_revision
+        )
+    if action.log_action:
+        parent = source.get_parent()
+        log(instance=target, action=action.log_action, user=action.user, data={
+            "page": {
+                "id": target.pk, "title": target.get_admin_display_title(),
+                "locale": {"id": target.locale_id, "language_code": target.locale.language_code},
+            },
+            "source": {
+                "id": parent.pk, "title": parent.specific_deferred.get_admin_display_title(),
+            } if parent else None,
+            "destination": {
+                "id": to.pk, "title": to.specific_deferred.get_admin_display_title(),
+            } if to else None,
+            "keep_live": target.live and action.keep_live,
+            "source_locale": {"id": source.locale_id, "language_code": source.locale.language_code},
+        })
+        if live_revision:
+            log(instance=target, action="wagtail.publish", user=action.user, revision=live_revision)
+    if action.recursive:
+        numchild = 0
+        for child in source.get_children().specific().iterator():
+            newdepth = mpnode_attrs[1] + 1
+            child_attrs = (
+                Page._get_path(mpnode_attrs[0], newdepth, numchild), newdepth
+            )
+            numchild += 1
+            action._copy_page(child, to=target, _mpnode_attrs=child_attrs)
+        if numchild:
+            target.numchild = numchild
+            target.save(clean=False, update_fields=["numchild"])
+    restriction_parent = to if to is not None else action.page.get_parent()
+    if not restriction_parent.get_view_restrictions().exists():
+        for restriction in action.page.view_restrictions.all():
+            copied_restriction = PageViewRestriction(
+                restriction_type=restriction.restriction_type,
+                password=restriction.password, page=target,
+            )
+            copied_restriction.save(user=action.user)
+            copied_restriction.groups.set(restriction.groups.all())
+    logger.info("external_content_copy_complete source=%s target=%s", source.pk, target.pk)
+    return target
+
+
 def wrap_copy_page_action() -> None:
-    """
-    包装 Wagtail 原生 CopyPageAction.execute，确保复制操作处于受控 copy 上下文中。
-    保证无论通过 page.copy() 还是直接调用 CopyPageAction.execute()，
-    正文外置通用协议均能安全识别并派生独立正文。
-    """
-    try:
-        from wagtail.actions.copy_page import CopyPageAction
-    except ImportError:
-        return
+    """只包装 Action 实例的节点入口，不改全局信号，也不豁免 Manifest 身份。"""
+    from wagtail.actions.copy_page import CopyPageAction
 
     if getattr(CopyPageAction, "_external_content_wrapped", False):
         return
-
     original_execute = CopyPageAction.execute
+    original_copy_page = CopyPageAction._copy_page
 
-    def controlled_copy_execute(self: Any, *args: Any, **kwargs: Any) -> Any:
-        from external_content.mixins import _controlled_copy_context
-        previous_copy_context = getattr(_controlled_copy_context, "in_copy", False)
-        _controlled_copy_context.in_copy = True
-        try:
-            target_page = original_execute(self, *args, **kwargs)
-            if hasattr(self, "page") and hasattr(target_page, "specific"):
-                source_specific = getattr(self.page, "specific", self.page)
-                target_specific = target_page.specific
-                policy = get_storage_policy_for_model(type(target_specific), allow_record_new=False)
-                if (
-                    policy
-                    and policy.external_fields
-                    and not getattr(target_specific, "_external_content_copy_processed", False)
-                ):
-                    duplicate_external_content_for_copy(
-                        source_page=source_specific,
-                        target_page=target_specific,
-                        keep_live=getattr(self, "keep_live", True),
-                        copy_revisions=getattr(self, "copy_revisions", True),
-                        user=getattr(self, "user", None),
-                    )
-                    setattr(target_specific, "_external_content_copy_processed", True)
-            return target_page
-        finally:
-            _controlled_copy_context.in_copy = previous_copy_context
+    @_translation_insert_scope()
+    def controlled_copy_page(
+        self: Any, page: Page, to: Optional[Page] = None,
+        update_attrs: Optional[Dict[str, Any]] = None,
+        exclude_fields: Optional[List[str]] = None, _mpnode_attrs: Any = None,
+    ) -> Page:
+        frame = getattr(self, "_external_content_copy_frame", None)
+        policy = get_storage_policy_for_model(page.specific_class, allow_record_new=False)
+        if not policy or not policy.external_fields:
+            return original_copy_page(
+                self, page, to=to, update_attrs=update_attrs,
+                exclude_fields=exclude_fields, _mpnode_attrs=_mpnode_attrs,
+            )
+        if frame is None or page.pk not in frame["locks"]:
+            raise ExternalContentOperationBlockedError("外置节点复制缺少 Action 事务围栏")
+        source = frame["locks"][page.pk].page.specific
+        return _copy_external_node(
+            self, source, to=to, update_attrs=update_attrs,
+            exclude_fields=exclude_fields, mpnode_attrs=_mpnode_attrs, frame=frame,
+        )
 
+    def controlled_copy_execute(self: Any, skip_permission_checks: bool = False) -> Page:
+        self.check(skip_permission_checks=skip_permission_checks)
+        translation = getattr(translation_lifecycle_context, "frame", None)
+        if translation is not None:
+            translation_member(self.page.pk)
+            if self.to is not None:
+                translation_member(self.to.pk)
+            with preserve_threadlocal_context(self, "_external_content_copy_frame", translation):
+                return original_execute(self, skip_permission_checks=skip_permission_checks)
+        sources = (
+            self.page.get_descendants(inclusive=True)
+            if self.recursive else [self.page]
+        )
+        has_external = any(
+            (policy := get_storage_policy_for_model(
+                page.specific_class, allow_record_new=False
+            )) and policy.external_fields
+            for page in sources
+        )
+        if not has_external:
+            return original_execute(self, skip_permission_checks=skip_permission_checks)
+        with transaction.atomic():
+            frame = _lock_copy_sources(self)
+            # 缺省与显式 None 不等价；嵌套及异常退出都恢复调用前的精确绑定。
+            with preserve_threadlocal_context(self, "_external_content_copy_frame", frame):
+                return original_execute(self, skip_permission_checks=skip_permission_checks)
+
+    CopyPageAction._copy_page = controlled_copy_page
     CopyPageAction.execute = controlled_copy_execute
     CopyPageAction._external_content_wrapped = True
 
@@ -945,11 +1490,17 @@ def wrap_create_page_alias_action() -> None:
         with transaction.atomic():
             return original_execute(self, *args, **kwargs)
 
+    @_translation_insert_scope()
     def controlled_create_alias(self: Any, page: Page, **kwargs: Any) -> Page:
         from external_content.mixins import _controlled_alias_context
 
         # 私有入口也保持原子边界；新增来源锁全部 NOWAIT，不先请求阻塞源锁。
         with transaction.atomic():
+            if getattr(translation_lifecycle_context, "frame", None) is not None:
+                translation_member(page.pk)
+                parent = kwargs.get("parent")
+                if parent is not None:
+                    translation_member(parent.pk)
             locks = lock_alias_lifecycle_closure(page.pk)
             source_specific = locks.pages[page.pk].page.specific
             if hasattr(page, "_test_content_store"):
@@ -1003,73 +1554,70 @@ def wrap_convert_alias_page_action() -> None:
     original_execute = ConvertAliasPageAction.execute
 
     def controlled_convert_alias_execute(self: Any, *args: Any, **kwargs: Any) -> Any:
-        if hasattr(self, "page") and hasattr(self.page, "specific"):
-            self.page = self.page.specific
+        # 策略识别仅取类，不访问 specific；实例可能陈旧，不能用它授予来源资格。
+        page = self.page
+        page_class = getattr(page, "specific_class", type(page))
+        policy = get_storage_policy_for_model(page_class, allow_record_new=False)
+        if not policy or not policy.external_fields:
+            return original_execute(self, *args, **kwargs)
 
-        spec = getattr(self.page, "specific", self.page)
-        policy = get_storage_policy_for_model(type(spec), allow_record_new=False)
-        if policy and policy.external_fields:
-            # Validate external-content identity before lifecycle pointer writes.
-            if getattr(spec, "live", False) and hasattr(spec, "load_published_content"):
-                spec.load_published_content()
-            elif getattr(spec, "latest_revision", None) and hasattr(spec, "get_latest_revision_as_object"):
-                draft_obj = spec.get_latest_revision_as_object()
-                for field_name in policy.external_fields.keys():
-                    setattr(spec, field_name, getattr(draft_obj, field_name, None))
-
-        # Validate external-content identity before lifecycle pointer writes.
         with transaction.atomic():
-            converted_page = original_execute(self, *args, **kwargs)
-            if hasattr(converted_page, "specific"):
+            closure = lock_alias_lifecycle_closure(page.pk)
+            locks = closure.pages[page.pk]
+            if not locks.page.alias_of_id:
+                raise ExternalContentOperationBlockedError("转换目标已不再是数据库 Alias")
+            if closure.target_ids != [page.pk]:
+                # 下游转换/重绑尚无完整协议，拒绝整次操作而不是部分推进。
+                raise ExternalContentOperationBlockedError("Alias 转换存在下游 Alias，拒绝操作")
+            _, _, _, manifest = _canonical_alias_source(
+                page.pk, locks=closure, allow_unpublished=True
+            )
+            if manifest is None:
+                raise PublicationRevisionInvalidError("Alias 转换缺少可证明的正式正文快照")
+            spec = locks.page.specific
+            coordinator = ExternalContentCoordinator(
+                store=getattr(page, "_test_content_store", None)
+            )
+            coordinator.load_external_content_from_manifest(spec, manifest)
+            spec._external_content_loaded_hashes = {
+                name: entry.payload_sha256 for name, entry in manifest.fields.items()
+            }
+            if hasattr(page, "_test_content_store"):
+                spec._test_content_store = page._test_content_store
+            # 获锁实例只用于本次执行；失败污染实例应丢弃，不把 SQL 撤回当作内存恢复。
+            # 提交结果未知也仅恢复 Action 的原绑定，不猜测或补偿持久结果。
+            with preserve_threadlocal_context(self, "page", spec):
+                # 行锁跨度覆盖 Mongo 验签、原生断链/save_revision 及最终 State 落地。
+                converted_page = original_execute(self, *args, **kwargs)
                 conv_specific = converted_page.specific
-                policy = get_storage_policy_for_model(type(conv_specific), allow_record_new=False)
-                if policy and policy.external_fields:
-                    coordinator = ExternalContentCoordinator()
-                    from external_content.locking import lock_page_lifecycle_hierarchy
-
-                    locks = lock_page_lifecycle_hierarchy(
-                        conv_specific.pk,
-                        revision_ids=None,
-                        check_write=True,
+                # save_revision 已更新草稿 State；重读而非使用获锁时的陈旧草稿。
+                # 新 Revision 由本事务在已围栏 Page 下创建，不在 Intent 层后补锁。
+                state = ExternalContentPublicationState.objects.get(page_id=page.pk)
+                state.source_page_id = None
+                state.source_revision_id = None
+                update_fields = ["source_page_id", "source_revision_id", "updated_at"]
+                if conv_specific.live:
+                    live_revision_id = conv_specific.live_revision_id
+                    if not live_revision_id or live_revision_id != state.draft_revision_id:
+                        raise PublicationRevisionInvalidError("Alias 转换正式指针未绑定新草稿 Revision")
+                    live_revision = Revision.objects.get(pk=live_revision_id)
+                    live_manifest = _manifest_from_revision(live_revision)
+                    _validate_revision_manifest(
+                        conv_specific, live_revision, live_manifest,
+                        coordinator.store, validate_business=True,
                     )
-                    base_page = locks.page
-                    state = locks.state
-                    if state is None:
-                        state = ExternalContentPublicationState.objects.create(
-                            page_id=base_page.pk,
-                            model_label=base_page.specific._meta.label_lower,
-                            publication_generation=0,
-                        )
-
-                    state.source_page_id = None
-                    state.source_revision_id = None
-                    update_fields = ["source_page_id", "source_revision_id", "updated_at"]
-                    if base_page.live:
-                        live_revision_id = base_page.live_revision_id
-                        if not live_revision_id:
-                            raise PublicationRevisionInvalidError(
-                                f"Converted page is live without live_revision_id",
-                                details={"page_id": base_page.pk, "error_category": "published_pointer_missing"},
-                            )
-                        live_revision = Revision.objects.select_for_update().get(pk=live_revision_id)
-                        live_manifest = _manifest_from_revision(live_revision)
-                        _validate_revision_manifest(base_page.specific, live_revision, live_manifest, coordinator.store, validate_business=True)
-                        state.published_manifest = live_manifest.to_dict()
-                        state.published_revision_id = live_revision.pk
-                        state.publication_generation += 1
-                        update_fields.extend(["published_manifest", "published_revision_id", "publication_generation"])
-                    else:
-                        state.published_manifest = None
-                        state.published_revision_id = None
-                        update_fields.extend(["published_manifest", "published_revision_id"])
-                    state.save(update_fields=update_fields)
-
-                    if state.published_manifest and "fields" in state.published_manifest:
-                        conv_specific._external_content_loaded_hashes = {
-                            field_name: field_data.get("payload_sha256")
-                            for field_name, field_data in state.published_manifest["fields"].items()
-                        }
-            return converted_page
+                    state.published_manifest = live_manifest.to_dict()
+                    state.published_revision_id = live_revision.pk
+                    state.publication_generation += 1
+                    update_fields.extend([
+                        "published_manifest", "published_revision_id", "publication_generation",
+                    ])
+                else:
+                    state.published_manifest = None
+                    state.published_revision_id = None
+                    update_fields.extend(["published_manifest", "published_revision_id"])
+                state.save(update_fields=update_fields)
+                return converted_page
 
     ConvertAliasPageAction.execute = controlled_convert_alias_execute
     ConvertAliasPageAction._external_content_wrapped = True

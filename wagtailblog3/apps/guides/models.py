@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from typing import Any, Dict, List, Optional
 
 from django import forms
@@ -19,14 +20,15 @@ from django.conf import settings
 from django.core.paginator import Paginator
 from django.db import models
 from modelcluster.fields import ParentalKey
-from wagtail.admin.forms.pages import WagtailAdminPageForm
+from wagtail.blocks import RichTextBlock, StreamBlock, StructBlock
 from wagtail.admin.panels import FieldPanel, InlinePanel, MultiFieldPanel
 from wagtail.fields import StreamField
 from wagtail.models import Orderable, Page
 from wagtail.snippets.models import register_snippet
 
 from external_content.exceptions import PublicationRevisionInvalidError
-from external_content.mixins import ExternalContentPageMixin, controlled_external_content_save
+from external_content.forms import ExternalContentPageForm
+from external_content.mixins import ExternalContentPageMixin
 from guides.blocks import GuideStreamBlock
 
 
@@ -143,7 +145,7 @@ class GuideIndexPage(Page):
         return context
 
 
-class GuidePageForm(WagtailAdminPageForm):
+class GuidePageForm(ExternalContentPageForm):
     """
     专题指南后台编辑表单。
 
@@ -152,18 +154,82 @@ class GuidePageForm(WagtailAdminPageForm):
     2. 发布阶段（is_deferred_validation=False）：强制校验必须指定有效主题且至少包含一个操作步骤。
     """
 
-    def save(self, commit: bool = True) -> Any:
-        """
-        将 Wagtail 后台表单的中间 Page.save() 纳入外置正文受控上下文。
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._guide_body_baseline: Optional[List[Dict[str, Any]]] = None
+        if self.is_bound and "body" in self.fields:
+            # 使用当前编辑/历史 Revision 实例，不回查 live/latest；读取失败照常关闭。
+            # _post_clean 会给 instance 赋新值，必须提前冻结，且不得原地改写旧正文。
+            field = self.instance._meta.get_field("body")
+            self._guide_body_baseline = deepcopy(
+                field.stream_block.get_prep_value(self.instance.body)
+            )
 
-        正文真正落 MongoDB 与 Revision 的步骤仍由 save_revision() 完成；
-        只允许后台标准保存链路通过，不改变普通 ORM 直接 save() 的禁写契约。
+    @staticmethod
+    def _matches_editor_roundtrip(block: Any, original: Any, submitted: Any) -> bool:
+        """确认整份指南仅发生编辑器往返，不把双向归一化相等当作未编辑。
+
+        submitted 已是 widget 清洗后的数据库 HTML；其重解析结果仅供读取段落 key，
+        最终仍须与原文单向往返结果逐字节相等，否则必须保留用户的新正文。
         """
-        with controlled_external_content_save():
-            return super().save(commit=commit)
+        if original == submitted:
+            return True
+        if isinstance(block, RichTextBlock):
+            # 转换器加载 Page 模型，只能在 apps ready 后的表单阶段导入。
+            from wagtail.admin.rich_text.editors.draftail import DraftailRichTextArea
+
+            widget = block.field.widget
+            if not isinstance(widget, DraftailRichTextArea):
+                return False
+            expected_state = json.loads(widget.format_value(original))
+            submitted_state = json.loads(widget.format_value(submitted))
+            if len(expected_state["blocks"]) != len(submitted_state["blocks"]):
+                return False
+            # Wagtail 8 会为旧 HTML 无 key 的段落随机生成 data-block-key。
+            # 只对齐编辑器段落身份；仍把原文单向转换后的完整 HTML 与提交字节比较，
+            # 不对提交内容做空白折叠或语义归一化，文字/链接/样式/结构差异不会被吞掉。
+            for expected, actual in zip(expected_state["blocks"], submitted_state["blocks"]):
+                expected["key"] = actual["key"]
+            return widget.converter.to_database_format(json.dumps(expected_state)) == submitted
+        if isinstance(block, StructBlock):
+            return (
+                isinstance(original, dict) and isinstance(submitted, dict)
+                and original.keys() == submitted.keys()
+                and all(
+                    GuidePageForm._matches_editor_roundtrip(
+                        block.child_blocks[name], original[name], submitted[name],
+                    )
+                    for name in original
+                )
+            )
+        if isinstance(block, StreamBlock):
+            if not isinstance(original, list) or not isinstance(submitted, list):
+                return False
+            if len(original) != len(submitted):
+                return False
+            for before, after in zip(original, submitted):
+                # 块 ID、类型、顺序及信封字段必须一致；非富文本值只能精确相等。
+                if {k: v for k, v in before.items() if k != "value"} != {
+                    k: v for k, v in after.items() if k != "value"
+                }:
+                    return False
+                if not GuidePageForm._matches_editor_roundtrip(
+                    block.child_blocks[before["type"]], before["value"], after["value"],
+                ):
+                    return False
+            return True
+        return False
 
     def clean(self) -> Dict[str, Any]:
         cleaned_data = super().clean()
+
+        baseline = getattr(self, "_guide_body_baseline", None)
+        if baseline is not None and "body" in cleaned_data:
+            field = self.instance._meta.get_field("body")
+            submitted = field.stream_block.get_prep_value(cleaned_data["body"])
+            if self._matches_editor_roundtrip(field.stream_block, baseline, submitted):
+                # 整体等于原文经编辑器往返才还原；任何真实改动均保留整份新输入。
+                cleaned_data["body"] = field.to_python(deepcopy(baseline))
 
         if not getattr(self, "is_deferred_validation", False):
             # 校验主题
@@ -202,6 +268,7 @@ class GuidePage(ExternalContentPageMixin, Page):
     # 正文外置策略声明
     content_storage = {"body": "mongo"}
     content_storage_schema = 1
+    content_search = {"type": "guides", "label": "专题指南"}
 
     subpage_types: List[str] = []
     parent_page_types: List[str] = ["guides.GuideIndexPage"]

@@ -24,7 +24,20 @@
     form.addEventListener("input", () => { userEdited = true; });
     form.addEventListener("change", () => { userEdited = true; });
 
+    const restoreProgress = () => {
+      // 原生 w-progress 延迟激活；等本次事件的激活任务结束后再恢复按钮。
+      // 准备请求尚未返回或已交给原生提交时，仍保留真实的忙碌状态。
+      window.setTimeout(() => window.setTimeout(() => {
+        if (navigation || attempt?.pending) return;
+        const app = window.wagtail?.app;
+        form.querySelectorAll('[data-controller~="w-progress"]').forEach((button) => {
+          app?.getControllerForElementAndIdentifier(button, "w-progress")?.deactivate();
+        });
+      }, 0), 0);
+    };
+
     const warn = () => {
+      restoreProgress();
       form.dispatchEvent(new CustomEvent("external-content:unknown", { bubbles: true }));
       try {
         window.alert("请求正在处理或结果尚未确认，请先核对原页面与保存结果；为避免重复写入，本次提交已暂停。");
@@ -68,8 +81,9 @@
           credentials: "same-origin",
           headers: { Accept: json ? "application/json" : "text/html" },
         }).then(async (response) => {
-          att.pending = false;
           const data = await response.json();
+          // 响应头到达后正文仍可能在读取；取得完整准备结果前保持忙碌。
+          att.pending = false;
           if (!response.ok || !data.token) {
             att.unknown = true;
             throw new Error("preparation rejected");

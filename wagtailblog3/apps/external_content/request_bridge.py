@@ -293,6 +293,33 @@ def attach_ticket(response: HttpResponse, request: HttpRequest, scope: dict, *,
     return response
 
 
+def track_form_valid(native: Callable) -> Callable:
+    """记录进入保存动作的边界，后续再返回校验页也不能证明正文未写入。"""
+    @wraps(native)
+    def tracked(view: object, form: forms.BaseForm) -> HttpResponse:
+        if getattr(view, "_ec_tracking_validation", False):
+            view._ec_form_valid_entered = True
+        return native(view, form)
+    tracked._external_content_validation_guard = True
+    return tracked
+
+
+def track_form_invalid(native: Callable) -> Callable:
+    """仅认可原生校验失败返回的同一个响应；锁定及工作流不作为无写入证明。"""
+    @wraps(native)
+    def tracked(view: object, form: forms.BaseForm) -> HttpResponse:
+        response = native(view, form)
+        if (getattr(view, "_ec_tracking_validation", False)
+                and not getattr(view, "_ec_form_valid_entered", False)
+                and not getattr(view, "locked_for_user", False)
+                and not getattr(view, "is_cancelling_workflow", False)
+                and not form.is_valid()):
+            view._ec_validation_response = response
+        return response
+    tracked._external_content_validation_guard = True
+    return tracked
+
+
 def guard_dispatch(native: Callable, kind: str) -> Callable:
     """原生 dispatch 外围领取与事务桥；工作流不在受控首批接入范围。"""
     @wraps(native)
@@ -330,6 +357,9 @@ def guard_dispatch(native: Callable, kind: str) -> Callable:
         # 旧围栏负责回滚，防重层保守 unknown，不自动再次执行。
         outcome = {"registered": False}
         try:
+            view._ec_tracking_validation = kind in {"create", "edit"}
+            view._ec_form_valid_entered = False
+            view._ec_validation_response = None
             request._ec_expected_effect = (
                 "publish" if kind in {"edit", "create"} and request.POST.get("action-publish")
                 else kind)
@@ -337,10 +367,25 @@ def guard_dispatch(native: Callable, kind: str) -> Callable:
             with transaction.atomic():
                 response = native(view, request, *args, **kwargs)
                 result = result_summary(view, request, response, scope)
+                # 普通 200 或 hook 返回页不能证明未保存；只接受尚未进入动作的
+                # 原生无效表单响应，且排除 JSON、锁定、工作流与完成标记。
+                validation_rejected = (
+                    kind in {"create", "edit"}
+                    and response is view._ec_validation_response
+                    and response.status_code == 200
+                    and hasattr(response, "add_post_render_callback")
+                    and not wants_json(request)
+                    and not view._ec_form_valid_entered
+                    and not getattr(request, "_ec_completed_page_id", None)
+                )
                 if result is not None:
                     def register_completion() -> None:
                         outcome["registered"] = current_service.complete(claim, result)
                     transaction.on_commit(register_completion)
+                elif validation_rejected:
+                    def register_validation_rejection() -> None:
+                        outcome["registered"] = current_service.fail(claim, rollback_proven=True)
+                    transaction.on_commit(register_validation_rejection)
                 else:
                     transaction.on_commit(lambda: current_service.fail(claim))
         except Exception:
@@ -363,6 +408,9 @@ def guard_dispatch(native: Callable, kind: str) -> Callable:
             # 不撤销业务响应；显式区分业务完成与防重结果尚待核对。
             response["X-External-Content-Outcome"] = "unknown"
         if response.status_code == 200 and hasattr(response, "add_post_render_callback"):
+            if validation_rejected and outcome["registered"]:
+                # 旧身份仍绑定原输入；校验登记成功后另发身份供用户补填提交。
+                return attach_ticket(response, request, scope)
             # before hook 可能在 Page/Revision 已写入后返回模板，200 不是无副作用证明。
             response["X-External-Content-Outcome"] = "unknown"
             return attach_ticket(response, request, scope, unavailable=True)
@@ -379,6 +427,11 @@ def install_request_bridge() -> None:
     from wagtail.admin.views.pages.delete import DeleteView
     from wagtail.admin.views.pages.unpublish import UnpublishView
     from wagtail.admin.views.pages.convert_alias import ConvertAliasView
+    for view_class in (CreateView, EditView):
+        if not getattr(view_class.form_valid, "_external_content_validation_guard", False):
+            view_class.form_valid = track_form_valid(view_class.form_valid)
+        if not getattr(view_class.form_invalid, "_external_content_validation_guard", False):
+            view_class.form_invalid = track_form_invalid(view_class.form_invalid)
     for view_class, kind in [(CreateView, "create"), (EditView, "edit"), (CopyView, "copy"),
                              (DeleteView, "delete"), (UnpublishView, "unpublish"),
                              (ConvertAliasView, "convert_alias")]:

@@ -49,10 +49,12 @@ class ExternalContentConfig(AppConfig):
             wrap_convert_alias_page_action,
             wrap_copy_page_action,
             wrap_create_page_alias_action,
+            wrap_copy_page_for_translation_action,
         )
         wrap_copy_page_action()
         wrap_create_page_alias_action()
         wrap_convert_alias_page_action()
+        wrap_copy_page_for_translation_action()
 
         from .deletion import wrap_native_page_deletion
         wrap_native_page_deletion()

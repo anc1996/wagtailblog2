@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 def record_blog_page_published(sender: Any, instance: BlogPage, **kwargs: Any) -> None:
     """页面发布后补齐正式指针，并记录待投递的搜索事件。"""
 
-    if settings.CONTENT_SEARCH_PRODUCER_ENABLED:
+    if settings.CONTENT_SEARCH_PRODUCER_ENABLED and not getattr(settings, "CONTENT_SEARCH_V2_PRODUCER_ENABLED", False):
         revision = kwargs.get("revision")
         if (
             not kwargs.get("alias")
@@ -51,7 +51,7 @@ def record_blog_page_published(sender: Any, instance: BlogPage, **kwargs: Any) -
 def record_blog_page_unpublished(sender: Any, instance: BlogPage, **kwargs: Any) -> None:
     """取消发布后记录不可搜索的墓碑事件。"""
 
-    if settings.CONTENT_SEARCH_PRODUCER_ENABLED:
+    if settings.CONTENT_SEARCH_PRODUCER_ENABLED and not getattr(settings, "CONTENT_SEARCH_V2_PRODUCER_ENABLED", False):
         # Wagtail 8.0 后台 UnpublishAction 绕过 BlogPage.unpublish；在统一信号中推进代次并清理正式指针。
         BlogPublicationService.advance_unpublish_generation(instance.pk)
         BlogPublicationService.clear_published_pointer(instance.pk)
@@ -71,7 +71,7 @@ def record_blog_page_unpublished(sender: Any, instance: BlogPage, **kwargs: Any)
 def record_blog_page_deleted(sender: Any, instance: BlogPage, **kwargs: Any) -> None:
     """后台 DeletePageAction 绕过页面子类方法时，仍登记递增代次的删除墓碑。"""
 
-    if settings.CONTENT_SEARCH_PRODUCER_ENABLED:
+    if settings.CONTENT_SEARCH_PRODUCER_ENABLED and not getattr(settings, "CONTENT_SEARCH_V2_PRODUCER_ENABLED", False):
         # Django Collector 可能对同一实例发出多次 pre_delete；实例标记保证墓碑只写一次。
         if getattr(instance, "_search_delete_recorded", False):
             return
@@ -100,7 +100,7 @@ def request_scope_recalculation_on_restriction_change(
 ) -> None:
     """权限范围变化后创建重算任务，避免在信号中递归扫描整棵页面树。"""
 
-    if settings.CONTENT_SEARCH_PRODUCER_ENABLED:
+    if settings.CONTENT_SEARCH_PRODUCER_ENABLED or getattr(settings, "CONTENT_SEARCH_V2_PRODUCER_ENABLED", False):
         ContentSearchOutboxService.request_scope_recalculation(instance.page_id)
 
 
@@ -115,5 +115,7 @@ def request_scope_recalculation_on_page_move(
 ) -> None:
     """页面移动后创建重算任务，覆盖跨越权限父节点的场景。"""
 
-    if settings.CONTENT_SEARCH_PRODUCER_ENABLED and getattr(instance, "pk", None) is not None:
+    if (
+        settings.CONTENT_SEARCH_PRODUCER_ENABLED or getattr(settings, "CONTENT_SEARCH_V2_PRODUCER_ENABLED", False)
+    ) and getattr(instance, "pk", None) is not None:
         ContentSearchOutboxService.request_scope_recalculation(instance.pk)

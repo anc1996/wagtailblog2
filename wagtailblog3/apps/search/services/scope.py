@@ -85,11 +85,15 @@ def _reconcile_page(page_id: int) -> None:
     # outbox 模块会导入 tasks，而 tasks 又注册 ScopeJob；延迟导入可避免应用启动时循环依赖。
     from search.services.outbox import ContentSearchOutboxService
 
-    page = BlogPage.objects.filter(pk=page_id).first()
-    if page is None:
-        return
-    is_public = BlogPage.objects.live().public().filter(pk=page_id).exists()
     with transaction.atomic():
+        # A 域先锁 Page 再锁 SearchState；不可从 State 反向进入生产者的 Page 锁。
+        locked_page = Page.objects.select_for_update().only("pk").filter(pk=page_id).first()
+        if locked_page is None:
+            return
+        page = BlogPage.objects.filter(pk=page_id).first()
+        if page is None:
+            return
+        is_public = BlogPage.objects.live().public().filter(pk=page_id).exists()
         state = ContentSearchState.objects.select_for_update().filter(pk=page_id).first()
         state_public = bool(
             state

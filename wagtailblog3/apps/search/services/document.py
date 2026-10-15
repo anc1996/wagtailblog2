@@ -234,3 +234,90 @@ def build_formal_content_documents(
             continue
         documents.append(document)
     return documents, missing_page_ids
+
+
+def build_published_content_document(
+    snapshot: "PublishedSnapshotV1",
+    content_version: int,
+    scope: Mapping[str, Any] | None = None,
+    target_schema_version: int = 2,
+    adapter: Any = None,
+) -> FormalContentDocument:
+    """从正式快照编码目标白名单；逻辑 hash 不因 v1/v2 传输字段裁剪而改变。
+
+    scope 必须由调用方从当前 SQL 权限/站点范围重新取得；这里不证明公开权限，
+    也不读取 Page、当前草稿或写入 State/Outbox/ES。
+    """
+    from search.services.published_adapters import get_published_adapter
+    from search.services.published_snapshot import (
+        PublishedSnapshotError, PublishedSnapshotV1, canonical_digest,
+        effective_projection_schema_version, positive_int,
+    )
+
+    if not isinstance(snapshot, PublishedSnapshotV1) or not positive_int(content_version):
+        raise PublishedSnapshotError("projection_input_invalid")
+    schema = effective_projection_schema_version(target_schema_version)
+    if target_schema_version is None:
+        raise PublishedSnapshotError("projection_target_schema_missing")
+    data = snapshot.to_dict()
+    if schema == 1 and snapshot.snapshot_kind != "blog_v1":
+        raise PublishedSnapshotError("projection_external_target_unsupported")
+    if scope is not None and not isinstance(scope, Mapping):
+        raise PublishedSnapshotError("projection_scope_invalid")
+    supplied_scope = dict(scope or {})
+    if supplied_scope.keys() - {"locale_id", "site_ids", "ancestor_ids", "searchable", "is_deleted"}:
+        raise PublishedSnapshotError("projection_scope_invalid")
+    current_scope = {
+        "locale_id": supplied_scope.get("locale_id"),
+        "site_ids": supplied_scope.get("site_ids", []),
+        "ancestor_ids": supplied_scope.get("ancestor_ids", []),
+        "searchable": supplied_scope.get("searchable", True),
+        "is_deleted": supplied_scope.get("is_deleted", False),
+    }
+    if not positive_int(current_scope["locale_id"], nullable=True):
+        raise PublishedSnapshotError("projection_scope_invalid")
+    for key in ("site_ids", "ancestor_ids"):
+        values = current_scope[key]
+        if not isinstance(values, list) or any(not positive_int(value) for value in values):
+            raise PublishedSnapshotError("projection_scope_invalid")
+        current_scope[key] = sorted(set(values))
+    if any(type(current_scope[key]) is not bool for key in ("searchable", "is_deleted")):
+        raise PublishedSnapshotError("projection_scope_invalid")
+    if current_scope["is_deleted"]:
+        current_scope["searchable"] = False
+    extractor = adapter if adapter is not None else get_published_adapter(snapshot)
+    body_text = extractor.extract_text(snapshot)
+    if not isinstance(body_text, str):
+        raise PublishedSnapshotError("projection_text_invalid")
+    metadata, pointer = data["published_metadata"], data["body_ref"]
+    logical = {
+        "page_id": data["page_id"], "model_label": data["model_label"],
+        "search_type": data["search_type"], "snapshot_kind": data["snapshot_kind"],
+        "published_metadata": metadata, "body_text": body_text, **current_scope,
+    }
+    content_hash = canonical_digest(logical)
+    common = {
+        "page_id": data["page_id"], "content_version": content_version,
+        "content_hash": content_hash, "searchable": current_scope["searchable"],
+        "title": metadata["title"], "body_text": body_text,
+        "first_published_at": metadata["first_published_at"], "locale_id": current_scope["locale_id"],
+        "publication_generation": data["publication_generation"],
+    }
+    if schema == 1:
+        document = {
+            **common, "operation": "upsert", "intro": metadata["intro"], "date": metadata["date"],
+            "tag_ids": metadata["tag_ids"], "category_ids": metadata["category_ids"],
+            "body_version_id": pointer["body_version_id"],
+        }
+    else:
+        document = {
+            **common, "site_ids": current_scope["site_ids"], "ancestor_ids": current_scope["ancestor_ids"],
+            "model_label": data["model_label"], "search_type": data["search_type"],
+            "snapshot_kind": data["snapshot_kind"], "summary": metadata["summary"],
+            "sort_date": metadata["first_published_at"], "projection_schema_version": 2,
+            "snapshot_digest": snapshot.digest, "is_deleted": current_scope["is_deleted"],
+        }
+    return FormalContentDocument(
+        mongo_content_id=pointer.get("mongo_content_id"), content_hash=content_hash, document=document,
+        body_version_id=pointer.get("body_version_id"), publication_generation=data["publication_generation"],
+    )

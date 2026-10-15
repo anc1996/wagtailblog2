@@ -69,10 +69,10 @@ class SearchPaginationAndCacheTests(SimpleTestCase):
         self.assertEqual(SearchCache.get_implementation_namespace("blog"), "content")
 
     def test_cache_clear_deletes_only_the_current_search_namespace(self):
-        with patch("search.cache.cache.delete_pattern") as delete_pattern:
+        with patch("search.cache.cache") as redis_cache:
             SearchCache.clear_search_cache()
 
-        delete_pattern.assert_called_once_with("search:v5:*")
+        redis_cache.delete_pattern.assert_called_once_with("search:v5:*")
 
     def test_restriction_change_schedules_search_cache_invalidation_after_commit(self):
         from blog.signals import invalidate_feed_on_restriction_changed

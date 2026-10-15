@@ -11,7 +11,7 @@ from django.urls import reverse
 from django.utils.translation import get_language
 
 from .analytics import SearchAnalytics
-from .core import MAX_RESULT_WINDOW, SearchUnavailableError, get_search_suggestions, perform_search
+from .core import ALLOWED_SEARCH_TYPES, MAX_RESULT_WINDOW, SearchTypeInvalidError, SearchUnavailableError, get_search_suggestions, perform_search
 from .services.content_query import ContentSearchQueryUnavailable, ContentSearchResults
 from .services.federated_query import FederatedSearchResults
 from .services.cursor import ContentSearchCursorError
@@ -41,11 +41,14 @@ def get_search_results_context(
 	locale: str | None = None,
 ) -> dict[str, Any]:
 	"""构造页面、片段和 JSON 接口共用的搜索上下文。
-
 	先校验 offset 窗口和游标适用范围，再调用核心搜索引擎；分页错误不会触发 ES 查询。
 	"""
 	search_query = clean_search_param(query_params.get("query"))
 	search_type = query_params.get("type") or "all"
+
+	if search_type not in ALLOWED_SEARCH_TYPES:
+		raise SearchTypeInvalidError("不支持的搜索类型。")
+
 	start_date = clean_search_param(query_params.get("start_date"))
 	end_date = clean_search_param(query_params.get("end_date"))
 	order_by = clean_search_param(query_params.get("order_by"))
@@ -172,10 +175,12 @@ def search(request: Any) -> Any:
 		context = add_cursor_navigation(
 			get_search_results_context(request.GET, getattr(request, "LANGUAGE_CODE", None))
 		)
+	except SearchTypeInvalidError:
+		return _search_error_response(request, request.GET, "不支持的搜索类型。", 400, "invalid_search_type")
 	except SearchResultWindowError as error:
 		return _search_error_response(request, request.GET, str(error), 400)
 	except SearchCursorRequestError:
-		return _search_error_response(request, request.GET, "搜索游标无效或已过期，请重新搜索。", 400)
+		return _search_error_response(request, request.GET, "搜索游标无效或已过期，请重新搜索。", 400, "invalid_cursor")
 	except (SearchUnavailableError, ContentSearchQueryUnavailable):
 		return _search_error_response(request, request.GET, "搜索服务暂时不可用，请稍后重试。", 503)
 
@@ -208,11 +213,12 @@ def _search_error_response(
 	query_params: Mapping[str, Any],
 	message: str,
 	status: int,
+	code: str | None = None,
 ) -> Any:
 	"""让 HTML、传统 AJAX 和异步页面共享稳定的搜索错误语义。"""
 	query = clean_search_param(query_params.get("query"))
 	if request.headers.get("X-Requested-With") == "XMLHttpRequest":
-		code = "result_window_exceeded" if status == 400 else "search_unavailable"
+		code = code or ("result_window_exceeded" if status == 400 else "search_unavailable")
 		return JsonResponse({"error": {"code": code, "message": message}}, status=status)
 	context = {
 		"search_query": query or "",
@@ -245,68 +251,38 @@ def search_results_api(request: Any) -> JsonResponse:
 		response["Allow"] = "GET"
 		response["Cache-Control"] = "private, no-store"
 		return response
-
 	try:
 		context = add_cursor_navigation(
 			get_search_results_context(request.GET, getattr(request, "LANGUAGE_CODE", None))
 		)
-		pagination = {
-			"page_size": SEARCH_RESULTS_PER_PAGE,
-			"has_previous": context["search_results"].has_previous(),
-			"has_next": context["search_results"].has_next(),
-		}
-		if context["cursor_mode"]:
-			pagination.update(
-				{
-					"mode": "cursor",
-					"previous_cursor": context["search_results"].previous_cursor,
-					"next_cursor": context["search_results"].next_cursor,
-				}
-			)
-		else:
-			pagination.update(
-				{
-					"page": context["search_results"].number,
-					"total_pages": context["search_results"].paginator.num_pages,
-				}
-			)
+	except SearchTypeInvalidError:
 		response = JsonResponse(
-			{
-				"ok": True,
-				"data": {
-					"query": context["search_query"],
-					"filters": {
-						"type": context["search_type"],
-						"start_date": context["start_date"],
-						"end_date": context["end_date"],
-						"order_by": context["order_by"],
-					},
-					"result_count": context["search_results"].paginator.count,
-					"html": render_to_string(
-						"search/partials/_search_results.html",
-						context,
-						request=request,
-					),
-					"pagination": pagination,
-					"canonical_url": get_search_canonical_url(context),
-				},
-			}
-		)
-	except SearchResultWindowError as error:
-		response = JsonResponse(
-			{"ok": False, "error": {"code": "result_window_exceeded", "message": str(error)}},
+			{"ok": False, "error": {"code": "invalid_search_type", "message": "不支持的搜索类型。"}},
 			status=400,
 		)
-	except SearchCursorRequestError:
-		response = JsonResponse(
-			{"ok": False, "error": {"code": "invalid_cursor", "message": "搜索游标无效或已过期，请重新搜索。"}},
-			status=400,
-		)
+		response["Cache-Control"] = "private, no-store"
+		return response
 	except SearchUnavailableError:
 		response = JsonResponse(
 			{"ok": False, "error": {"code": "search_unavailable", "message": "搜索服务暂时不可用，请稍后重试。"}},
 			status=503,
 		)
+		response["Cache-Control"] = "private, no-store"
+		return response
+	except SearchResultWindowError as error:
+		response = JsonResponse(
+			{"ok": False, "error": {"code": "result_window_exceeded", "message": str(error)}},
+			status=400,
+		)
+		response["Cache-Control"] = "private, no-store"
+		return response
+	except SearchCursorRequestError:
+		response = JsonResponse(
+			{"ok": False, "error": {"code": "invalid_cursor", "message": "搜索游标无效或已过期，请重新搜索。"}},
+			status=400,
+		)
+		response["Cache-Control"] = "private, no-store"
+		return response
 	except Exception as e:
 		logger.error(f"搜索结果片段响应错误: {e}", exc_info=True)
 		response = JsonResponse(
@@ -319,7 +295,52 @@ def search_results_api(request: Any) -> JsonResponse:
 			},
 			status=503,
 		)
+		response["Cache-Control"] = "private, no-store"
+		return response
 
+	# 成功路径：构建响应
+	pagination = {
+		"page_size": SEARCH_RESULTS_PER_PAGE,
+		"has_previous": context["search_results"].has_previous(),
+		"has_next": context["search_results"].has_next(),
+	}
+	if context["cursor_mode"]:
+		pagination.update(
+			{
+				"mode": "cursor",
+				"previous_cursor": context["search_results"].previous_cursor,
+				"next_cursor": context["search_results"].next_cursor,
+			}
+		)
+	else:
+		pagination.update(
+			{
+				"page": context["search_results"].number,
+				"total_pages": context["search_results"].paginator.num_pages,
+			}
+		)
+	response = JsonResponse(
+		{
+			"ok": True,
+			"data": {
+				"query": context["search_query"],
+				"filters": {
+					"type": context["search_type"],
+					"start_date": context["start_date"],
+					"end_date": context["end_date"],
+					"order_by": context["order_by"],
+				},
+				"result_count": context["search_results"].paginator.count,
+				"html": render_to_string(
+					"search/partials/_search_results.html",
+					context,
+					request=request,
+				),
+				"pagination": pagination,
+				"canonical_url": get_search_canonical_url(context),
+			},
+		}
+	)
 	response["Cache-Control"] = "private, no-store"
 	return response
 

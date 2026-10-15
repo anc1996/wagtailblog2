@@ -231,6 +231,180 @@
       "tool_mode": null,
       "multi_agent_version": "v1",
       "base_instructions": "你是运行在 Codex CLI 中的编码协作智能体。遵守系统、开发者、用户指令和适用的 AGENTS.md，在用户授权范围内工作。先核对现有代码、配置与工具结果，再实施最小且可验证的变更；保留他人修改，不编造测试结果或底层模型身份。工具名称、参数与角色以当前会话实际清单为准；按角色配置调用模型，紧凑派发独立任务，明确文件归属并及时关闭已完成代理。修改后运行定向验证，准确报告结果与限制。保护凭据和用户数据，未经明确授权不得提交、推送、执行生产变更或破坏性操作。"
+    },
+    {
+      "slug": "claude-opus-5-5",
+      "display_name": "Claude Opus 疑难攻坚",
+      "description": "项目指定高推理攻坚模型（Claude Opus 5.5），通过 custom 提供方调用。",
+      "default_reasoning_level": "high",
+      "supported_reasoning_levels": [
+        {
+          "effort": "high",
+          "description": "复杂任务（本地策略限定高推理，非上游能力声明）"
+        }
+      ],
+      "shell_type": "unified_exec",
+      "visibility": "list",
+      "supported_in_api": true,
+      "priority": 4,
+      "additional_speed_tiers": [],
+      "service_tiers": [],
+      "default_service_tier": null,
+      "availability_nux": null,
+      "upgrade": null,
+      "model_messages": {
+        "instructions_template": null,
+        "instructions_variables": null,
+        "persistent_instructions": null
+      },
+      "include_skills_usage_instructions": true,
+      "include_plugin_usage_instructions": true,
+      "include_apps_usage_instructions": true,
+      "supports_reasoning_summary_parameter": false,
+      "default_reasoning_summary": "none",
+      "support_verbosity": false,
+      "default_verbosity": null,
+      "apply_patch_tool_type": "freeform",
+      "web_search_tool_type": "text",
+      "truncation_policy": {
+        "mode": "tokens",
+        "limit": 10000
+      },
+      "supports_image_detail_original": false,
+      "supports_parallel_tool_calls": true,
+      "context_window": 131072,
+      "max_context_window": 131072,
+      "auto_compact_token_limit": 100000,
+      "effective_context_window_percent": 90,
+      "experimental_supported_tools": [],
+      "input_modalities": [
+        "text"
+      ],
+      "supports_search_tool": false,
+      "use_responses_lite": false,
+      "node_repl_auto_review_required": false,
+      "node_repl_disabled": false,
+      "auto_review_model_override": null,
+      "model_specialty": null,
+      "tool_mode": null,
+      "multi_agent_version": "v1",
+      "base_instructions": "你是运行在 Codex CLI 中的编码协作智能体。遵守系统、开发者、用户指令和适用的 AGENTS.md，在用户授权范围内工作。先核对现有代码、配置与工具结果，再实施最小且可验证的变更；保留他人修改，不编造测试结果或底层模型身份。工具名称、参数与角色以当前会话实际清单为准；按角色配置调用模型，紧凑派发独立任务，明确文件归属并及时关闭已完成代理。修改后运行定向验证，准确报告结果与限制。保护凭据和用户数据，未经明确授权不得提交、推送、执行生产变更或破坏性操作。"
+    },
+    {
+      "slug": "gpt-6-astra",
+      "display_name": "GPT-6 Astra",
+      "description": "用户授权的可选子代理模型；high 为本地请求配置，提供商能力待实测。",
+      "default_reasoning_level": "high",
+      "supported_reasoning_levels": [
+        {
+          "effort": "high",
+          "description": "复杂任务（本地策略限定高推理，非上游能力声明）"
+        }
+      ],
+      "shell_type": "unified_exec",
+      "visibility": "list",
+      "supported_in_api": true,
+      "priority": 5,
+      "additional_speed_tiers": [],
+      "service_tiers": [],
+      "default_service_tier": null,
+      "availability_nux": null,
+      "upgrade": null,
+      "model_messages": {
+        "instructions_template": null,
+        "instructions_variables": null,
+        "persistent_instructions": null
+      },
+      "include_skills_usage_instructions": true,
+      "include_plugin_usage_instructions": true,
+      "include_apps_usage_instructions": true,
+      "supports_reasoning_summary_parameter": false,
+      "default_reasoning_summary": "none",
+      "support_verbosity": false,
+      "default_verbosity": null,
+      "apply_patch_tool_type": "freeform",
+      "web_search_tool_type": "text",
+      "truncation_policy": {
+        "mode": "tokens",
+        "limit": 10000
+      },
+      "supports_image_detail_original": false,
+      "supports_parallel_tool_calls": true,
+      "context_window": 131072,
+      "max_context_window": 131072,
+      "auto_compact_token_limit": 100000,
+      "effective_context_window_percent": 90,
+      "experimental_supported_tools": [],
+      "input_modalities": [
+        "text"
+      ],
+      "supports_search_tool": false,
+      "use_responses_lite": false,
+      "node_repl_auto_review_required": false,
+      "node_repl_disabled": false,
+      "auto_review_model_override": null,
+      "model_specialty": null,
+      "tool_mode": null,
+      "multi_agent_version": "v1",
+      "base_instructions": "你是运行在 Codex CLI 中的编码协作智能体。遵守系统、开发者、用户指令和适用的 AGENTS.md，在用户授权范围内工作。先核对现有代码、配置与工具结果，再实施最小且可验证的变更；保留他人修改，不编造测试结果或底层模型身份。工具名称、参数与角色以当前会话实际清单为准；按角色配置调用模型，紧凑派发独立任务，明确文件归属并及时关闭已完成代理。修改后运行定向验证，准确报告结果与限制。保护凭据和用户数据，未经明确授权不得提交、推送、执行生产变更或破坏性操作。"
+    },
+    {
+      "slug": "gpt-6-luna",
+      "display_name": "GPT-6 Luna",
+      "description": "用户授权的可选子代理模型；high 为本地请求配置，提供商能力待实测。",
+      "default_reasoning_level": "high",
+      "supported_reasoning_levels": [
+        {
+          "effort": "high",
+          "description": "复杂任务（本地策略限定高推理，非上游能力声明）"
+        }
+      ],
+      "shell_type": "unified_exec",
+      "visibility": "list",
+      "supported_in_api": true,
+      "priority": 6,
+      "additional_speed_tiers": [],
+      "service_tiers": [],
+      "default_service_tier": null,
+      "availability_nux": null,
+      "upgrade": null,
+      "model_messages": {
+        "instructions_template": null,
+        "instructions_variables": null,
+        "persistent_instructions": null
+      },
+      "include_skills_usage_instructions": true,
+      "include_plugin_usage_instructions": true,
+      "include_apps_usage_instructions": true,
+      "supports_reasoning_summary_parameter": false,
+      "default_reasoning_summary": "none",
+      "support_verbosity": false,
+      "default_verbosity": null,
+      "apply_patch_tool_type": "freeform",
+      "web_search_tool_type": "text",
+      "truncation_policy": {
+        "mode": "tokens",
+        "limit": 10000
+      },
+      "supports_image_detail_original": false,
+      "supports_parallel_tool_calls": true,
+      "context_window": 131072,
+      "max_context_window": 131072,
+      "auto_compact_token_limit": 100000,
+      "effective_context_window_percent": 90,
+      "experimental_supported_tools": [],
+      "input_modalities": [
+        "text"
+      ],
+      "supports_search_tool": false,
+      "use_responses_lite": false,
+      "node_repl_auto_review_required": false,
+      "node_repl_disabled": false,
+      "auto_review_model_override": null,
+      "model_specialty": null,
+      "tool_mode": null,
+      "multi_agent_version": "v1",
+      "base_instructions": "你是运行在 Codex CLI 中的编码协作智能体。遵守系统、开发者、用户指令和适用的 AGENTS.md，在用户授权范围内工作。先核对现有代码、配置与工具结果，再实施最小且可验证的变更；保留他人修改，不编造测试结果或底层模型身份。工具名称、参数与角色以当前会话实际清单为准；按角色配置调用模型，紧凑派发独立任务，明确文件归属并及时关闭已完成代理。修改后运行定向验证，准确报告结果与限制。保护凭据和用户数据，未经明确授权不得提交、推送、执行生产变更或破坏性操作。"
     }
   ]
 }

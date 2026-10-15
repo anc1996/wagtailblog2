@@ -14,6 +14,7 @@ from django.conf import settings
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
+from wagtail.models import Page
 
 from blog.models import BlogPage
 from search.models import (
@@ -29,6 +30,9 @@ from search.services.document import build_formal_content_document
 from search.services.elasticsearch import (
     ContentSearchElasticsearchError,
     write_content_search_document,
+)
+from search.services.published_snapshot import (
+    PublishedSnapshotError, PublishedSnapshotV1, effective_projection_schema_version,
 )
 
 
@@ -98,28 +102,46 @@ def _terminal_statuses() -> set[str]:
 
 
 def _active_delivery_target_query(prefix: str = "") -> Q:
-    """返回应接收增量事件的目标条件。
-
-    已切走 alias 但尚未完成退役的旧 serving 目标可能仍为 enabled。它们只
-    保留历史审计，不能继续生成 Delivery 或影响 Outbox 状态；构建中的目标
-    则必须继续接收增量事件以完成 catch-up。
-    """
-
-    return Q(**{f"{prefix}role": ContentSearchTargetRole.BUILDING}) | Q(
-        **{
-            f"{prefix}role": ContentSearchTargetRole.SERVING,
-            f"{prefix}required": True,
-        }
-    )
+    """先选 enabled serving/building，再按事件协议筛选回滚目标。"""
+    return Q(**{f"{prefix}role__in": (
+        ContentSearchTargetRole.BUILDING, ContentSearchTargetRole.SERVING,
+    )})
 
 
 def _is_active_delivery_target(target: ContentSearchTarget) -> bool:
     """判断单个目标是否仍参与增量投递和 Outbox 收敛。"""
 
-    return target.enabled and (
-        target.role == ContentSearchTargetRole.BUILDING
-        or (target.role == ContentSearchTargetRole.SERVING and target.required)
+    return target.enabled and target.role in (
+        ContentSearchTargetRole.BUILDING, ContentSearchTargetRole.SERVING,
     )
+
+
+def event_applies_to_target(event: object, target: object) -> bool:
+    """单一 schema 路由：新 Blog 同快照双编码，外置不降级，旧事件不升级。"""
+    if not _is_active_delivery_target(target):
+        return False
+    try:
+        event_schema = effective_projection_schema_version(getattr(event, "projection_schema_version", None))
+        target_schema = effective_projection_schema_version(getattr(target, "projection_schema_version", 1))
+    except PublishedSnapshotError:
+        return False
+    if event_schema == 1:
+        # 保留原有 Blog optional-serving 消费语义，不能把 NULL 当 v2。
+        return target_schema == 1 and (
+            target.role == ContentSearchTargetRole.BUILDING or target.required
+        )
+    kind = getattr(event, "snapshot_kind", None)
+    return kind in ("blog_v1", "external_v1") and (
+        target_schema == 2 or (kind == "blog_v1" and target_schema == 1)
+    )
+
+
+def _locked_event_and_state(event_id: int) -> tuple[ContentSearchOutbox, ContentSearchState | None]:
+    """C 域固定 State→Outbox；定位读不加锁，禁止在此反向获取 Page。"""
+    page_id = ContentSearchOutbox.objects.filter(pk=event_id).values_list("page_id", flat=True).get()
+    state = ContentSearchState.objects.select_for_update().filter(page_id=page_id).first()
+    event = ContentSearchOutbox.objects.select_for_update().get(pk=event_id)
+    return event, state
 
 
 def materialize_content_search_deliveries(limit: object | None = None) -> int:
@@ -131,7 +153,6 @@ def materialize_content_search_deliveries(limit: object | None = None) -> int:
     targets = list(
         ContentSearchTarget.objects.filter(enabled=True)
         .filter(_active_delivery_target_query())
-        .only("pk", "created_at", "role")
     )
     if not targets:
         return 0
@@ -150,19 +171,28 @@ def materialize_content_search_deliveries(limit: object | None = None) -> int:
         if target.role == ContentSearchTargetRole.BUILDING:
             # 构建目标注册后产生的事件即使已被旧目标完成，也必须补建新目标 Delivery。
             eligible_events |= Q(created_at__gte=target.created_at)
-        event_ids = list(
-            ContentSearchOutbox.objects.filter(eligible_events)
-            .order_by("available_at", "pk")
-            .values_list("pk", flat=True)[: _batch_size(limit)]
-        )
-        for event_id in event_ids:
-            _delivery, created = ContentSearchDelivery.objects.get_or_create(
-                event_id=event_id,
-                target_id=target.pk,
-                defaults={"available_at": now},
+        events = list(
+            ContentSearchOutbox.objects.filter(eligible_events).exclude(
+                status__in=(ContentSearchStatus.DEAD, ContentSearchStatus.SUPERSEDED),
             )
-            if created:
-                created_count += 1
+            .order_by("available_at", "pk")
+            [: _batch_size(limit)]
+        )
+        for candidate in events:
+            if not event_applies_to_target(candidate, target):
+                continue
+            with transaction.atomic():
+                event, state = _locked_event_and_state(candidate.pk)
+                if (
+                    event.status in (ContentSearchStatus.DEAD, ContentSearchStatus.SUPERSEDED)
+                    or classify_content_search_event(event, state) != "ready"
+                ):
+                    continue
+                _delivery, created = ContentSearchDelivery.objects.get_or_create(
+                    event_id=event.pk, target_id=target.pk, defaults={"available_at": now},
+                )
+                if created:
+                    created_count += 1
     return created_count
 
 
@@ -243,7 +273,6 @@ def _claim_content_search_delivery(delivery_id: int):
     with transaction.atomic():
         delivery = (
             ContentSearchDelivery.objects.select_for_update(skip_locked=True)
-            .select_related("event", "target")
             .filter(pk=delivery_id)
             .first()
         )
@@ -251,12 +280,6 @@ def _claim_content_search_delivery(delivery_id: int):
             return None, "locked"
         if delivery.status in _terminal_statuses():
             return None, delivery.status
-        if not _is_active_delivery_target(delivery.target):
-            return None, _finish_content_search_delivery(
-                delivery,
-                owner=None,
-                status=ContentSearchStatus.SUPERSEDED,
-            )
         if delivery.status == ContentSearchStatus.PROCESSING:
             if delivery.lock_expires_at and delivery.lock_expires_at > now:
                 return None, ContentSearchStatus.PROCESSING
@@ -303,6 +326,27 @@ def classify_content_search_event(
         return "superseded"
     if event.content_version > state.content_version:
         return "retry"
+    try:
+        event_schema = effective_projection_schema_version(getattr(event, "projection_schema_version", None))
+        state_schema = effective_projection_schema_version(getattr(state, "projection_schema_version", None))
+        if event_schema != state_schema:
+            return "superseded" if state_schema == 2 and event_schema == 1 else "retry"
+        if event_schema == 2:
+            digest = getattr(event, "snapshot_digest", None)
+            if not digest:
+                return "dead"
+            snapshot = PublishedSnapshotV1.from_dict(
+                getattr(event, "published_snapshot", None), expected_digest=digest,
+            )
+            snapshot.validate_state(event)
+            snapshot.validate_state(state)
+            if event.operation == ContentSearchOperation.UPSERT and (
+                not event.content_hash or not state.content_hash
+                or event.content_hash != state.content_hash
+            ):
+                return "retry"
+    except PublishedSnapshotError:
+        return "dead"
     if event.operation != state.desired_operation:
         return "retry"
     if bool(event.searchable) != bool(state.searchable):
@@ -349,8 +393,13 @@ def _confirm_formal_content(lease: DeliveryLease, formal_document: object) -> st
     """在 ES 写入前再次锁定 State，避免 Mongo 新正文被旧版本事件索引。"""
 
     with transaction.atomic():
-        event = ContentSearchOutbox.objects.select_for_update().get(pk=lease.event_id)
-        state = ContentSearchState.objects.select_for_update().filter(page_id=event.page_id).first()
+        event, state = _locked_event_and_state(lease.event_id)
+        classification = classify_content_search_event(event, state)
+        if classification != "ready":
+            return classification
+        if effective_projection_schema_version(getattr(event, "projection_schema_version", None)) == 2:
+            # v2 不允许消费者补 hash 或正文；只确认已在发布事务固定的快照。
+            return "ready" if formal_document.content_hash == event.content_hash else "retry"
         if state is None:
             return "dead"
         if event.content_version < state.content_version:
@@ -401,10 +450,19 @@ def _confirm_formal_content(lease: DeliveryLease, formal_document: object) -> st
     return "ready"
 
 
-def _tombstone_document(event: object) -> dict[str, object]:
+def _tombstone_document(event: object, target: object | None = None) -> dict[str, object]:
     """生成仅保留版本和公开状态的 tombstone，防止 ES 残留正文。"""
     """墓碑只保留版本和公开状态，防止取消发布后 ES 留存任何可展示正文。"""
 
+    if target is not None and effective_projection_schema_version(getattr(target, "projection_schema_version", 1)) == 2:
+        return {
+            "page_id": event.page_id, "content_version": event.content_version,
+            "publication_generation": event.publication_generation,
+            "projection_schema_version": 2, "model_label": event.model_label,
+            "search_type": event.search_type, "snapshot_kind": event.snapshot_kind,
+            "snapshot_digest": event.snapshot_digest, "searchable": False,
+            "is_deleted": True,
+        }
     return {
         "page_id": event.page_id,
         "content_version": event.content_version,
@@ -454,15 +512,26 @@ def _finish_content_search_delivery(delivery, owner, status, error_code=""):
     return delivery.status
 
 
-def _complete_delivery(lease, status, error_code=""):
-    with transaction.atomic():
-        delivery = ContentSearchDelivery.objects.select_for_update().get(pk=lease.delivery_id)
-        result = _finish_content_search_delivery(
-            delivery,
-            owner=lease.owner,
-            status=status,
-            error_code=error_code,
-        )
+def _conditional_delivery_result(
+    lease: DeliveryLease, status: str, error_code: str = "", *, attempts: int = 0,
+) -> str:
+    """D 域只条件更新 Delivery：旧 token 不能完成被重新领取的工作。"""
+    now = timezone.now()
+    updated = ContentSearchDelivery.objects.filter(
+        pk=lease.delivery_id, locked_by=lease.owner, status=ContentSearchStatus.PROCESSING,
+    ).update(
+        status=status, locked_by="", lock_expires_at=None,
+        last_error_code=error_code, last_error_message="", updated_at=now,
+        available_at=now + timedelta(seconds=_retry_delay(attempts)) if status == ContentSearchStatus.RETRY else now,
+        completed_at=None if status == ContentSearchStatus.RETRY else now,
+    )
+    if updated:
+        return status
+    return ContentSearchDelivery.objects.filter(pk=lease.delivery_id).values_list("status", flat=True).first() or "missing"
+
+
+def _complete_delivery(lease: DeliveryLease, status: str, error_code: str = "") -> str:
+    result = _conditional_delivery_result(lease, status, error_code)
     refresh_content_search_outbox_status(lease.event_id)
     logger.info(
         "content_search_delivery_finished delivery_id=%s outbox_pk=%s target_id=%s status=%s error_code=%s",
@@ -475,23 +544,14 @@ def _complete_delivery(lease, status, error_code=""):
     return result
 
 
-def _retry_or_dead_delivery(lease, error_code):
-    with transaction.atomic():
-        delivery = ContentSearchDelivery.objects.select_for_update().get(pk=lease.delivery_id)
-        if delivery.locked_by != lease.owner:
-            result = delivery.status
-        else:
-            status = (
-                ContentSearchStatus.DEAD
-                if delivery.attempts >= _max_attempts()
-                else ContentSearchStatus.RETRY
-            )
-            result = _finish_content_search_delivery(
-                delivery,
-                owner=lease.owner,
-                status=status,
-                error_code=error_code,
-            )
+def _retry_or_dead_delivery(lease: DeliveryLease, error_code: str) -> str:
+    attempts = ContentSearchDelivery.objects.filter(
+        pk=lease.delivery_id, locked_by=lease.owner, status=ContentSearchStatus.PROCESSING,
+    ).values_list("attempts", flat=True).first()
+    if attempts is None:
+        return ContentSearchDelivery.objects.filter(pk=lease.delivery_id).values_list("status", flat=True).first() or "missing"
+    status = ContentSearchStatus.DEAD if attempts >= _max_attempts() else ContentSearchStatus.RETRY
+    result = _conditional_delivery_result(lease, status, error_code, attempts=attempts)
     refresh_content_search_outbox_status(lease.event_id)
     logger.warning(
         "content_search_delivery_retry_or_dead delivery_id=%s outbox_pk=%s target_id=%s status=%s error_code=%s",
@@ -509,14 +569,46 @@ def refresh_content_search_outbox_status(event_id: int):
     """由各目标 Delivery 聚合 Outbox 状态，optional 目标失败不会阻断 required 目标收敛。"""
 
     with transaction.atomic():
-        event = ContentSearchOutbox.objects.select_for_update().get(pk=event_id)
+        event, state = _locked_event_and_state(event_id)
+        if event.status in (ContentSearchStatus.DEAD, ContentSearchStatus.SUPERSEDED):
+            return event.status
+        classification = classify_content_search_event(event, state)
+        if classification in ("dead", "superseded"):
+            event.status = classification
+            event.completed_at = timezone.now()
+            event.save(update_fields=("status", "completed_at", "updated_at"))
+            return event.status
+        compatible_targets = list(
+            ContentSearchTarget.objects.filter(enabled=True).filter(_active_delivery_target_query())
+        )
+        compatible_targets = [
+            target for target in compatible_targets if event_applies_to_target(event, target)
+        ]
         deliveries = list(event.deliveries.select_related("target").all())
         active_deliveries = [
             delivery
             for delivery in deliveries
-            if _is_active_delivery_target(delivery.target)
+            if event_applies_to_target(event, delivery.target)
         ]
-        if not active_deliveries:
+        required_ids = {target.pk for target in compatible_targets if target.required}
+        # 没有 required 时，所有兼容 optional 目标均须有 Delivery，不能只凭一个成功。
+        tracked_ids = required_ids or {target.pk for target in compatible_targets}
+        delivery_ids = {item.target_id for item in active_deliveries}
+        if not compatible_targets or not active_deliveries or tracked_ids - delivery_ids:
+            event.status = ContentSearchStatus.PENDING
+            event.completed_at = None
+            event.last_error_code = (
+                "content_search_no_compatible_target" if not compatible_targets
+                else "content_search_delivery_missing"
+            )
+            event.last_error_message = ""
+            event.save(update_fields=("status", "completed_at", "last_error_code", "last_error_message", "updated_at"))
+            logger.warning("content_search_projection_pending outbox_pk=%s code=%s", event_id, event.last_error_code)
+            return event.status
+        if classification != "ready":
+            event.status = ContentSearchStatus.RETRY
+            event.completed_at = None
+            event.save(update_fields=("status", "completed_at", "updated_at"))
             return event.status
 
         required_deliveries = [
@@ -589,11 +681,19 @@ def process_content_search_delivery(delivery_id: int) -> str:
             return _retry_or_dead_delivery(lease, "content_search_state_mismatch")
 
         target = ContentSearchTarget.objects.get(pk=lease.target_id)
-        if not _is_active_delivery_target(target):
+        if not event_applies_to_target(event, target):
             return _complete_delivery(lease, ContentSearchStatus.SUPERSEDED)
 
         if event.operation == ContentSearchOperation.TOMBSTONE or not state.searchable:
-            tombstone = _tombstone_document(event)
+            # 墓碑同样有版本围栏；短 C 事务结束后才访问 ES，绝不带锁调用外部服务。
+            with transaction.atomic():
+                current_event, current_state = _locked_event_and_state(lease.event_id)
+                confirmation = classify_content_search_event(current_event, current_state)
+            if confirmation in ("dead", "superseded"):
+                return _complete_delivery(lease, confirmation)
+            if confirmation != "ready":
+                return _retry_or_dead_delivery(lease, "content_search_state_mismatch")
+            tombstone = _tombstone_document(event, target)
             if event.publication_generation is None:
                 write_result = write_content_search_document(
                     target, tombstone, event.content_version
@@ -606,16 +706,21 @@ def process_content_search_delivery(delivery_id: int) -> str:
                     publication_generation=event.publication_generation,
                 )
         else:
-            page = BlogPage.objects.live().public().filter(pk=event.page_id).first()
+            is_v2 = effective_projection_schema_version(getattr(event, "projection_schema_version", None)) == 2
+            page_model = Page if is_v2 else BlogPage
+            page = page_model.objects.live().public().filter(pk=event.page_id).first()
             if page is None:
                 # 权限范围消费者尚未收敛前不能伪成功，否则旧 ES 正文可能继续公开。
                 return _retry_or_dead_delivery(lease, "content_search_page_not_public")
-            formal_document = build_formal_content_document(
-                page,
-                event.content_version,
-                body_version_id=event.body_version_id,
-                publication_generation=event.publication_generation,
-            )
+            if is_v2:
+                # P03 提供唯一适配器，P04 只从事件快照编码，绝不读取当前草稿。
+                from search.services.outbox import build_event_projection
+                formal_document = build_event_projection(event, target)
+            else:
+                formal_document = build_formal_content_document(
+                    page, event.content_version, body_version_id=event.body_version_id,
+                    publication_generation=event.publication_generation,
+                )
             if formal_document is None:
                 return _retry_or_dead_delivery(lease, "mongo_formal_content_unavailable")
             confirmation = _confirm_formal_content(lease, formal_document)
@@ -644,6 +749,9 @@ def process_content_search_delivery(delivery_id: int) -> str:
         if error.retryable:
             return _retry_or_dead_delivery(lease, error.code)
         return _complete_delivery(lease, ContentSearchStatus.DEAD, error_code=error.code)
+    except PublishedSnapshotError:
+        # 缺损/摘要冲突不能回退草稿或旧正文，也不以空文档伪成功。
+        return _retry_or_dead_delivery(lease, "content_search_published_snapshot_invalid")
     except Exception:
         # 不记录异常文本，避免 Mongo 或 ES 客户端把正文、请求体或凭据带入任务审计。
         logger.error(

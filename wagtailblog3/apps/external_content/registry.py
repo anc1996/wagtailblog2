@@ -71,6 +71,21 @@ _DEFAULT_BASELINE_FILE = os.path.join(
 _active_baseline_file: str = _DEFAULT_BASELINE_FILE
 
 
+@dataclass(frozen=True)
+class ExternalFieldState:
+    """实例字段状态，不是持久化权威；来源 Manifest 必须经过完整身份校验。
+
+    baseline_hash 仅代表已读取/已保存的不可变正文，不把 SQL 空占位当基线。
+    NEW 与 EDIT 独立于 DIRTY/CLEARED，首建元数据保存不能冒充 Revision 提交。
+    """
+
+    status: str
+    source: str
+    revision_id: Optional[int] = None
+    baseline_hash: Optional[str] = None
+    manifest: Optional[Any] = None
+
+
 def set_active_baseline_file(path: str) -> None:
     """设置当前活动的策略基线文件路径（供测试注入临时文件隔离）。"""
     global _active_baseline_file

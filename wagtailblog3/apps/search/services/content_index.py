@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any, Mapping
 
+from search.services.published_snapshot import PublishedSnapshotError, effective_projection_schema_version
 
 # mapping 采用不可变物理索引；新增字段必须创建新版本索引后再切换 alias。
 CONTENT_INDEX_MAPPING_VERSION = "v005"
@@ -49,6 +50,16 @@ CONTENT_INDEX_REQUIRED_FIELDS = frozenset(
         "searchable",
     }
 )
+CONTENT_INDEX_V2_FIELD_TYPES = {
+    "page_id": "long", "locale_id": "long", "site_ids": "long", "ancestor_ids": "long",
+    "model_label": "keyword", "search_type": "keyword", "snapshot_kind": "keyword",
+    "title": "text", "summary": "text", "body_text": "text",
+    "first_published_at": "date", "sort_date": "date", "content_version": "long",
+    "publication_generation": "long", "projection_schema_version": "integer",
+    "snapshot_digest": "keyword", "content_hash": "keyword",
+    "searchable": "boolean", "is_deleted": "boolean",
+}
+CONTENT_INDEX_V2_REQUIRED_FIELDS = frozenset(CONTENT_INDEX_V2_FIELD_TYPES)
 _INDEX_VERSION_PATTERN = re.compile(r"v[0-9]{3,16}\Z")
 _INDEX_NAME_PATTERN = re.compile(r"[a-z0-9][a-z0-9._-]*\Z")
 
@@ -103,10 +114,12 @@ def build_content_index_template(
     shards: Any = 1,
     replicas: Any = 0,
     refresh_interval: str = "30s",
+    projection_schema_version: int = 1,
 ) -> dict[str, Any]:
     """构造单索引模板；字段白名单防止草稿或原始正文意外进入 ES。"""
 
     version = validate_content_index_version(version)
+    schema = effective_projection_schema_version(projection_schema_version)
     profile = CONTENT_INDEX_ANALYZER_PROFILES.get(analyzer_profile)
     if profile is None:
         raise ValueError("未知的内容索引 analyzer 配置")
@@ -143,6 +156,19 @@ def build_content_index_template(
         "category_ids": {"type": "long"},
         "searchable": {"type": "boolean"},
     }
+    if schema == 2:
+        properties = {
+            name: {"type": field_type}
+            for name, field_type in CONTENT_INDEX_V2_FIELD_TYPES.items()
+        }
+        # 简介沿用同一 analyzer 策略，但不把 v1 的 intro 混入 v2。
+        for name, profile_name in (("title", "title"), ("summary", "intro"), ("body_text", "body_text")):
+            if profile[profile_name]:
+                properties[name].update(
+                    analyzer=profile[profile_name], search_analyzer="content_ik_smart",
+                )
+        for name in ("content_hash", "snapshot_digest"):
+            properties[name].update(index=False, doc_values=False)
     index_settings = {
         "number_of_shards": shards,
         "number_of_replicas": replicas,
@@ -164,21 +190,66 @@ def build_content_index_template(
             }
         }
 
+    metadata = {
+        "application": "wagtailblog-content-search",
+        "mapping_version": content_index_mapping_version(version, analyzer_profile),
+        "analyzer_profile": analyzer_profile,
+    }
+    mappings = {"dynamic": "strict", "properties": properties}
+    if schema == 2:
+        metadata["projection_schema_version"] = schema
+        # 模板顶层 _meta 不会进入物理索引；必须在 mappings 内另存协议版本。
+        mappings["_meta"] = dict(metadata)
     return {
         "index_patterns": [index_name],
         "template": {
             "settings": index_settings,
-            "mappings": {
-                "dynamic": "strict",
-                "properties": properties,
-            },
+            "mappings": mappings,
         },
-        "_meta": {
-            "application": "wagtailblog-content-search",
-            "mapping_version": content_index_mapping_version(version, analyzer_profile),
-            "analyzer_profile": analyzer_profile,
-        },
+        "_meta": metadata,
     }
+
+
+def content_index_mapping_matches_schema(mapping: Mapping[str, Any], schema: Any) -> bool:
+    """字段集合和类型必须匹配协议；旧 v1 无 _meta 仍保留显式兼容。"""
+    schema = effective_projection_schema_version(schema)
+    expected = (
+        CONTENT_INDEX_V2_FIELD_TYPES if schema == 2 else
+        {
+            name: definition["type"]
+            for name, definition in build_content_index_template(
+                "schema-check-v005", analyzer_profile="legacy_standard",
+            )["template"]["mappings"]["properties"].items()
+        }
+    )
+    properties = mapping.get("properties", {})
+    if mapping.get("dynamic") != "strict" or set(properties) != set(expected):
+        return False
+    if any(properties[name].get("type") != field_type for name, field_type in expected.items()):
+        return False
+    metadata = mapping.get("_meta", {})
+    if schema == 2:
+        return type(metadata.get("projection_schema_version")) is int and metadata["projection_schema_version"] == 2
+    return type(metadata.get("projection_schema_version", 1)) is int and metadata.get("projection_schema_version", 1) == 1
+
+
+def content_index_v2_contract_matches(
+    mapping: Mapping[str, Any], index_name: str,
+) -> bool:
+    """schema、物理版本、analyzer 与完整字段定义必须属于同一不可变契约。"""
+    if not content_index_mapping_matches_schema(mapping, 2):
+        return False
+    metadata = mapping.get("_meta", {})
+    version = index_name.rsplit("-", 1)[-1]
+    profile = metadata.get("analyzer_profile")
+    try:
+        expected = build_content_index_template(
+            index_name, analyzer_profile=profile, version=version,
+            projection_schema_version=2,
+        )
+    except (ValueError, TypeError, PublishedSnapshotError):
+        return False
+    return mapping == expected["template"]["mappings"]
 
 
 def content_index_template_matches(

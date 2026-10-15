@@ -59,6 +59,13 @@ class ContentSearchState(models.Model):
     # 新版本使用正文不可变指针和公开代际；旧页面可继续为空。
     body_version_id = models.CharField(max_length=128, null=True, blank=True)
     publication_generation = models.PositiveBigIntegerField(null=True, blank=True)
+    # 快照只固定正式元数据和正文引用；旧 NULL 由兼容路径解释，不能默认升级为 v2。
+    model_label = models.CharField(max_length=255, null=True, blank=True)
+    search_type = models.CharField(max_length=64, null=True, blank=True)
+    snapshot_kind = models.CharField(max_length=32, null=True, blank=True)
+    published_snapshot = models.JSONField(null=True, blank=True)
+    snapshot_digest = models.CharField(max_length=64, null=True, blank=True)
+    projection_schema_version = models.PositiveIntegerField(null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -82,6 +89,13 @@ class ContentSearchOutbox(models.Model):
     # Outbox 事件携带生成时的正文身份，消费者据此拒绝迟到事件。
     body_version_id = models.CharField(max_length=128, null=True, blank=True)
     publication_generation = models.PositiveBigIntegerField(null=True, blank=True)
+    # 保留旧事件的 NULL；新协议生产者负责显式写入完整正式快照，不在 schema 层猜类型。
+    model_label = models.CharField(max_length=255, null=True, blank=True)
+    search_type = models.CharField(max_length=64, null=True, blank=True)
+    snapshot_kind = models.CharField(max_length=32, null=True, blank=True)
+    published_snapshot = models.JSONField(null=True, blank=True)
+    snapshot_digest = models.CharField(max_length=64, null=True, blank=True)
+    projection_schema_version = models.PositiveIntegerField(null=True, blank=True)
     searchable = models.BooleanField(default=False)
     status = models.CharField(
         max_length=16,
@@ -134,6 +148,8 @@ class ContentSearchTarget(models.Model):
     target_id = models.SlugField(max_length=80, unique=True)
     connection_name = models.SlugField(max_length=80)
     index_name = models.CharField(max_length=255)
+    # 既有 strict 索引仍声明为 v1，支持 v2 的新目标必须显式配置能力版本。
+    projection_schema_version = models.PositiveIntegerField(default=1)
     role = models.CharField(
         max_length=16,
         choices=ContentSearchTargetRole.choices,

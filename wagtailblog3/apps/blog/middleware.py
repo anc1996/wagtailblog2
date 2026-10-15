@@ -17,6 +17,9 @@ class PageViewMiddleware(MiddlewareMixin):
     """只统计 BlogPage 成功呈现后的 GET，预览、重定向和错误页均不计入。"""
 
     _admin_page_path = re.compile(r"^/admin/pages/(?P<page_id>\d+)/")
+    _admin_body_read_path = re.compile(
+        r"^/admin/pages/(?P<page_id>\d+)/(?:edit|revisions|history|compare)/"
+    )
 
     def process_exception(
         self,
@@ -25,11 +28,20 @@ class PageViewMiddleware(MiddlewareMixin):
     ) -> TemplateResponse | None:
         """把后台历史正文故障转为受控响应，阻止用户在错误版本上继续操作。
 
-        只处理 BlogPage 的历史正文领域异常，其他异常仍交给 Django 默认错误处理。
+        只在页面读取入口处理正文领域异常，写入冻结及程序错误仍由原边界处理。
         缺失或损坏快照不能安全恢复，返回 409；Mongo 暂时不可用时返回 503，允许重试。
         """
+        if request.method not in ("GET", "HEAD"):
+            return None
+
         from .models import BlogRevisionBodyUnavailableError
-        from external_content.exceptions import PublicationBodyUnavailableError
+        from external_content.exceptions import (
+            CodecError,
+            ContentStoreError,
+            ManifestError,
+            PublicationBodyUnavailableError,
+            PublicationRevisionInvalidError,
+        )
 
         if isinstance(exception, PublicationBodyUnavailableError):
             path_match = self._admin_page_path.match(request.path)
@@ -59,26 +71,38 @@ class PageViewMiddleware(MiddlewareMixin):
                 status=status,
             )
 
-        if not isinstance(exception, BlogRevisionBodyUnavailableError):
+        if isinstance(exception, (CodecError, ContentStoreError, ManifestError, PublicationRevisionInvalidError)):
+            path_match = self._admin_body_read_path.match(request.path)
+            if path_match is None:
+                return None
+            # 保留底层 Fail-Closed，只在 HTTP 展示边界映射已分类的读取故障。
+            retryable = (
+                isinstance(exception, ContentStoreError)
+                and exception.details.get("error_category") == "network_timeout"
+            )
+            error_code = exception.code
+        elif isinstance(exception, BlogRevisionBodyUnavailableError):
+            path_match = self._admin_page_path.match(request.path)
+            retryable = exception.retryable
+            error_code = exception.code
+        else:
             return None
 
-        path_match = self._admin_page_path.match(request.path)
         if path_match is None:
             return None
 
         page_id = path_match.group("page_id")
-        retryable = exception.retryable
         context = {
-            "error_code": exception.code,
+            "error_code": error_code,
             "history_url": reverse("wagtailadmin_pages:history", args=[page_id]),
             "retry_url": request.get_full_path(),
             "retryable": retryable,
         }
         status = 503 if retryable else 409
         logger.warning(
-            "blog_revision_body_admin_error page_id=%s code=%s status=%s",
+            "revision_body_admin_error page_id=%s code=%s status=%s",
             page_id,
-            exception.code,
+            error_code,
             status,
         )
         return TemplateResponse(

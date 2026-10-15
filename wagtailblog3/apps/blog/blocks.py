@@ -28,7 +28,9 @@ class VditorMarkdownBlock(blocks.TextBlock):
     def field(self) -> forms.CharField:
         # 每个块实例复用同一个表单字段，隐藏文本域仍是提交和存储的唯一来源。
         field_kwargs = {
-            "widget": VditorMarkdownWidget(attrs={"rows": self.rows})
+            "widget": VditorMarkdownWidget(attrs={"rows": self.rows}),
+            # Markdown 首尾空白和末尾换行属于原文，不能在表单 clean 时自动裁剪。
+            "strip": False,
         }
         field_kwargs.update(self.field_options)
         return forms.CharField(**field_kwargs)

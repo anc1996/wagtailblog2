@@ -44,9 +44,10 @@ class Command(BaseCommand):
         parser.add_argument("--index-name", help="物理索引名；省略时按当前测试前缀生成。")
         parser.add_argument(
             "--mapping-version",
-            default=CONTENT_INDEX_MAPPING_VERSION,
+            default=None,
             help="版本化 mapping 标识，例如 v001。",
         )
+        parser.add_argument("--projection-schema-version", type=int, choices=(1, 2), default=1)
         parser.add_argument(
             "--analyzer-profile",
             choices=sorted(CONTENT_INDEX_ANALYZER_PROFILES),
@@ -63,6 +64,10 @@ class Command(BaseCommand):
         environment = os.environ.get("WAGTAILBLOG_ENV", "unset")
         target_id = options["target"]
         index_prefix = settings.CONTENT_SEARCH_INDEX_PREFIX
+        schema = options["projection_schema_version"]
+        options["mapping_version"] = options["mapping_version"] or ("v006" if schema == 2 else CONTENT_INDEX_MAPPING_VERSION)
+        if schema == 2 and options["mapping_version"] != "v006":
+            raise CommandError("v2 投影必须使用 v006 mapping")
         if not _TARGET_ID_PATTERN.fullmatch(target_id):
             raise CommandError("目标 ID 必须为精确的 slug，不能包含通配符或空白")
         index_name = options["index_name"] or default_content_index_name(
@@ -71,6 +76,8 @@ class Command(BaseCommand):
         )
         try:
             index_name = validate_content_index_name(index_name, index_prefix)
+            if not index_name.endswith("-" + options["mapping_version"]):
+                raise ValueError("物理索引版本必须与 mapping 一致")
             template_definition = build_content_index_template(
                 index_name,
                 analyzer_profile=options["analyzer_profile"],
@@ -78,6 +85,7 @@ class Command(BaseCommand):
                 shards=settings.CONTENT_SEARCH_INDEX_SHARDS,
                 replicas=settings.CONTENT_SEARCH_INDEX_REPLICAS,
                 refresh_interval=settings.CONTENT_SEARCH_INDEX_REFRESH_INTERVAL,
+                projection_schema_version=schema,
             )
             mapping_version = content_index_mapping_version(
                 options["mapping_version"],
@@ -95,6 +103,7 @@ class Command(BaseCommand):
             "index_name": index_name,
             "template_name": template_name,
             "mapping_version": mapping_version,
+            "projection_schema_version": schema,
             "analyzer_profile": options["analyzer_profile"],
             "target_enabled": False,
             "read_alias_changed": False,
@@ -134,6 +143,7 @@ class Command(BaseCommand):
                     role=ContentSearchTargetRole.BUILDING,
                     required=False,
                     enabled=False,
+                    projection_schema_version=schema,
                 )
                 build = SearchIndexBuild.objects.create(
                     target=target,

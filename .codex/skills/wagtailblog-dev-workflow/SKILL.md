@@ -1,79 +1,104 @@
 ---
 name: wagtailblog-dev-workflow
-description: Wagtail 8.0 & Django 5.2.8 full-stack engineering workflow for wagtailblog2. Use for dual-storage (MySQL/MongoDB) data contracts, Elasticsearch outbox indexing, WSL2 testing, Playwright verification, and Maker-Checker production deployment.
+description: Wagtail 8.0 与 Django 5.2.8 项目的按风险分级开发、双存储测试、浏览器验证和生产发布工作流。用于 wagtailblog2 的相关工程任务，不替代用户授权。
 ---
 
-# WagtailBlog2 专属工程与运维技能规范 (wagtailblog-dev-workflow)
+# wagtailblog2 专属工程工作流
 
-本技能沉淀了 wagtailblog2 项目的核心开发契约、测试验证流水线与生产发布门禁，供全栈智能体在执行需求实现、排障、测试与发布时加载使用。
+本技能只提供项目特有的决策依据。先判断任务风险，再加载必要细节；小型文案、文档或配置修正不必强行创建设计文档或派发代理。
 
-## 1. 核心技术基线与环境事实
+## 1. 任务路由
 
-- **技术栈**：Python 3.13、Django 5.2.8、Wagtail 8.0（严格锁定在
-equirements.txt）、MySQL 8.4、MongoDB (pymongo 4.11)、Redis 5.2、Elasticsearch 8.19、Celery 5.5。
-- **物理拓扑**：
-  - Windows 主机 (192.168.20.1)：负责文件编辑，NTFS 工作目录 F:\openclaw\workspace\wagtail\wagtailblog2；
-  - WSL2 测试环境 (192.168.20.5, Debian)：共享同一 NTFS 目录 /mnt/f/openclaw/workspace/wagtail/wagtailblog2；Conda 环境 /root/anaconda3/envs/wagtailblog-test；
-  - 生产虚拟机 (192.168.20.2, 主机名 ziliao, SSH:22)：生产项目 /home/source/Django/wagtail/wagtailblog3；Conda 环境 /root/anaconda3/envs/wagtailblog。
+1. **小型任务**：主代理直接修改，做最小定向验证。
+2. **中型任务**：先写短计划；仅对有清晰文件边界的独立工作并行派发。
+3. **高风险任务**：涉及 MySQL/MongoDB 双存储、发布、复制、别名、删除、revision、`mongo_content_id`、Outbox、并发锁、数据修复或生产时，先确认契约、回滚边界和测试矩阵，再安排独立复核。
+4. **生产任务**：必须有用户明确授权。应用补丁不默认重启基础设施或无关服务。
 
-## 2. 数据模型与双存储契约 (Dual-Storage Contract)
+## 2. 不可破坏的项目契约
 
-### 2.1 MongoDB 与 MySQL 协同规则
-- **正文数据保护**：BlogPage 正文、StreamField body、MongoDB 正文、草稿快照、revision pointer 与 mongo_content_id 是绝对受保护数据；
-- **Markdown 不可变性**：Markdown 必须保持原始 Markdown 字符串，markdown_block 存储 key 不得改变，渲染时才转换为 HTML；
-- **生命周期受控**：
-  - 页面发布：必须通过 BlogPublicationService 保证 MySQL Page/Revision 与 MongoDB 文档哈希及版本号强一致；
-  - 页面复制与别名：禁止共享可变正文指针，必须显式派生独立 Mongo 副本；
-  - 页面删除：严禁直接调用裸 delete()，必须固化清单、校验引用后异步执行级联清理。
+- BlogPage 正文、StreamField `body`、MongoDB 正文、草稿快照、revision pointer 和 `mongo_content_id` 是受保护资产。
+- Markdown 以原始字符串保存；`markdown_block` 存储 key 稳定，HTML 只在模板渲染时生成。
+- 发布流程核对 `BlogPublicationService` 及 `external_content` 的实际入口，确认 MySQL Page/Revision 与 Mongo 文档版本、哈希和指针的一致性。
+- 复制与别名语义以当前实现和测试为准：不可变发布 manifest 可能有意复用源别名，不能套用“所有复制都必须立即产生独立 Mongo 副本”的旧规则。
+- 删除必须先记录删除意图、校验引用和安全围栏，再按当前实现异步清理；禁止直接用裸 `delete()` 绕过生命周期。
+- Outbox 事件与业务事务同批写入 MySQL，由异步消费者投影 Elasticsearch；不要在视图中假定同步 ES 已完成。
+- 后台管理组件按现有代码演进。仓库目前同时存在 `wagtail-modeladmin`/ModelAdmin 与原生 SnippetViewSet；除非需求明确迁移，不卸载依赖、不批量改造。
 
-### 2.2 Wagtail 8.0 规范演进
-- **后台管理组件**：废弃外部兼容层 wagtail-modeladmin，全面采用 Wagtail 8.0 原生 SnippetViewSet 与 SnippetViewSetGroup；
-- **StreamField 块定义**：遵循 Telepath 序列化规范，保持向后兼容。
+## 3. 测试与验证
 
-## 3. 异步任务与搜索索引治理 (Outbox & Search)
+### 3.1 选择原则
 
-- **Outbox 事务投递**：文章索引事件写入 MySQL Outbox 表，与业务事务同批提交，杜绝直接在视图内同步写 ES；
-- **Delivery 消费服务**：异步 Worker 扫描 Outbox 表，批量投影文章数据并更新 Elasticsearch；
-- **读写别名与零停机重建**：
-  - 生产文章索引严格通过 wagtailblog3_blog_page_read 和 wagtailblog3_blog_page_write 别名对外服务；
-  - 索引全量重建时先写入物理版本索引，数据同步并验证无误后原子切换别名，零停机无感知。
+- `manage.py check`、`compileall`、CSS token 检查属于静态/系统检查，不等于业务测试。
+- Mock 单元测试只证明替身边界；涉及真实 MySQL/Mongo 的集成结论必须标明隔离环境和服务状态。
+- 模板、后台和前端交互需要渲染或浏览器证据，不能只凭 Python 测试推断。
+- 不要假设存在 `wagtailblog3/settings/test.py`，也不要假设不存在的 Django 测试标签；先核对目录和测试类。
 
-## 4. 本地与 WSL2 测试验证矩阵
+### 3.2 常用命令
 
-所有测试与静态检查必须在 WSL2 的 wagtailblog-test 环境中执行：
+在 WSL2 的 `/root/anaconda3/envs/wagtailblog-test` 环境执行：
 
-| 验证场景 | 命令示例 | 核心目的 |
-|---|---|---|
-| **全系统检查** | python manage.py check | 核验 Django 5.2 / Wagtail 8.0 系统完整性 |
-| **全工程语法编译** | python -m compileall -q wagtailblog3 | 阻断隐蔽语法错误与字节码损坏 |
-| **快速单元回归** | python manage.py test blog search archive --keepdb | 复用测试数据库，极速验证三大核心业务 |
-| **AI 元数据专项** | python manage.py test blog.tests.test_ai_metadata --keepdb | 验证提示词解析与异常保护 |
-| **搜索异步管道** | python manage.py test search.tests.test_search_async --keepdb | 验证 Outbox 投递与异步投递重试契约 |
-| **格式与冲突检查** | git diff --cached --check | 拦截空白符与未解 Git 冲突 |
-| **语义样式检查** | python tools/check_css_tokens.py | 验证 CSS 设计 token 一致性 |
+```bash
+python manage.py check
+python -m compileall -q wagtailblog3
+python tools/check_css_tokens.py
+git diff --check
+```
 
-## 5. Playwright 端到端浏览器验证规范
+按变更选择定向测试，例如：
 
-- **产物唯一输出目录**：所有 Playwright 调试产物（截图、trace、视频、HTML 报告）**统一写入 output/playwright/<task-name>/**；
-- **严禁泄漏**：output/ 目录受 .gitignore 保护，严禁将其提交至 Git 或同步到生产环境；
-- **验证范围**：覆盖前台响应式视口（桌面 1280x800 与移动 375x667）、Wagtail 后台登录、富文本/Markdown 编辑与关键表单交互，检查控制台是否有 JS 报错与 404 资源。
+```bash
+# external_content 的单元与契约测试
+python manage.py test \
+  wagtailblog3.apps.external_content.tests.test_registry \
+  wagtailblog3.apps.external_content.tests.test_copy \
+  wagtailblog3.apps.external_content.tests.test_publication_state \
+  --keepdb
 
-## 6. 生产服务编排与发布门禁 (Maker-Checker)
+# 博客发布/正文兼容性
+python manage.py test \
+  blog.tests.test_publication_service \
+  blog.tests.test_publication_consistency \
+  blog.tests.test_mongo_body_versions \
+  --keepdb
 
-### 6.1 生产 4 大 systemd 服务与重启顺序
-1. wagtailblog3.service：uWSGI / Django 核心应用
-2. wagtailblog3-celery-maintenance.service：maintenance 队列异步 Worker
-3. wagtailblog3-celery-beat.service：定时任务与补偿调度
-4. wagtailblog3-filebeat.service：日志收集至 Elasticsearch
+# 搜索 Outbox
+python manage.py test \
+  search.tests.test_search_sync_delivery \
+  search.tests.test_search_sync_producer \
+  --keepdb
+```
 
-**重启顺序**：基础设施（MySQL/Mongo/Redis/ES） -> Django/uWSGI -> Maintenance Worker -> Beat -> Filebeat。
+需要真实隔离存储时使用 `wagtailblog3.settings.external_content_test`，并先确认专用 MySQL/Mongo 服务和环境凭据已就绪：
 
-### 6.2 Maker-Checker 双模型四眼发布门禁
-- **指挥官 Sol (gpt-6.1-sol)**：核对生产提交 SHA、制定原子发布指令清单与回滚预案；
-- **执行官 Gemini (gemini-3.8-flash)**：严格执行 Sol 下达的单步终端命令，如实回传退出码与日志；
-- **红线约束**：未经对话人（用户）明确授权，严禁擅自执行 Git commit/push 或在生产环境触发服务更新。
+```bash
+python manage.py test \
+  wagtailblog3.apps.external_content.tests \
+  --settings=wagtailblog3.settings.external_content_test \
+  --keepdb
+```
 
-### 4.4 Markdown 导入油猴脚本维护与导出规范
-- **开发源路径**：`wagtailblog3/static/vendor/Script/downlaod_markdown.js`；
-- **生产工具导出**：每次更新脚本必须同步至 `tools/downlaod_markdown.user.js`（及 `tools/downlaod_markdown.js`），支持 `python tools/sync_production_userscript.py`；
-- **生产托管路径**：`wagtailblog3/staticfiles_collected/vendor/Script/downlaod_markdown.js`（执行 `collectstatic` 产物）。
+该命令不会自动启动服务、创建未知数据库或清理数据；服务未就绪时报告阻塞原因，不绕过安全门禁。
+
+## 4. 浏览器验证
+
+- 无状态回归使用 Playwright，产物统一放在 `output/playwright/<task-name>/`，不得提交。
+- 需要真实登录态、Wagtail 后台权限或前后台联动时使用 `browser-skill`；只验证必要的页面结果，严禁读取或输出 Cookie、Token、密码。
+- 至少覆盖与变更相关的桌面视口（1280×800）和移动视口（375×667）；检查控制台错误、关键资源 404、表单提交结果。
+- 浏览器不可用时，说明限制并改用模板渲染、Django 测试或静态检查，不伪造实机结果。
+
+## 5. 发布边界
+
+生产路径为 `/home/source/Django/wagtail/wagtailblog3`，环境为 `/root/anaconda3/envs/wagtailblog`。未经用户明确授权，不执行 SSH 写操作、`collectstatic`、服务重启、迁移或回滚。
+
+按补丁影响范围处理服务：
+
+- Web/Django 代码：通常只涉及 `wagtailblog3.service`。
+- Maintenance 任务：再考虑 `wagtailblog3-celery-maintenance.service`。
+- Beat 调度：再考虑 `wagtailblog3-celery-beat.service`。
+- 日志采集：只有补丁确实影响 Filebeat 配置或日志链路时才考虑 `wagtailblog3-filebeat.service`。
+
+不要因为“完整发布流程”默认重启 MySQL、MongoDB、Redis、Elasticsearch 或 Filebeat。涉及生产时由 Sol/审查角色制定原子步骤和回滚点，执行角色逐步回传退出码；用户授权只覆盖明确写出的范围。
+
+## 6. 油猴脚本
+
+源码唯一事实源：`wagtailblog3/static/vendor/Script/downlaod_markdown.js`。修改时同步生成 `tools/downlaod_markdown.user.js`；生产发布再按授权执行 `collectstatic`，验证收集结果后重启受影响的应用服务。

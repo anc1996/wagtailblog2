@@ -6,7 +6,7 @@
 2. 校验 model_catalog_json 所引用的 JSON 模型目录，包括关键 schema 字段、必须包含的基础模型及 duplicate slug 拦截；
 3. 校验各角色 model 与推理等级（model_reasoning_effort）是否在对应 supported_reasoning_levels 内；
 4. 校验所有角色使用的 model_provider（如 custom）是否在仓库或全局 ~/.codex/config.toml 的 model_providers 中登记；
-5. 拦截禁止使用的 gpt-6-astra；
+5. 按本地禁止集合校验模型；Astra 经授权登记后允许使用；
 6. 当开启 --runtime 时，通过调用 `codex debug models` 验证运行时实际加载情况，严格保障零凭据与敏感信息泄露。
 """
 
@@ -25,6 +25,7 @@ REQUIRED_MINIMAL_MODELS: Tuple[str, ...] = (
     "gpt-6.1-sol",
     "gemini-3.8-flash",
     "grok-4.7",
+    "claude-opus-5-5",
     "claude-sonnet-5-5",
 )
 
@@ -36,10 +37,8 @@ REQUIRED_SCHEMA_FIELDS: Tuple[str, ...] = (
     "supported_reasoning_levels",
 )
 
-# 严禁在默认或各角色中选用的高消耗/弃用模型
-FORBIDDEN_MODELS: Set[str] = {
-    "gpt-6-astra",
-}
+# 用户已授权 Astra；可用性仍由模型目录、运行时及提供商分别验证。
+FORBIDDEN_MODELS: Set[str] = set()
 
 
 @dataclass

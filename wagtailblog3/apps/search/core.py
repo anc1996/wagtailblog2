@@ -67,6 +67,13 @@ class SearchUnavailableError(RuntimeError):
 	"""搜索后端不可用时返回的稳定领域错误。"""
 
 
+ALLOWED_SEARCH_TYPES = frozenset({"all", "blog", "pages", "guides"})
+
+
+class SearchTypeInvalidError(ValueError):
+	"""仅标识类型白名单失败，不将后端或游标 ValueError 归为用户类型错误。"""
+
+
 def _minimum_should_match(query_string: str) -> str:
 	"""按查询词数量调整召回门槛，避免短词被过度过滤或长查询充斥低相关结果。"""
 	tokens = re.findall(r"[A-Za-z0-9_]+|[\u4e00-\u9fff]", query_string)
@@ -313,7 +320,9 @@ def _build_base_qs(
 ) -> Any:
 	if search_type == 'pages':
 		qs = build_public_pages_queryset(parsed_start, parsed_end, order_by)
-
+	elif search_type == 'guides':
+		from .services.guides_query import build_public_guides_queryset
+		qs = build_public_guides_queryset(parsed_start, parsed_end, order_by)
 	else:
 		qs = Page.objects.live().public()
 		if parsed_start:
@@ -387,10 +396,12 @@ def perform_search(
 	order_by: str | None = None,
 ) -> Any:
 	"""按搜索类型选择后端，并保持空查询和无效查询的短路语义。
-
 	Blog 使用独立内容索引，Pages 使用 Wagtail Page 索引，all 合并两条公开结果流。
 	后端不可用统一转换为 SearchUnavailableError，由视图层决定响应格式。
 	"""
+	if search_type not in ALLOWED_SEARCH_TYPES:
+		raise SearchTypeInvalidError("不支持的搜索类型。")
+
 	parsed_start = _parse_date(start_date)
 	parsed_end = _parse_date(end_date)
 
@@ -416,6 +427,20 @@ def perform_search(
 			raise SearchUnavailableError("内容搜索服务暂时不可用") from error
 		_record_search_hit(clean_query)
 		return content_results
+
+	if search_type == "guides":
+		from .services.guides_query import build_public_guides_queryset
+		qs = build_public_guides_queryset(parsed_start, parsed_end, order_by)
+		results = _build_search_results_for_queryset(
+			qs,
+			clean_query,
+			search_type=search_type,
+			start_date=parsed_start,
+			end_date=parsed_end,
+			order_by=order_by,
+		)
+		_record_search_hit(clean_query)
+		return results
 
 	if search_type == "all":
 		try:

@@ -10,7 +10,7 @@ from django.core import signing
 
 from .content_query import ContentSearchQueryUnavailable, build_content_search_results
 from .cursor import build_cursor_query_hash
-from .pages_query import build_public_pages_queryset
+from .pages_query import build_public_non_blog_queryset
 
 
 RRF_K = 60
@@ -28,8 +28,8 @@ def _public_pages_queryset(
     end_date: Any = None,
     order_by: str | None = None,
 ) -> Any:
-    """构造唯一的 Pages 流，`pages` 和 `all` 必须共用相同公开边界。"""
-    return build_public_pages_queryset(start_date, end_date, order_by)
+    """全站非博客流包含普通页和指南，仍强制已发布、公开及日期边界。"""
+    return build_public_non_blog_queryset(start_date, end_date, order_by)
 
 
 def _build_pages_search_results(

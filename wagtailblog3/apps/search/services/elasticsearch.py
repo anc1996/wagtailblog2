@@ -4,13 +4,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import re
 from typing import Any, Iterable, Mapping, Sequence
 
 from wagtail.search.backends import get_search_backend
 
 from search.services.content_index import (
     CONTENT_INDEX_REQUIRED_FIELDS,
+    CONTENT_INDEX_V2_REQUIRED_FIELDS,
+    content_index_mapping_matches_schema,
     content_index_template_matches,
+    content_index_v2_contract_matches,
+)
+from search.services.published_snapshot import (
+    PublishedSnapshotError, effective_projection_schema_version,
 )
 
 
@@ -110,6 +117,20 @@ def create_content_search_index(
 ) -> ContentSearchIndexCreateResult:
     """创建精确物理索引并校验 mapping；绝不覆盖既有模板或索引。"""
 
+    expected_mapping = template_definition.get("template", {}).get("mappings", {})
+    schema = template_definition.get("_meta", {}).get("projection_schema_version", 1)
+    try:
+        valid = content_index_mapping_matches_schema(expected_mapping, schema)
+    except PublishedSnapshotError:
+        valid = False
+    if not valid or (
+        schema == 2 and (
+            expected_mapping.get("_meta") != template_definition.get("_meta")
+            or not content_index_v2_contract_matches(expected_mapping, index_name)
+            or template_definition.get("index_patterns") != [index_name]
+        )
+    ):
+        raise ContentSearchElasticsearchError("es_content_template_schema_mismatch", retryable=False)
     client = get_content_search_client_for_connection(connection_name)
     try:
         template_exists = bool(client.indices.exists_index_template(name=template_name))
@@ -147,11 +168,7 @@ def create_content_search_index(
         raise _read_error(error) from error
 
     index_mapping = mapping.get(index_name, {}).get("mappings", {}) if isinstance(mapping, dict) else {}
-    properties = index_mapping.get("properties", {})
-    if (
-        index_mapping.get("dynamic") != "strict"
-        or not CONTENT_INDEX_REQUIRED_FIELDS.issubset(properties)
-    ):
+    if index_mapping != expected_mapping:
         raise ContentSearchElasticsearchError(
             "es_content_index_mapping_mismatch",
             retryable=False,
@@ -174,16 +191,37 @@ def verify_content_search_index(target: Any) -> bool:
     except Exception as error:
         raise _read_error(error) from error
     index_mapping = mapping.get(target.index_name, {}).get("mappings", {}) if isinstance(mapping, dict) else {}
-    properties = index_mapping.get("properties", {})
-    if (
-        index_mapping.get("dynamic") != "strict"
-        or not CONTENT_INDEX_REQUIRED_FIELDS.issubset(properties)
-    ):
+    try:
+        valid = content_index_mapping_matches_schema(
+            index_mapping, getattr(target, "projection_schema_version", 1),
+        )
+        if valid and effective_projection_schema_version(getattr(target, "projection_schema_version", 1)) == 2:
+            valid = content_index_v2_contract_matches(index_mapping, target.index_name)
+    except PublishedSnapshotError:
+        valid = False
+    if not valid:
         raise ContentSearchElasticsearchError(
             "es_content_index_mapping_mismatch",
             retryable=False,
         )
     return True
+
+
+def _identity_source_fields(target: Any, include_identity: bool) -> tuple[str, ...]:
+    """只读对账也按目标 schema，禁止把正文引用或原始快照带出 ES。"""
+    try:
+        schema = effective_projection_schema_version(getattr(target, "projection_schema_version", 1))
+    except PublishedSnapshotError as error:
+        raise ContentSearchElasticsearchError("es_target_schema_unsupported", retryable=False) from error
+    common = ("page_id", "content_version", "content_hash", "searchable")
+    if schema == 2:
+        return common + ("is_deleted", "projection_schema_version") + (
+            ("snapshot_digest", "publication_generation", "model_label", "search_type", "snapshot_kind")
+            if include_identity else ()
+        )
+    return common + ("operation",) + (
+        ("body_version_id", "publication_generation") if include_identity else ()
+    )
 
 
 def read_content_search_documents(
@@ -197,23 +235,7 @@ def read_content_search_documents(
     if not page_ids:
         return {}
     try:
-        source_includes = (
-            "page_id",
-            "content_version",
-            "content_hash",
-            "searchable",
-            "operation",
-        )
-        if include_identity:
-            source_includes = (
-                "page_id",
-                "content_version",
-                "content_hash",
-                "body_version_id",
-                "publication_generation",
-                "searchable",
-                "operation",
-            )
+        source_includes = _identity_source_fields(target, include_identity)
         response = get_content_search_client(target).mget(
             index=target.index_name,
             ids=[str(page_id) for page_id in page_ids],
@@ -250,23 +272,7 @@ def scan_content_search_documents(
     """通过 page_id 的 search_after 游标读取最小字段，不使用深 offset。"""
 
     try:
-        source_includes = (
-            "page_id",
-            "content_version",
-            "content_hash",
-            "searchable",
-            "operation",
-        )
-        if include_identity:
-            source_includes = (
-                "page_id",
-                "content_version",
-                "content_hash",
-                "body_version_id",
-                "publication_generation",
-                "searchable",
-                "operation",
-            )
+        source_includes = _identity_source_fields(target, include_identity)
         response = get_content_search_client(target).search(
             index=target.index_name,
             query={"match_all": {}},
@@ -307,7 +313,6 @@ def _bulk_operations(target: Any, documents: Iterable[Mapping[str, Any]]) -> lis
                     "index": {
                         "_index": target.index_name,
                         "_id": str(document["page_id"]),
-                        # 新事件以公开代际作为 ES external version；旧事件继续使用 content_version。
                         # external version 只使用 MySQL State 的单调 content_version；
                         # publication_generation 是公开身份字段，不能切换版本域。
                         "version": document["content_version"],
@@ -318,6 +323,57 @@ def _bulk_operations(target: Any, documents: Iterable[Mapping[str, Any]]) -> lis
             ]
         )
     return operations
+
+
+def validate_content_search_source(target: Any, document: Mapping[str, Any]) -> None:
+    """请求构造前拒绝跨 schema、未知字段和非法版本，不依赖 ES 400 防泄露。"""
+    try:
+        schema = effective_projection_schema_version(getattr(target, "projection_schema_version", 1))
+    except PublishedSnapshotError as error:
+        raise ContentSearchElasticsearchError("es_target_schema_unsupported", retryable=False) from error
+    allowed = CONTENT_INDEX_V2_REQUIRED_FIELDS if schema == 2 else CONTENT_INDEX_REQUIRED_FIELDS
+    if not isinstance(document, Mapping) or set(document) - allowed:
+        raise ContentSearchElasticsearchError("es_source_fields_invalid", retryable=False)
+    if any(type(document.get(name)) is not int or document[name] <= 0 for name in ("page_id", "content_version")):
+        raise ContentSearchElasticsearchError("es_source_version_invalid", retryable=False)
+    if schema == 2:
+        required = {
+            "projection_schema_version", "model_label", "search_type", "snapshot_kind",
+            "snapshot_digest", "publication_generation", "searchable", "is_deleted",
+        }
+        if not required <= document.keys() or type(document["projection_schema_version"]) is not int or document["projection_schema_version"] != 2:
+            raise ContentSearchElasticsearchError("es_source_schema_mismatch", retryable=False)
+        if (
+            type(document["publication_generation"]) is not int or document["publication_generation"] <= 0
+            or type(document["searchable"]) is not bool or type(document["is_deleted"]) is not bool
+            or document["searchable"] == document["is_deleted"]
+            or not isinstance(document["snapshot_digest"], str)
+            or re.fullmatch(r"[0-9a-f]{64}", document["snapshot_digest"]) is None
+            or any(not isinstance(document[name], str) or not document[name] for name in ("model_label", "search_type", "snapshot_kind"))
+        ):
+            raise ContentSearchElasticsearchError("es_source_identity_invalid", retryable=False)
+        if document["searchable"] and not CONTENT_INDEX_V2_REQUIRED_FIELDS <= document.keys():
+            raise ContentSearchElasticsearchError("es_source_projection_incomplete", retryable=False)
+        if not document["searchable"]:
+            # 墓碑不能携带正文、标题或范围；ES index 操作整体替换 _source 清除旧内容。
+            if set(document) != required | {"page_id", "content_version"}:
+                raise ContentSearchElasticsearchError("es_source_tombstone_fields_invalid", retryable=False)
+        elif (
+            any(not isinstance(document[name], str) for name in ("title", "summary", "body_text"))
+            or type(document["locale_id"]) is not int or document["locale_id"] <= 0
+            or any(
+                not isinstance(document[name], list)
+                or any(type(value) is not int or value <= 0 for value in document[name])
+                for name in ("site_ids", "ancestor_ids")
+            )
+            or not isinstance(document["content_hash"], str)
+            or re.fullmatch(r"[0-9a-f]{64}", document["content_hash"]) is None
+            or any(
+                not isinstance(document[name], str) or not document[name]
+                for name in ("first_published_at", "sort_date")
+            )
+        ):
+            raise ContentSearchElasticsearchError("es_source_projection_invalid", retryable=False)
 
 
 def estimate_content_search_bulk_bytes(
@@ -379,6 +435,8 @@ def write_content_search_documents(
     if not documents:
         return ContentSearchBulkWriteResult(succeeded=0, superseded=0)
 
+    for document in documents:
+        validate_content_search_source(target, document)
     try:
         backend = get_search_backend(target.connection_name)
         client = backend.es

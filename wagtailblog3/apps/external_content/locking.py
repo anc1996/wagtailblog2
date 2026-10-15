@@ -30,7 +30,8 @@ from __future__ import annotations
 import logging
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Iterator, List, Optional, Sequence
+from threading import local
+from typing import Any, Callable, Iterator, List, Mapping, Optional, Sequence
 
 from django.db import NotSupportedError, OperationalError, connection, transaction
 from wagtail.models import Page, Revision
@@ -45,6 +46,19 @@ from external_content.models import (
 logger = logging.getLogger(__name__)
 
 _MYSQL_ER_LOCK_NOWAIT = 3572
+
+# 仅翻译整操作入口建立此上下文；既存行不得在低层锁后补锁。
+translation_lifecycle_context = local()
+
+
+def translation_member(page_id: int) -> Optional[PageLifecycleLocks]:
+    """返回已围栏成员；未知既存身份必须退出整个翻译事务。"""
+    frame = getattr(translation_lifecycle_context, "frame", None)
+    if frame is None:
+        return None
+    if page_id not in frame["locks"]:
+        raise ExternalContentOperationBlockedError("翻译访问原闭包外的既存页面")
+    return frame["locks"][page_id]
 
 
 @contextmanager
@@ -114,15 +128,10 @@ def read_alias_source_chain(page_id: int) -> List[Page]:
     return chain
 
 
-def lock_alias_lifecycle_closure(page_id: int) -> AliasLifecycleLocks:
-    """NOWAIT 锁定祖先链与本次 Alias 子图，并用锁定读复核拓扑。
-
-    外层发布可能已持有较大 ID 的源锁，因此升序只是确定性遍历，安全边界是
-    所有新增生命周期锁均 NOWAIT。拓扑变化或锁冲突必须退出整个 Action，
-    不能在原事务重试，也不能用一致性快照重读冒充 MySQL 当前拓扑。
-    """
-    if not connection.in_atomic_block:
-        raise RuntimeError("Alias 围栏必须在活跃 transaction.atomic 块内执行")
+def _discover_alias_closure(
+    page_id: int,
+) -> tuple[List[Page], dict[int, Page], set[int]]:
+    """只用基础 Page 发现来源链及递归目标，不加载正文或获取下层锁。"""
     chain = read_alias_source_chain(page_id)
     discovered = {page.pk: page for page in chain}
     target_ids: set[int] = {page_id}
@@ -136,44 +145,258 @@ def lock_alias_lifecycle_closure(page_id: int) -> AliasLifecycleLocks:
             discovered[child.pk] = child
             target_ids.add(child.pk)
             frontier.add(child.pk)
+    return chain, discovered, target_ids
 
-    locked: dict[int, PageLifecycleLocks] = {}
-    for locked_id in sorted(discovered):
-        try:
-            locked[locked_id] = lock_page_lifecycle_hierarchy(
-                locked_id, revision_ids=None, check_write=True, nowait=True
+
+def lock_alias_lifecycle_closures(
+    page_ids: Sequence[int],
+    *,
+    additional_page_ids: Sequence[int] = (),
+    validate_pages: Optional[Callable[[Mapping[int, Page]], None]] = None,
+) -> tuple[dict[int, PageLifecycleLocks], dict[int, AliasLifecycleLocks]]:
+    """多个 Alias/复制源先求并集再分层锁定，不逐闭包补锁。
+
+    返回 (全部生命周期锁, 各入口的 Alias 闭包)。additional_page_ids 通常为
+    混合复制树中的普通 Page 与目标父页。调用者的拓扑复核同样位于 Page 层。
+    """
+    if not connection.in_atomic_block:
+        raise RuntimeError("Alias 围栏必须在活跃 transaction.atomic 块内执行")
+    topologies = {
+        page_id: _discover_alias_closure(page_id) for page_id in sorted(set(page_ids))
+    }
+    discovered_ids = set(additional_page_ids)
+    for _, discovered, _ in topologies.values():
+        discovered_ids.update(discovered)
+
+    def validate_topologies(pages: Mapping[int, Page]) -> None:
+        """拓扑当前读仅在 Page 层执行；发现变化立即终止，不扩展闭包。"""
+        for page_id, (_, discovered, target_ids) in topologies.items():
+            for locked_id, expected in discovered.items():
+                actual = pages[locked_id]
+                if (
+                    actual.alias_of_id != expected.alias_of_id
+                    or actual.content_type_id != expected.content_type_id
+                ):
+                    raise ExternalContentOperationBlockedError("获锁期间 Alias 来源或模型发生变化")
+            current_children = list(
+                Page.objects.select_for_update(nowait=True)
+                .filter(alias_of_id__in=target_ids)
+                .order_by("pk")
             )
-        except Page.DoesNotExist as exc:
-            raise ExternalContentOperationBlockedError("获锁期间 Alias 页面已消失") from exc
-        expected = discovered[locked_id]
-        actual = locked[locked_id].page
-        if (
-            actual.alias_of_id != expected.alias_of_id
-            or actual.content_type_id != expected.content_type_id
-        ):
-            raise ExternalContentOperationBlockedError("获锁期间 Alias 来源或模型发生变化")
+            if {page.pk for page in current_children} != target_ids - {page_id}:
+                raise ExternalContentOperationBlockedError("获锁期间 Alias 递归目标闭包发生变化")
+            for child in current_children:
+                expected = pages[child.pk]
+                if (
+                    child.alias_of_id != expected.alias_of_id
+                    or child.content_type_id != expected.content_type_id
+                ):
+                    raise ExternalContentOperationBlockedError("获锁后 Alias 目标拓扑复核失败")
+        if validate_pages is not None:
+            validate_pages(pages)
 
-    with _nowait_lock_errors(page_id, nowait=True):
-        current_children = list(
-            Page.objects.select_for_update(nowait=True)
-            .filter(alias_of_id__in=target_ids)
-            .order_by("pk")
+    try:
+        locked = lock_lifecycle_closure(
+            sorted(discovered_ids), nowait=True, validate_pages=validate_topologies
         )
-    expected_children = target_ids - {page_id}
-    if {page.pk for page in current_children} != expected_children:
-        raise ExternalContentOperationBlockedError("获锁期间 Alias 递归目标闭包发生变化")
-    for child in current_children:
-        expected = locked[child.pk].page
-        if (
-            child.alias_of_id != expected.alias_of_id
-            or child.content_type_id != expected.content_type_id
-        ):
-            raise ExternalContentOperationBlockedError("获锁后 Alias 目标拓扑复核失败")
+    except Page.DoesNotExist as exc:
+        raise ExternalContentOperationBlockedError("获锁期间 Alias 页面已消失") from exc
+    return locked, {
+        page_id: AliasLifecycleLocks(
+            source_chain=[page.pk for page in chain], target_ids=sorted(target_ids),
+            pages={pk: locked[pk] for pk in discovered},
+        )
+        for page_id, (chain, discovered, target_ids) in topologies.items()
+    }
+
+
+def lock_alias_lifecycle_closure(page_id: int) -> AliasLifecycleLocks:
+    """NOWAIT 全层锁定单个 Alias 闭包；拓扑变化必须退出整个 Action 事务。"""
+    frame = getattr(translation_lifecycle_context, "frame", None)
+    if frame is not None:
+        translation_member(page_id)
+        return _translation_alias_locks(page_id, frame["locks"])
+    _, closures = lock_alias_lifecycle_closures([page_id])
+    return closures[page_id]
+
+
+def _translation_alias_locks(
+    page_id: int, members: Mapping[int, PageLifecycleLocks],
+) -> AliasLifecycleLocks:
+    """仅由已围栏成员构造 Alias 关系；不能发现或锁定额外既存 Page。"""
+    chain: List[int] = []
+    current = page_id
+    while current is not None:
+        if current in chain or current not in members:
+            raise ExternalContentOperationBlockedError("翻译 Alias 来源链存在环或越出闭包")
+        chain.append(current)
+        current = members[current].page.alias_of_id
+    targets = {page_id}
+    while True:
+        expanded = targets | {
+            pk for pk, row in members.items() if row.page.alias_of_id in targets
+        }
+        if expanded == targets:
+            break
+        targets = expanded
     return AliasLifecycleLocks(
-        source_chain=[page.pk for page in chain],
-        target_ids=sorted(target_ids),
-        pages=locked,
+        source_chain=chain, target_ids=sorted(targets),
+        pages={pk: members[pk] for pk in set(chain) | targets},
     )
+
+
+def lock_translation_lifecycle_closure(
+    page_ids: Sequence[int],
+    *,
+    validate_pages: Callable[[Mapping[int, Page]], None],
+) -> tuple[dict[int, PageLifecycleLocks], dict[int, AliasLifecycleLocks]]:
+    """翻译专用：Page 复核后冻结低层身份，按各层主键逐点 NOWAIT 取锁。
+
+    不扩充 Page 闭包，不补锁或原地重试；非翻译 helper 保持原契约。
+    非锁定发现与点锁之间及发现后新增行仍有窗口；不证明完整 R3、
+    MVCC 可见性或真实 InnoDB 首次锁全序，也不触发正文 hydration。
+    """
+    if not connection.in_atomic_block:
+        raise RuntimeError("翻译生命周期闭包必须在活跃 transaction.atomic 块内执行")
+    ids = sorted(set(page_ids))
+    if not ids or any(type(page_id) is not int or page_id < 1 for page_id in ids):
+        raise ExternalContentOperationBlockedError("生命周期闭包需要有效持久化 Page ID")
+    with _nowait_lock_errors(ids[0], nowait=True):
+        try:
+            pages = {page_id: lock_writable_page(page_id, nowait=True) for page_id in ids}
+        except Page.DoesNotExist as exc:
+            raise ExternalContentOperationBlockedError("翻译获锁期间页面已消失") from exc
+        validate_pages(pages)
+
+        # 只冻结标量身份，不持有发现阶段的可变模型；所有 Page 校验先于低层查询。
+        state_plan = tuple(sorted(set(
+            ExternalContentPublicationState.objects.filter(page_id__in=ids)
+            .values_list("pk", flat=True)
+        )))
+        base_type = pages[ids[0]].get_base_content_type()
+        base_type_id = base_type.pk
+        object_pages = {str(page_id): page_id for page_id in ids}
+        revision_plan = tuple(sorted(set(
+            Revision.objects.filter(
+                base_content_type=base_type, object_id__in=list(object_pages),
+            ).values_list("pk", "object_id", "base_content_type_id")
+        )))
+        intent_plan = tuple(sorted(set(
+            ExternalContentDeletionIntent.objects.filter(page_id__in=ids)
+            .values_list("pk", "page_id")
+        )))
+
+        states: dict[int, ExternalContentPublicationState] = {}
+        for pk in state_plan:
+            try:
+                state = ExternalContentPublicationState.objects.select_for_update(
+                    nowait=True,
+                ).get(pk=pk)
+            except ExternalContentPublicationState.DoesNotExist as exc:
+                raise ExternalContentOperationBlockedError("翻译已发现的发布状态消失") from exc
+            # State.page_id 本身就是 PK；未发现的缺失槽位仍合法，不创建替代行。
+            if state.pk != pk or state.page_id != pk or pk not in pages:
+                raise ExternalContentOperationBlockedError("翻译发布状态身份发生变化")
+            states[pk] = state
+
+        revisions: dict[int, List[Revision]] = {page_id: [] for page_id in ids}
+        for pk, object_id, content_type_id in revision_plan:
+            try:
+                revision = Revision.objects.select_for_update(nowait=True).get(pk=pk)
+            except Revision.DoesNotExist as exc:
+                raise ExternalContentOperationBlockedError("翻译已发现的版本消失") from exc
+            if (
+                (revision.pk, revision.object_id, revision.base_content_type_id)
+                != (pk, object_id, content_type_id)
+                or object_id not in object_pages
+                or content_type_id != base_type_id
+            ):
+                raise ExternalContentOperationBlockedError("翻译版本关联身份发生变化")
+            revisions[object_pages[object_id]].append(revision)
+
+        intents: dict[int, List[ExternalContentDeletionIntent]] = {
+            page_id: [] for page_id in ids
+        }
+        for pk, page_id in intent_plan:
+            # 使用原 UUID 主键；按关联重新查找会掩盖换绑，不得附加关联过滤条件。
+            try:
+                intent = ExternalContentDeletionIntent.objects.select_for_update(
+                    nowait=True,
+                ).get(pk=pk)
+            except ExternalContentDeletionIntent.DoesNotExist as exc:
+                raise ExternalContentOperationBlockedError("翻译已发现的删除意图消失") from exc
+            if intent.pk != pk or intent.page_id != page_id or page_id not in pages:
+                raise ExternalContentOperationBlockedError("翻译删除意图关联身份发生变化")
+            if intent.status != DeletionIntentStatus.CANCELLED:
+                raise ExternalContentOperationBlockedError(
+                    f"页面 (ID: {page_id}) 存在未取消的删除意图 "
+                    f"(ID: {intent.pk}, 状态: {intent.status})，写入被冻结"
+                )
+            intents[page_id].append(intent)
+
+        locked = {
+            page_id: PageLifecycleLocks(
+                page=pages[page_id], state=states.get(page_id),
+                revisions=revisions[page_id], intents=intents[page_id],
+            )
+            for page_id in ids
+        }
+    return locked, {pk: _translation_alias_locks(pk, locked) for pk in locked}
+
+
+def lock_lifecycle_closure(
+    page_ids: Sequence[int],
+    *,
+    check_write: bool = True,
+    nowait: bool = False,
+    validate_pages: Optional[Callable[[Mapping[int, Page]], None]] = None,
+) -> dict[int, PageLifecycleLocks]:
+    """一次锁定完整 Page 闭包，禁止获锁后增补既存页面或在事务内重试。
+
+    Page PK、State page_id、Revision PK、Intent PK 分别全局升序。
+    validate_pages 用于 Page 层的拓扑当前读；变化必须抛异常退出外层事务。
+    本接口不触发 specific、不读 Mongo、不创建缺失状态。
+    """
+    if not connection.in_atomic_block:
+        raise RuntimeError("生命周期闭包必须在活跃 transaction.atomic 块内执行")
+    ids = sorted(set(page_ids))
+    if not ids or any(type(page_id) is not int or page_id < 1 for page_id in ids):
+        raise ExternalContentOperationBlockedError("生命周期闭包需要有效持久化 Page ID")
+    options = {"nowait": True} if nowait else {}
+    with _nowait_lock_errors(ids[0], nowait=nowait):
+        pages = {page_id: lock_writable_page(page_id, nowait=nowait) for page_id in ids}
+        if validate_pages is not None:
+            validate_pages(pages)
+        states = {
+            state.page_id: state
+            for state in ExternalContentPublicationState.objects.select_for_update(**options)
+            .filter(page_id__in=ids).order_by("page_id")
+        }
+        revisions: dict[int, List[Revision]] = {page_id: [] for page_id in ids}
+        # 所有成员都是基础 Wagtail Page，因此共享 Page 的 base_content_type。
+        for revision in Revision.objects.select_for_update(**options).filter(
+            base_content_type=pages[ids[0]].get_base_content_type(),
+            object_id__in=[str(page_id) for page_id in ids],
+        ).order_by("id"):
+            revisions[int(revision.object_id)].append(revision)
+        intents: dict[int, List[ExternalContentDeletionIntent]] = {
+            page_id: [] for page_id in ids
+        }
+        for intent in ExternalContentDeletionIntent.objects.select_for_update(**options) \
+                .filter(page_id__in=ids).order_by("id"):
+            intents[intent.page_id].append(intent)
+            if check_write and intent.status != DeletionIntentStatus.CANCELLED:
+                raise ExternalContentOperationBlockedError(
+                    f"页面 (ID: {intent.page_id}) 存在未取消的删除意图 "
+                    f"(ID: {intent.pk}, 状态: {intent.status})，写入被冻结"
+                )
+        return {
+            page_id: PageLifecycleLocks(
+                page=pages[page_id], state=states.get(page_id),
+                revisions=revisions[page_id], intents=intents[page_id],
+            )
+            for page_id in ids
+        }
 
 
 def lock_writable_page(page_id: int, *, nowait: bool = False) -> Page:
@@ -279,6 +502,13 @@ def lock_page_lifecycle_hierarchy(
     """
     if not connection.in_atomic_block:
         raise RuntimeError("lock_page_lifecycle_hierarchy 必须在活跃事务 (transaction.atomic) 块内执行")
+
+    frame = getattr(translation_lifecycle_context, "frame", None)
+    if frame is not None:
+        member = translation_member(page_id)
+        if page_id not in frame["created_ids"]:
+            return member
+        # 本事务 INSERT 的身份可继续初始化；不是凭 ID 缺席推断“新行”。
 
     lock_options = {"nowait": True} if nowait else {}
     with _nowait_lock_errors(page_id, nowait=nowait):

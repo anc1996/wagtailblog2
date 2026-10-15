@@ -2,17 +2,48 @@
 
 ## 配置契约
 
-- Sol 与项目默认子代理模型统一为 `gpt-6.1-sol`；Gemini、Grok、Claude 保持各自角色文件中的真实模型。
-- 本项目执行 **high-only**：项目默认、已注册/未注册角色的 `model_reasoning_effort`、目录默认等级均必须是 `high`，目录仅公布 `high` 选项。预检覆盖有效角色文件并忽略纯注释废弃文件。Codex 官方 Subagents 文档规定，自定义角色文件中的等级优先于显式 spawn 值与 `[agents]` 默认；调用方仍应显式传 `high`。这属于本地配置与预检策略，不代表厂商只支持一种等级，也不能限制任意外部 CLI 覆盖。
+- 2026-10-08：在已有 Astra 模型目录项基础上，增加 `astra`、`luna` 具名角色及项目 `gpt-6-luna` 模型条目；默认子代理仍为 Sol，原五个角色不变，全局配置未改。Astra/Luna 均通过 `custom` 请求 `high`；这些别名和能力字段是本地配置，不是官网型号或上游能力声明。角色加载后可按 `agent_type` 选择，也可显式指定已加载的完整 `model` 名称；不要将工具说明中的模型展示列表当成完整拒绝名单。
+
+### Astra / Luna 配置入口
+
+项目 `.codex/config.toml` 注册角色并引用相对于该文件的角色配置：
+
+```toml
+[agents.luna]
+description = "按明确授权承担独立任务的 Luna 子代理"
+config_file = "agents/luna.toml"
+```
+
+对应 `.codex/agents/luna.toml` 使用角色配置字段，而不是工具调用参数名：
+
+```toml
+name = "luna"
+description = "按明确授权承担独立任务的 Luna 子代理"
+model_provider = "custom"
+model = "gpt-6-luna"
+model_reasoning_effort = "high"
+developer_instructions = "仅执行明确分派的任务，遵守项目安全和验证边界。"
+```
+
+Astra 使用相同结构，角色名为 `astra`，模型为 `gpt-6-astra`。`model_reasoning_effort` 是 TOML 配置字段；V1 `spawn_agent` 的显式覆盖参数才是 `reasoning_effort`。模型另须进入本项目 `model-catalog.json`；仅加入全局桌面菜单不足以证明本项目子代理已加载。
+
+2026-10-08 尝试核对官方 Subagents、Configuration reference / schema 页面时，HTTP 客户端与隔离浏览器均返回 403，未取得官方正文；不能将此配置记录说成已逐条通过官网核对。本次以已安装 CLI 的解析、项目预检和运行时证据为验证依据。修改后应在重新加载项目配置的会话中验证具名角色，旧聊天成功按 `model` 调用不等于新 `agent_type` 已热加载。
+
+回退仅移除本次新增的两个角色注册、两个角色文件、Luna 项目目录项及 Luna 白名单项，并恢复对应说明；保留原 Astra 模型条目、Sol 默认设置及所有他人修改，不覆盖整个配置文件。
+
+### 既有配置约束
+
+- Sol 与项目默认子代理模型统一为 `gpt-6.1-sol`；Gemini、Grok、Claude 保持各自角色文件中的真实模型。主会话模型由宿主配置决定，不能从本文件反推。
+- 本项目执行 **high-only**：项目默认、已注册角色的 `model_reasoning_effort` 和目录默认等级均为 `high`。这是本地一致性策略，不代表提供商只支持一种等级，也不能限制外部 CLI 覆盖；预检只检查当前工作区实际存在的有效角色文件。
 - `.codex/config.toml` 的 `model_catalog_json` 加载同目录 `model-catalog.json`，先注册自定义模型，再执行原生子代理路由。
 - 提供方 `custom` 继承宿主 `~/.codex/config.toml`；凭据继续由宿主认证配置管理，本仓库不存储 API Key、Cookie 或 Token。
 - 目录按本机 Codex CLI `0.157.1` 验证。升级后必须重新检查 schema；旧目录可能因缺少 `support_verbosity` 等字段无法读取。每个模型还须提供非空基础指令或指令模板，本目录使用项目自有、中性的 Codex 协作指令。
-- 当前 `codex debug models` 确认四个目录别名已载入且仅声明 `high`；输出未包含 `supports_parallel_tool_calls`，因此目录检查不作为该能力已被运行时采用的证据。
+- 最近一次目录检查确认五个目录别名已载入且仅声明 `high`；这只是历史/配置证据，不能代替新会话的真实推理或工具调用验证。
 - 目录中的 128 Ki token 上限与 100000 token 压缩阈值是本项目的保守运行预算，不代表厂商公布的模型上限。文本输入、普通 Responses 与 V1 多代理为当前兼容基线，不启用尚未验证的图片、Responses Lite 或厂商内置搜索接口。
 
 ## 原生调用规则
 
-正常调用只选择当前工具暴露的 `agent_type`，并设置 `fork_context=false`；实际模型、推理等级、角色职责由角色 TOML 加载。默认模型必须已进入当前会话目录，角色文件尚未加载时也不能绕过前置校验。
+正常调用只选择当前工具暴露的 `agent_type`，并设置 `fork_context=false`；实际模型、推理等级、角色职责由角色 TOML 和当前运行时加载结果共同决定。默认模型必须已进入当前会话目录，角色文件尚未加载时也不能绕过前置校验。
 
 必须显式传 `model` 时，使用目录中的完整模型名称。错误提示通常只列前五个可见名称，不代表整个目录只有五个模型。旧会话不会自动保证加载新目录，修改后应从本仓库开启新会话再验证。
 
@@ -42,7 +73,7 @@ python tools/check_codex_agents.py --runtime --codex "C:\Users\haryk\.codemoss\d
 
 路径不同可通过 `--codex` 指定实际二进制；不要将密码或 API Key 放入命令。Windows 编辑与 WSL2 测试共享仓库，但提供方及认证配置仍分别来自各自用户目录。
 
-真实冒烟验证必须在新会话执行：创建 Gemini 与 Grok 子代理，要求一次无副作用的只读任务和一次公开页面的 Fetch 请求，确认代理完成，并从对应 rollout 的 `turn_context.model` 与 `effort` 核对实际模型及 `high`。API 返回 200、代理自报身份或成功创建 agent ID 均不能替代此验证。
+真实冒烟验证应在新会话按需执行：对需要使用的代理分别安排无副作用的只读任务，必要时再安排公开页面 Fetch 请求，并从对应 rollout 的 `turn_context.model` 与 `effort` 核对实际模型及 `high`。若某个提供商当前不可用，应记录为路由失败并降级到已验证角色，不伪造成功；API 返回 200、代理自报身份或成功创建 agent ID 均不能替代此验证。
 
 Windows 只读沙箱未必继承宿主 Python 的 PATH。连通性验收优先使用 PowerShell 内置 `Write-Output READONLY_TOOL_OK`；项目 Python 测试按专属技能走 WSL2/Conda 的明确环境，不把可执行程序缺失误判为模型路由故障。
 
@@ -57,7 +88,7 @@ Windows 只读沙箱未必继承宿主 Python 的 PATH。连通性验收优先�
 安装或重建（需要 Node >=22.19.0，本机验收为 24.17.0；路径不同使用实际 Node/npm）：
 
 ```powershell
-& "D:\softwarepro\nodejs\npm.cmd" ci --prefix tools/fetch-mcp --ignore-scripts --no-audit --no-fund
+& "D:\softwarepro\nodejs\npm.cmd" ci nt文件的-prefix tools/fetch-mcp --ignore-scripts --no-audit --no-fund
 & "D:\softwarepro\nodejs\node.exe" --test tools/fetch-mcp/test-fetch.mjs
 ```
 
@@ -78,7 +109,9 @@ try {
 
 ## 本机默认与代理核验边界
 
-本机 `~/.codex/config.toml` 原默认子代理是 `gpt-6-astra/medium`，已针对性改为 `gpt-6.1-sol/high` 并引用本仓库同一模型目录；主会话保持 `gemini-3.8-flash/high`，提供方及认证未改。仓库外会话也依赖该目录的绝对路径，移动仓库须同步调整；需要回退时仅恢复上述三项，不覆盖整个全局配置。
+当前审计记录显示，宿主默认子代理已针对性改为 `gpt-6.1-sol/high` 并引用本仓库同一模型目录，主会话保持 `gemini-3.8-flash/high`；这些是本机状态，不是所有会话或提供商的保证。仓库外会话也可能依赖该目录的绝对路径，移动仓库须重新验证；回退时只恢复明确改动项，不覆盖整个全局配置。
+
+`fork_context=false` 不会把主会话历史自动复制给子代理；代理之间也没有可假定的共享长期记忆或缓存。共享事实必须通过紧凑提示、工作区文件、工具结果或显式消息传递。固定提示前缀可能改善缓存命中，但不是跨模型知识共享机制。
 
 Codex 的 `reasoning.effort=high` 是请求体配置，不通过自定义 HTTP 响应头开启推理；`default_reasoning_summary="none"` 仅关闭摘要展示，不等于关闭推理。终端与 MCP 工具是宿主能力，模型经 Responses 工具调用协议使用这些能力，不是模型直接获得主机权限。
 

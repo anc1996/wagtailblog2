@@ -1,36 +1,47 @@
-# 项目级 Codex 配置 (Repository-scoped)
+# Repository-scoped Codex configuration
 disable_response_storage = false
-# 自定义模型须先进入本地目录，避免子代理在加载角色配置前被模型校验拦截。
 model_catalog_json = "model-catalog.json"
 
 [agents]
+enabled = true
 default_subagent_model = "gpt-6.1-sol"
 default_subagent_reasoning_effort = "high"
 
+[agents.astra]
+description = "按明确授权承担独立分析、实现或复核任务的 Astra 子代理，不替代默认 Sol 角色"
+config_file = "agents/astra.toml"
+nickname_candidates = ["AstraAnalyst", "AstraEngineer"]
+
+[agents.luna]
+description = "按明确授权承担独立分析、实现或复核任务的 Luna 子代理，不替代默认 Sol 角色"
+config_file = "agents/luna.toml"
+nickname_candidates = ["LunaAnalyst", "LunaEngineer"]
+
 [agents.sol]
-description = "Sol 架构与技术方案设计核心"
+description = "负责 Django/Wagtail 跨模块契约、事务与补偿边界及验收证据审查的架构代理"
 config_file = "agents/sol.toml"
 nickname_candidates = ["SolArchitect", "SolPlanner"]
 
 [agents.gemini]
-description = "负责代码落地、功能重构与定向测试执行的 Gemini 开发主力"
+description = "在明确契约和文件范围内完成 Python/Django/Wagtail 全栈实现、定向测试及文档同步的工程代理"
 config_file = "agents/gemini.toml"
-nickname_candidates = ["GeminiCoder", "GeminiTester"]
+nickname_candidates = ["GeminiCoder", "GeminiDocs", "GeminiTester"]
 
 [agents.grok]
-description = "负责全流程对照方案审核与对抗式安全审查的 Grok 审查官"
+description = "以反例独立复核身份、事务、并发、补偿与测试证据并提出阻断项的只读审查代理"
 config_file = "agents/grok.toml"
-nickname_candidates = ["GrokAuditor", "GrokReviewer"]
+nickname_candidates = ["GrokReviewer", "GrokAuditor"]
 
-[agents.helper]
-description = "轻量辅助杂役与快速工具助手（Gemini驱动，免费无限token）"
-config_file = "agents/gemini-helper.toml"
-nickname_candidates = ["GeminiHelper", "QuickHelper"]
-
-[agents.claude]
-description = "复杂业务逻辑与极端疑难特种攻坚工程师（Claude Opus 5 / 5.5）"
+[agents.opus]
+description = "仅在重大契约争议、跨存储取舍或难以判断的残余风险时提供独立架构第二意见的专家"
 config_file = "agents/claude-complex.toml"
-nickname_candidates = ["ClaudeComplex", "ClaudeCore"]
+nickname_candidates = ["ClaudeOpus", "OpusArchitect"]
+
+[agents.sonnet]
+description = "经明确指派处理 Wagtail 生命周期、复制别名及并发疑难缺陷并实施最小修复的工程代理"
+config_file = "agents/claude-sonnet.toml"
+nickname_candidates = ["ClaudeSonnet", "SonnetEngineer"]
+
 [mcp_servers.playwright]
 type = "stdio"
 command = "D:\\softwarepro\\nodejs\\node.exe"

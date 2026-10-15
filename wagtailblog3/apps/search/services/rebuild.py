@@ -206,6 +206,13 @@ def _backfill_missing_content_hashes(
     documents: list[dict[str, object]],
 ) -> None:
     """仅为不可变正文版本补齐缺失 hash，并拒绝覆盖并发产生的新状态。"""
+    from search.services.published_snapshot import effective_projection_schema_version
+
+    if any(
+        effective_projection_schema_version(getattr(state, "projection_schema_version", None)) == 2
+        and not state.content_hash for state in states.values()
+    ):
+        raise ContentSearchRebuildError("snapshot_hash_missing")
 
     missing_documents = [
         document
@@ -309,13 +316,19 @@ def rebuild_content_search_batch(target_id: str, batch_size: int, max_batch_byte
         with transaction.atomic():
             locked_build = SearchIndexBuild.objects.select_for_update().get(pk=build.pk)
             locked_build.status = SearchIndexBuildStatus.CATCHING_UP
+            # 删除/隐藏的尾部页面同样已扫描完，不能让固定上界永远无法完成。
+            locked_build.checkpoint_page_id = max(
+                locked_build.checkpoint_page_id, locked_build.scan_upper_bound_page_id,
+            )
+            locked_build.last_error_code = ""
+            locked_build.last_error_message = ""
             locked_build.save(
-                update_fields=("status", "last_error_code", "last_error_message", "updated_at")
+                update_fields=("status", "checkpoint_page_id", "last_error_code", "last_error_message", "updated_at")
             )
         materialize_content_search_deliveries()
         return ContentSearchRebuildBatch(
             done=True,
-            checkpoint_page_id=build.checkpoint_page_id,
+            checkpoint_page_id=locked_build.checkpoint_page_id,
             scanned=0,
             succeeded=0,
             superseded=0,

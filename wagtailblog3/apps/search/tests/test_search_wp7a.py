@@ -57,25 +57,46 @@ class FederatedResultTests(SimpleTestCase):
 
 
 class SharedPagesQueryTests(SimpleTestCase):
-	@patch("search.services.pages_query.BlogPage.objects.values")
+	@patch("guides.models.GuidePage")
+	@patch("search.services.pages_query.BlogPage")
 	@patch("search.services.pages_query.Page.objects")
-	def test_pages_queryset_excludes_blog_and_uses_first_published_at(self, page_objects, blog_values):
+	def test_pages_queryset_excludes_blog_and_uses_first_published_at(
+		self, page_objects, mock_blog_page, mock_guide_page
+	):
+		"""验证 pages 查询集排除 BlogPage 与 GuidePage 并使用 first_published_at。
+
+		[契约演进与 RED 记录]
+		pages_query.py 新增了对 GuidePage 的物理排除（第二次 .exclude(id__in=guide_ids)）。
+		主线程已在 2026-10-06 确认旧 Mock 未适配时的预期 RED（exit 1，参见
+		output/test-results/search-wp7a-current-red-2026-10-06.raw.log:
+		AssertionError: [] != [((), {'first_published_at__gte': ...})]）。
+		此处进行最小适配：Patch GuidePage.objects.values 并链式断言两次 exclude。
+		"""
+		blog_ids = [201]
+		guide_ids = [101]
+		mock_blog_page.objects.values.return_value = blog_ids
+		mock_guide_page.objects.values.return_value = guide_ids
+
 		public_pages = page_objects.live.return_value.public.return_value
-		filtered_pages = public_pages.exclude.return_value
-		filtered_pages.filter.side_effect = lambda **kwargs: filtered_pages
-		filtered_pages.order_by.return_value = "ordered"
+		exclude_blog_qs = public_pages.exclude.return_value
+		exclude_guides_qs = exclude_blog_qs.exclude.return_value
+		exclude_guides_qs.filter.side_effect = lambda **kwargs: exclude_guides_qs
+		exclude_guides_qs.order_by.return_value = "ordered"
 
 		result = build_public_pages_queryset("2026-01-01", "2026-12-31", "-date")
 
 		page_objects.live.assert_called_once_with()
-		public_pages.exclude.assert_called_once_with(id__in=blog_values.return_value)
+		public_pages.exclude.assert_called_once_with(id__in=blog_ids)
+		exclude_blog_qs.exclude.assert_called_once_with(id__in=guide_ids)
 		self.assertEqual(
-			filtered_pages.filter.call_args_list,
+			exclude_guides_qs.filter.call_args_list,
 			[
 				(( ), {"first_published_at__gte": "2026-01-01"}),
 				(( ), {"first_published_at__lte": "2026-12-31"}),
 			],
 		)
+		exclude_guides_qs.order_by.assert_called_once_with("-first_published_at")
+		self.assertEqual(result, "ordered")
 
 
 class FederatedRoutingTests(SimpleTestCase):

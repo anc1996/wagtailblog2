@@ -19,6 +19,21 @@ class TitleSuggestionIndexCreateResult:
     index_created: bool
 
 
+def build_published_title_document(state: Any, *, locale_id: int) -> dict[str, Any]:
+    """标题索引不读当前草稿，也不访问正文存储；沿用标题 v001 白名单。"""
+    from search.services.published_snapshot import PublishedSnapshotV1
+
+    snapshot = PublishedSnapshotV1.from_dict(
+        state.published_snapshot, expected_digest=state.snapshot_digest,
+    )
+    snapshot.validate_state(state)
+    return {
+        "page_id": state.page_id,
+        "title": snapshot.to_dict()["published_metadata"]["title"] if state.searchable else "",
+        "locale_id": locale_id, "searchable": bool(state.searchable), "popularity": 0,
+    }
+
+
 def default_title_suggestion_index_name(index_prefix: str, version: str = "v001") -> str:
     """生成并校验带版本的标题建议索引名。"""
     if not isinstance(version, str) or not version.startswith("v") or not version[1:].isdigit():
@@ -87,8 +102,6 @@ def create_title_suggestion_index(
         raise
     except Exception as error:
         raise ContentSearchElasticsearchError("es_title_index_create_failed", retryable=False) from error
-    properties = mapping.get(index_name, {}).get("mappings", {}).get("properties", {})
-    required = {"page_id", "title", "locale_id", "searchable", "popularity"}
-    if mapping.get(index_name, {}).get("mappings", {}).get("dynamic") != "strict" or not required.issubset(properties):
+    if mapping.get(index_name, {}).get("mappings", {}) != definition["template"]["mappings"]:
         raise ContentSearchElasticsearchError("es_title_index_mapping_mismatch", retryable=False)
     return TitleSuggestionIndexCreateResult(index_created=True)

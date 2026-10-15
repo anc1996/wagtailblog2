@@ -1,0 +1,14 @@
+{
+  "name": "wagtailblog-fetch-mcp",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "test": "node --test test-fetch.mjs"
+  },
+  "dependencies": {
+    "@yawlabs/fetch-mcp": "0.8.2"
+  }
+}
